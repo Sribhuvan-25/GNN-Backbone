@@ -1,0 +1,11 @@
+Top important feature interactions:
+1. JS1 ↔ Kosmotogaceae: 0.459
+2. Methanoregulaceae ↔ Pedosphaeraceae: 0.459
+3. Cloacimonadaceae ↔ Syntrophorhabdaceae: 0.459
+4. uncultured ↔ Pedosphaeraceae: 0.458
+5. Lentimicrobiaceae ↔ Smithellaceae: 0.458
+6. Methanobacteriaceae ↔ Rikenellaceae: 0.458
+7. Christensenellaceae ↔ Kosmotogaceae: 0.457
+8. Rikenellaceae ↔ Christensenellaceae: 0.457
+9. Methanobacteriaceae ↔ Bacteroidetes_vadinHA17: 0.457
+10. Cloacimonadaceae ↔ Smithellaceae: 0.456

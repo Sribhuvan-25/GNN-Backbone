@@ -1,0 +1,11 @@
+Top important feature interactions:
+1. JS1 ↔ SAR324_clade(Marine_group_B): 0.457
+2. uncultured ↔ Calditrichaceae: 0.456
+3. JS1 ↔ Pedosphaeraceae: 0.454
+4. uncultured ↔ Christensenellaceae: 0.454
+5. Spirochaetaceae ↔ Cloacimonadaceae: 0.453
+6. Lentimicrobiaceae ↔ Calditrichaceae: 0.453
+7. JS1 ↔ Geobacteraceae: 0.452
+8. Lentimicrobiaceae ↔ Syntrophorhabdaceae: 0.452
+9. UnclassifiedFamily ↔ Aminicenantales: 0.451
+10. Cloacimonadaceae ↔ SAR324_clade(Marine_group_B): 0.451

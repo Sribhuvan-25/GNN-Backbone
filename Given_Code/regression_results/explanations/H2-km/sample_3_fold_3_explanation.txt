@@ -1,0 +1,11 @@
+Top important feature interactions:
+1. Aminicenantales ↔ Synergistaceae: 0.458
+2. Lentimicrobiaceae ↔ Christensenellaceae: 0.458
+3. Cloacimonadaceae ↔ SBR1031: 0.458
+4. Anaerolineaceae ↔ Bacteroidetes_vadinHA17: 0.456
+5. Methanobacteriaceae ↔ Syntrophobacteraceae: 0.455
+6. Spirochaetaceae ↔ Cloacimonadaceae: 0.454
+7. Bacteroidetes_vadinHA17 ↔ Syntrophorhabdaceae: 0.454
+8. Cloacimonadaceae ↔ Pedosphaeraceae: 0.453
+9. JS1 ↔ SAR324_clade(Marine_group_B): 0.452
+10. Anaerolineaceae ↔ Calditrichaceae: 0.451

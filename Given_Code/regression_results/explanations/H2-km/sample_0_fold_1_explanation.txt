@@ -1,0 +1,11 @@
+Top important feature interactions:
+1. UnclassifiedFamily ↔ SBR1031: 0.459
+2. Gracilibacteraceae ↔ SBR1031: 0.459
+3. Dysgonomonadaceae ↔ Methanosaetaceae: 0.458
+4. Prolixibacteraceae ↔ SBR1031: 0.458
+5. Methanobacteriaceae ↔ Pedosphaeraceae: 0.458
+6. Lentimicrobiaceae ↔ Prolixibacteraceae: 0.458
+7. uncultured ↔ Pedosphaeraceae: 0.457
+8. SAR324_clade(Marine_group_B) ↔ Geobacteraceae: 0.457
+9. Spirochaetaceae ↔ Cloacimonadaceae: 0.455
+10. uncultured ↔ Christensenellaceae: 0.454

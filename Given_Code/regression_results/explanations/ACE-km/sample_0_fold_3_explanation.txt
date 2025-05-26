@@ -1,0 +1,11 @@
+Top important feature interactions:
+1. uncultured ↔ Christensenellaceae: 0.459
+2. Lentimicrobiaceae ↔ Geobacteraceae: 0.459
+3. Cloacimonadaceae ↔ Kosmotogaceae: 0.458
+4. Prolixibacteraceae ↔ Methanoregulaceae: 0.458
+5. JS1 ↔ Cloacimonadaceae: 0.457
+6. SAR324_clade(Marine_group_B) ↔ Syntrophorhabdaceae: 0.457
+7. Aminicenantales ↔ Anaerolineaceae: 0.456
+8. Gracilibacteraceae ↔ SBR1031: 0.455
+9. Aminicenantales ↔ Spirochaetaceae: 0.454
+10. Rikenellaceae ↔ Syntrophobacteraceae: 0.453

@@ -1,0 +1,11 @@
+Top important feature interactions:
+1. Methanosaetaceae ↔ Geobacteraceae: 0.458
+2. Dysgonomonadaceae ↔ Kosmotogaceae: 0.458
+3. Methanosaetaceae ↔ Methanoregulaceae: 0.457
+4. Anaerolineaceae ↔ Calditrichaceae: 0.457
+5. Syntrophobacteraceae ↔ Anaerolineaceae: 0.457
+6. Synergistaceae ↔ Calditrichaceae: 0.455
+7. JS1 ↔ Methanosaetaceae: 0.454
+8. Christensenellaceae ↔ Pedosphaeraceae: 0.452
+9. SBR1031 ↔ Calditrichaceae: 0.452
+10. Smithellaceae ↔ Kosmotogaceae: 0.450

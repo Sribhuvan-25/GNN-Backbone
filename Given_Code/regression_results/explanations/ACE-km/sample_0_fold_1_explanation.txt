@@ -1,0 +1,11 @@
+Top important feature interactions:
+1. Cloacimonadaceae ↔ Smithellaceae: 0.371
+2. Smithellaceae ↔ Methanoregulaceae: 0.371
+3. Spirochaetaceae ↔ SBR1031: 0.371
+4. Cloacimonadaceae ↔ Syntrophorhabdaceae: 0.371
+5. Christensenellaceae ↔ SBR1031: 0.370
+6. JS1 ↔ Syntrophobacteraceae: 0.370
+7. Dysgonomonadaceae ↔ Christensenellaceae: 0.368
+8. Spirochaetaceae ↔ Bacteroidetes_vadinHA17: 0.368
+9. Gracilibacteraceae ↔ SBR1031: 0.367
+10. uncultured ↔ Methanoregulaceae: 0.367

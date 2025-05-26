@@ -1,0 +1,11 @@
+Top important feature interactions:
+1. Syntrophobacteraceae ↔ Anaerolineaceae: 0.459
+2. Aminicenantales ↔ Methanoregulaceae: 0.458
+3. Spirochaetaceae ↔ Cloacimonadaceae: 0.458
+4. Cloacimonadaceae ↔ Pedosphaeraceae: 0.458
+5. uncultured ↔ Syntrophorhabdaceae: 0.458
+6. JS1 ↔ Lentimicrobiaceae: 0.457
+7. Lentimicrobiaceae ↔ Synergistaceae: 0.457
+8. UnclassifiedFamily ↔ Aminicenantales: 0.457
+9. Methanobacteriaceae ↔ Bacteroidetes_vadinHA17: 0.456
+10. JS1 ↔ Prolixibacteraceae: 0.455

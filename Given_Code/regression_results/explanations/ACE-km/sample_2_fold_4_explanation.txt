@@ -1,0 +1,11 @@
+Top important feature interactions:
+1. SAR324_clade(Marine_group_B) ↔ Methanosaetaceae: 0.459
+2. Anaerolineaceae ↔ Kosmotogaceae: 0.457
+3. Lentimicrobiaceae ↔ Smithellaceae: 0.456
+4. Aminicenantales ↔ Synergistaceae: 0.456
+5. Christensenellaceae ↔ Pedosphaeraceae: 0.455
+6. Cloacimonadaceae ↔ Christensenellaceae: 0.455
+7. Aminicenantales ↔ Rikenellaceae: 0.454
+8. JS1 ↔ Kosmotogaceae: 0.454
+9. Dysgonomonadaceae ↔ Calditrichaceae: 0.452
+10. Synergistaceae ↔ Calditrichaceae: 0.450

@@ -1,0 +1,11 @@
+Top important feature interactions:
+1. Christensenellaceae ↔ Calditrichaceae: 0.407
+2. Dysgonomonadaceae ↔ uncultured: 0.407
+3. Dysgonomonadaceae ↔ Christensenellaceae: 0.406
+4. Bacteroidetes_vadinHA17 ↔ Syntrophorhabdaceae: 0.406
+5. JS1 ↔ SAR324_clade(Marine_group_B): 0.406
+6. Spirochaetaceae ↔ Prolixibacteraceae: 0.406
+7. Aminicenantales ↔ Syntrophorhabdaceae: 0.405
+8. JS1 ↔ Smithellaceae: 0.405
+9. Syntrophobacteraceae ↔ Anaerolineaceae: 0.405
+10. Syntrophobacteraceae ↔ Methanosaetaceae: 0.404

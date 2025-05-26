@@ -1,0 +1,11 @@
+Top important feature interactions:
+1. Prolixibacteraceae ↔ Pedosphaeraceae: 0.458
+2. JS1 ↔ Geobacteraceae: 0.458
+3. Lentimicrobiaceae ↔ Syntrophorhabdaceae: 0.458
+4. SAR324_clade(Marine_group_B) ↔ Methanosaetaceae: 0.456
+5. Spirochaetaceae ↔ Anaerolineaceae: 0.456
+6. Spirochaetaceae ↔ Bacteroidetes_vadinHA17: 0.455
+7. Methanobacteriaceae ↔ Cloacimonadaceae: 0.455
+8. Syntrophobacteraceae ↔ Gracilibacteraceae: 0.455
+9. Cloacimonadaceae ↔ Pedosphaeraceae: 0.454
+10. Prolixibacteraceae ↔ SBR1031: 0.454

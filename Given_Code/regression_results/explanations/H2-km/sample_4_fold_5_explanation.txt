@@ -1,0 +1,11 @@
+Top important feature interactions:
+1. SAR324_clade(Marine_group_B) ↔ Syntrophorhabdaceae: 0.459
+2. JS1 ↔ Pedosphaeraceae: 0.459
+3. Smithellaceae ↔ Syntrophorhabdaceae: 0.458
+4. Aminicenantales ↔ Kosmotogaceae: 0.458
+5. Syntrophobacteraceae ↔ Methanosaetaceae: 0.456
+6. JS1 ↔ Geobacteraceae: 0.455
+7. Methanobacteriaceae ↔ UnclassifiedFamily: 0.454
+8. UnclassifiedFamily ↔ SBR1031: 0.454
+9. Dysgonomonadaceae ↔ UnclassifiedFamily: 0.453
+10. Spirochaetaceae ↔ Prolixibacteraceae: 0.453

@@ -1,0 +1,11 @@
+Top important feature interactions:
+1. Smithellaceae ↔ Methanosaetaceae: 0.459
+2. Cloacimonadaceae ↔ Gracilibacteraceae: 0.458
+3. JS1 ↔ Methanosaetaceae: 0.457
+4. Rikenellaceae ↔ Gracilibacteraceae: 0.456
+5. UnclassifiedFamily ↔ Anaerolineaceae: 0.456
+6. JS1 ↔ Geobacteraceae: 0.455
+7. Cloacimonadaceae ↔ Pedosphaeraceae: 0.455
+8. Bacteroidetes_vadinHA17 ↔ Geobacteraceae: 0.455
+9. Methanobacteriaceae ↔ Rikenellaceae: 0.455
+10. SBR1031 ↔ Calditrichaceae: 0.455

@@ -1,0 +1,11 @@
+Top important feature interactions:
+1. Dysgonomonadaceae ↔ SAR324_clade(Marine_group_B): 0.456
+2. JS1 ↔ Cloacimonadaceae: 0.456
+3. Smithellaceae ↔ Geobacteraceae: 0.455
+4. Prolixibacteraceae ↔ Methanoregulaceae: 0.455
+5. uncultured ↔ Synergistaceae: 0.455
+6. Spirochaetaceae ↔ SBR1031: 0.454
+7. Bacteroidetes_vadinHA17 ↔ Syntrophorhabdaceae: 0.453
+8. Spirochaetaceae ↔ Syntrophorhabdaceae: 0.453
+9. JS1 ↔ Methanosaetaceae: 0.451
+10. Spirochaetaceae ↔ Prolixibacteraceae: 0.449

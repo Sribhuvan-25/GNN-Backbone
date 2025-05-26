@@ -1,0 +1,11 @@
+Top important feature interactions:
+1. uncultured ↔ Methanoregulaceae: 0.459
+2. Methanoregulaceae ↔ Pedosphaeraceae: 0.459
+3. Methanobacteriaceae ↔ Methanosaetaceae: 0.457
+4. Dysgonomonadaceae ↔ Kosmotogaceae: 0.455
+5. Methanosaetaceae ↔ Methanoregulaceae: 0.455
+6. Gracilibacteraceae ↔ Prolixibacteraceae: 0.453
+7. Syntrophobacteraceae ↔ Methanoregulaceae: 0.453
+8. Anaerolineaceae ↔ SBR1031: 0.451
+9. Cloacimonadaceae ↔ Prolixibacteraceae: 0.451
+10. uncultured ↔ Pedosphaeraceae: 0.451

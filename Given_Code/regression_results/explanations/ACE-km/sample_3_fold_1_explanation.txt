@@ -1,0 +1,11 @@
+Top important feature interactions:
+1. uncultured ↔ Calditrichaceae: 0.459
+2. Cloacimonadaceae ↔ Methanosaetaceae: 0.459
+3. Methanobacteriaceae ↔ Syntrophobacteraceae: 0.459
+4. Synergistaceae ↔ Christensenellaceae: 0.458
+5. JS1 ↔ Pedosphaeraceae: 0.458
+6. Dysgonomonadaceae ↔ SAR324_clade(Marine_group_B): 0.458
+7. UnclassifiedFamily ↔ Gracilibacteraceae: 0.457
+8. Methanobacteriaceae ↔ Gracilibacteraceae: 0.456
+9. Christensenellaceae ↔ Calditrichaceae: 0.456
+10. UnclassifiedFamily ↔ SBR1031: 0.454

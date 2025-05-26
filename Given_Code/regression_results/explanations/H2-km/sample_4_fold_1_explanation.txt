@@ -1,0 +1,11 @@
+Top important feature interactions:
+1. JS1 ↔ Bacteroidetes_vadinHA17: 0.459
+2. Cloacimonadaceae ↔ Smithellaceae: 0.459
+3. Cloacimonadaceae ↔ Methanoregulaceae: 0.457
+4. Methanobacteriaceae ↔ Prolixibacteraceae: 0.456
+5. Methanobacteriaceae ↔ Methanosaetaceae: 0.454
+6. Smithellaceae ↔ Kosmotogaceae: 0.452
+7. uncultured ↔ Calditrichaceae: 0.452
+8. Methanobacteriaceae ↔ Pedosphaeraceae: 0.452
+9. Syntrophobacteraceae ↔ Geobacteraceae: 0.451
+10. JS1 ↔ Smithellaceae: 0.450

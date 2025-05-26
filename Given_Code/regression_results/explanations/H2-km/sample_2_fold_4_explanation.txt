@@ -1,0 +1,11 @@
+Top important feature interactions:
+1. JS1 ↔ Lentimicrobiaceae: 0.459
+2. Dysgonomonadaceae ↔ Methanosaetaceae: 0.459
+3. Cloacimonadaceae ↔ Methanosaetaceae: 0.457
+4. Dysgonomonadaceae ↔ Calditrichaceae: 0.456
+5. uncultured ↔ JS1: 0.453
+6. Rikenellaceae ↔ Synergistaceae: 0.452
+7. Rikenellaceae ↔ Gracilibacteraceae: 0.451
+8. Anaerolineaceae ↔ Kosmotogaceae: 0.451
+9. uncultured ↔ Prolixibacteraceae: 0.451
+10. Methanobacteriaceae ↔ Prolixibacteraceae: 0.451

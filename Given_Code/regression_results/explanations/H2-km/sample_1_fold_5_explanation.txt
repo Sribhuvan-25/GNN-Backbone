@@ -1,0 +1,11 @@
+Top important feature interactions:
+1. Methanobacteriaceae ↔ Cloacimonadaceae: 0.456
+2. Lentimicrobiaceae ↔ Synergistaceae: 0.456
+3. Smithellaceae ↔ Prolixibacteraceae: 0.456
+4. Gracilibacteraceae ↔ SBR1031: 0.455
+5. UnclassifiedFamily ↔ Anaerolineaceae: 0.455
+6. Spirochaetaceae ↔ Anaerolineaceae: 0.455
+7. Rikenellaceae ↔ Syntrophobacteraceae: 0.451
+8. uncultured ↔ Syntrophorhabdaceae: 0.451
+9. Aminicenantales ↔ Rikenellaceae: 0.450
+10. uncultured ↔ Prolixibacteraceae: 0.448

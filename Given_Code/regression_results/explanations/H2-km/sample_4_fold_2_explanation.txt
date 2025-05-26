@@ -1,0 +1,11 @@
+Top important feature interactions:
+1. Lentimicrobiaceae ↔ Syntrophorhabdaceae: 0.459
+2. Aminicenantales ↔ Spirochaetaceae: 0.459
+3. Geobacteraceae ↔ Calditrichaceae: 0.457
+4. Rikenellaceae ↔ Gracilibacteraceae: 0.455
+5. uncultured ↔ Synergistaceae: 0.455
+6. Rikenellaceae ↔ Synergistaceae: 0.454
+7. Cloacimonadaceae ↔ Syntrophorhabdaceae: 0.454
+8. Aminicenantales ↔ Anaerolineaceae: 0.454
+9. Christensenellaceae ↔ Calditrichaceae: 0.454
+10. Dysgonomonadaceae ↔ Aminicenantales: 0.453

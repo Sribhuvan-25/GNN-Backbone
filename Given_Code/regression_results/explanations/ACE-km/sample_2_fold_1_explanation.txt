@@ -1,0 +1,11 @@
+Top important feature interactions:
+1. Methanobacteriaceae ↔ Prolixibacteraceae: 0.350
+2. Rikenellaceae ↔ Synergistaceae: 0.349
+3. Lentimicrobiaceae ↔ Smithellaceae: 0.348
+4. Dysgonomonadaceae ↔ Christensenellaceae: 0.348
+5. uncultured ↔ UnclassifiedFamily: 0.348
+6. Christensenellaceae ↔ Calditrichaceae: 0.347
+7. JS1 ↔ Methanoregulaceae: 0.347
+8. Cloacimonadaceae ↔ Methanoregulaceae: 0.346
+9. uncultured ↔ Christensenellaceae: 0.346
+10. Dysgonomonadaceae ↔ Aminicenantales: 0.345

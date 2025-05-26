@@ -1,0 +1,11 @@
+Top important feature interactions:
+1. Dysgonomonadaceae ↔ Synergistaceae: 0.446
+2. Anaerolineaceae ↔ Calditrichaceae: 0.444
+3. Synergistaceae ↔ Christensenellaceae: 0.443
+4. Anaerolineaceae ↔ SBR1031: 0.443
+5. Lentimicrobiaceae ↔ Pedosphaeraceae: 0.442
+6. Smithellaceae ↔ Methanosaetaceae: 0.441
+7. UnclassifiedFamily ↔ Cloacimonadaceae: 0.440
+8. Spirochaetaceae ↔ Anaerolineaceae: 0.439
+9. Dysgonomonadaceae ↔ Aminicenantales: 0.438
+10. Aminicenantales ↔ Methanoregulaceae: 0.438

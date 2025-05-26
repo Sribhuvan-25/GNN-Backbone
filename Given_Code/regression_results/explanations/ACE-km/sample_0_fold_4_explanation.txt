@@ -1,0 +1,11 @@
+Top important feature interactions:
+1. JS1 ↔ Methanosaetaceae: 0.457
+2. Gracilibacteraceae ↔ Prolixibacteraceae: 0.456
+3. UnclassifiedFamily ↔ Aminicenantales: 0.455
+4. Methanobacteriaceae ↔ Methanosaetaceae: 0.455
+5. Lentimicrobiaceae ↔ Pedosphaeraceae: 0.454
+6. JS1 ↔ Syntrophorhabdaceae: 0.454
+7. UnclassifiedFamily ↔ Spirochaetaceae: 0.454
+8. Geobacteraceae ↔ Calditrichaceae: 0.453
+9. JS1 ↔ Cloacimonadaceae: 0.452
+10. SAR324_clade(Marine_group_B) ↔ Geobacteraceae: 0.452

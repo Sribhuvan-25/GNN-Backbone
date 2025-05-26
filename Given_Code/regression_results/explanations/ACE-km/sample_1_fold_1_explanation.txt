@@ -1,0 +1,11 @@
+Top important feature interactions:
+1. Cloacimonadaceae ↔ Kosmotogaceae: 0.410
+2. uncultured ↔ Synergistaceae: 0.410
+3. Methanobacteriaceae ↔ Cloacimonadaceae: 0.408
+4. Gracilibacteraceae ↔ Geobacteraceae: 0.408
+5. Cloacimonadaceae ↔ Calditrichaceae: 0.408
+6. Rikenellaceae ↔ Syntrophobacteraceae: 0.406
+7. Methanobacteriaceae ↔ Geobacteraceae: 0.406
+8. Syntrophobacteraceae ↔ Anaerolineaceae: 0.406
+9. Cloacimonadaceae ↔ SAR324_clade(Marine_group_B): 0.406
+10. Syntrophorhabdaceae ↔ Prolixibacteraceae: 0.406

@@ -1,0 +1,11 @@
+Top important feature interactions:
+1. uncultured ↔ UnclassifiedFamily: 0.441
+2. Smithellaceae ↔ Syntrophobacteraceae: 0.440
+3. Lentimicrobiaceae ↔ Pedosphaeraceae: 0.439
+4. Dysgonomonadaceae ↔ uncultured: 0.439
+5. Syntrophobacteraceae ↔ Anaerolineaceae: 0.439
+6. Syntrophorhabdaceae ↔ Prolixibacteraceae: 0.439
+7. Cloacimonadaceae ↔ Synergistaceae: 0.439
+8. Prolixibacteraceae ↔ Christensenellaceae: 0.438
+9. Dysgonomonadaceae ↔ Synergistaceae: 0.437
+10. Cloacimonadaceae ↔ Bacteroidetes_vadinHA17: 0.436

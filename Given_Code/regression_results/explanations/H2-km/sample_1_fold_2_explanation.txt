@@ -1,0 +1,11 @@
+Top important feature interactions:
+1. Syntrophobacteraceae ↔ Methanoregulaceae: 0.459
+2. JS1 ↔ Methanosaetaceae: 0.459
+3. Dysgonomonadaceae ↔ Methanosaetaceae: 0.459
+4. Smithellaceae ↔ Geobacteraceae: 0.458
+5. Gracilibacteraceae ↔ Bacteroidetes_vadinHA17: 0.458
+6. Christensenellaceae ↔ SBR1031: 0.458
+7. Dysgonomonadaceae ↔ uncultured: 0.457
+8. Methanobacteriaceae ↔ Syntrophobacteraceae: 0.456
+9. uncultured ↔ UnclassifiedFamily: 0.456
+10. uncultured ↔ Calditrichaceae: 0.456

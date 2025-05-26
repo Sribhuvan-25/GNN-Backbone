@@ -1,0 +1,11 @@
+Top important feature interactions:
+1. Methanobacteriaceae ↔ Geobacteraceae: 0.428
+2. Methanobacteriaceae ↔ Pedosphaeraceae: 0.426
+3. UnclassifiedFamily ↔ Cloacimonadaceae: 0.426
+4. Aminicenantales ↔ Spirochaetaceae: 0.424
+5. Methanobacteriaceae ↔ UnclassifiedFamily: 0.424
+6. Dysgonomonadaceae ↔ UnclassifiedFamily: 0.424
+7. JS1 ↔ Syntrophorhabdaceae: 0.423
+8. Methanobacteriaceae ↔ SAR324_clade(Marine_group_B): 0.422
+9. Syntrophobacteraceae ↔ Methanosaetaceae: 0.422
+10. Cloacimonadaceae ↔ Methanoregulaceae: 0.421
