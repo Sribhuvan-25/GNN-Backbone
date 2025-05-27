@@ -60,7 +60,8 @@ class RegressionPipeline:
                  use_fast_correlation=True,
                  graph_mode='otu',
                  family_filter_mode='relaxed',
-                 train_all_models=True):
+                 train_all_models=True,
+                 quick_evaluation=False):
         """
         Initialize the regression pipeline
         
@@ -84,6 +85,7 @@ class RegressionPipeline:
             graph_mode: Mode for graph construction ('otu' or 'family')
             family_filter_mode: Mode for family filtering ('relaxed' or 'strict')
             train_all_models: Whether to train all available models (True) or just the specified model_type (False)
+            quick_evaluation: If True, do quick evaluation with fewer epochs to select best model, then full training
         """
         self.data_path = data_path
         self.k_neighbors = k_neighbors
@@ -104,6 +106,7 @@ class RegressionPipeline:
         self.graph_mode = graph_mode
         self.family_filter_mode = family_filter_mode
         self.train_all_models = train_all_models
+        self.quick_evaluation = quick_evaluation
         
         # Create save directory
         os.makedirs(save_dir, exist_ok=True)

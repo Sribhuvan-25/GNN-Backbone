@@ -1,0 +1,65 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.pyw
+*.pyz
+*.pywz
+*.pyzw
+*.pyzwz
+*.py[cod]
+*$py.class
+
+# Data files
+Data/
+*.csv
+*.xlsx
+*.xls
+
+# Result directories
+Given_Code/*results*/
+Given_Code/*_results/
+Given_Code/graph_visualizations/
+gat_test_results/
+
+# Model files
+*.pt
+*.pth
+*.pkl
+*.pickle
+
+# Logs
+*.log
+logs/
+
+# Documentation (if you want to ignore)
+parameters.md
+
+# OS files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# IDE files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Jupyter Notebook
+.ipynb_checkpoints
+
+# Environment
+.env
+.venv
+env/
+venv/
+
+# Other directories
+gnn_backbone/

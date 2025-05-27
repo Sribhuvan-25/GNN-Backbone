@@ -13,7 +13,7 @@ device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
 def train_model(pipeline, target_idx=None, data_list=None):
     """
-    Train a GNN model for regression with comprehensive diagnostics
+    Train a GNN model for regression
     
     Args:
         pipeline: RegressionPipeline instance
@@ -40,22 +40,6 @@ def train_model(pipeline, target_idx=None, data_list=None):
         print(f"Training model for all {num_targets} targets")
         print(f"{'='*50}")
     
-    # DIAGNOSTIC: Analyze target distribution
-    print(f"\n📊 TARGET ANALYSIS:")
-    all_targets = []
-    for data in data_list:
-        if target_idx is not None and not isinstance(target_idx, list):
-            target_val = data.y[:, target_idx].item()
-        else:
-            target_val = data.y.numpy().flatten()
-        all_targets.append(target_val)
-    
-    all_targets = np.array(all_targets)
-    if all_targets.ndim == 1:
-        print(f"Target range: {all_targets.min():.3f} to {all_targets.max():.3f}")
-        print(f"Target mean: {all_targets.mean():.3f}, std: {all_targets.std():.3f}")
-        print(f"Target variance: {all_targets.var():.3f}")
-    
     # Setup k-fold cross-validation
     from sklearn.model_selection import KFold
     kf = KFold(n_splits=pipeline.num_folds, shuffle=True, random_state=42)
@@ -70,32 +54,11 @@ def train_model(pipeline, target_idx=None, data_list=None):
     # Iterate through folds
     for fold, (train_index, test_index) in enumerate(kf.split(data_list)):
         fold_num = fold + 1
-        print(f"\n🔄 Fold {fold_num}/{pipeline.num_folds}: Train on {len(train_index)} samples, Test on {len(test_index)} samples")
+        print(f"Fold {fold_num}/{pipeline.num_folds}: Train on {len(train_index)} samples, Test on {len(test_index)} samples")
         
         # Split into train and test sets
         train_dataset = [data_list[i] for i in train_index]
         test_dataset = [data_list[i] for i in test_index]
-        
-        # DIAGNOSTIC: Analyze train/test split
-        train_targets = []
-        test_targets = []
-        for i in train_index:
-            if target_idx is not None and not isinstance(target_idx, list):
-                train_targets.append(data_list[i].y[:, target_idx].item())
-            else:
-                train_targets.append(data_list[i].y.numpy().flatten())
-        for i in test_index:
-            if target_idx is not None and not isinstance(target_idx, list):
-                test_targets.append(data_list[i].y[:, target_idx].item())
-            else:
-                test_targets.append(data_list[i].y.numpy().flatten())
-        
-        train_targets = np.array(train_targets)
-        test_targets = np.array(test_targets)
-        
-        if train_targets.ndim == 1:
-            print(f"📈 Train targets - mean: {train_targets.mean():.3f}, std: {train_targets.std():.3f}")
-            print(f"📉 Test targets - mean: {test_targets.mean():.3f}, std: {test_targets.std():.3f}")
         
         # Create data loaders
         train_loader = DataLoader(train_dataset, batch_size=pipeline.batch_size, shuffle=True)
@@ -104,33 +67,21 @@ def train_model(pipeline, target_idx=None, data_list=None):
         # Initialize model
         model = pipeline.create_model(pipeline.model_type, num_targets=num_targets)
         
-        # DIAGNOSTIC: Model parameter count
-        total_params = sum(p.numel() for p in model.parameters())
-        trainable_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
-        print(f"🏗️  Model parameters - Total: {total_params:,}, Trainable: {trainable_params:,}")
-        
         # Setup optimizer and scheduler
         optimizer = Adam(model.parameters(), lr=pipeline.learning_rate, weight_decay=pipeline.weight_decay)
         scheduler = lr_scheduler.ReduceLROnPlateau(optimizer, mode='min', factor=0.5, patience=10, min_lr=1e-5)
         
-        # Training loop with diagnostics
+        # Training loop
         best_val_loss = float('inf')
         best_model_state = None
         patience_counter = 0
         train_losses = []
         val_losses = []
         
-        # Diagnostic tracking
-        gradient_norms = []
-        prediction_variances = []
-        learning_rates = []
-        
         for epoch in range(1, pipeline.num_epochs+1):
             # Training step
             model.train()
             total_loss = 0
-            epoch_predictions = []
-            epoch_targets = []
             
             for batch_data in train_loader:
                 batch_data = batch_data.to(device)
@@ -164,22 +115,8 @@ def train_model(pipeline, target_idx=None, data_list=None):
                         target = batch_data.y.view(-1, num_targets)
                     loss = criterion(pred, target)
                 
-                # Store predictions and targets for variance analysis
-                epoch_predictions.append(pred.detach().cpu().numpy())
-                epoch_targets.append(target.detach().cpu().numpy())
-                
                 # Backward pass and optimization
                 loss.backward()
-                
-                # DIAGNOSTIC: Calculate gradient norm
-                total_norm = 0
-                for p in model.parameters():
-                    if p.grad is not None:
-                        param_norm = p.grad.data.norm(2)
-                        total_norm += param_norm.item() ** 2
-                total_norm = total_norm ** (1. / 2)
-                gradient_norms.append(total_norm)
-                
                 torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)  # Gradient clipping
                 optimizer.step()
                 
@@ -188,22 +125,9 @@ def train_model(pipeline, target_idx=None, data_list=None):
             avg_train_loss = total_loss / len(train_dataset)
             train_losses.append(avg_train_loss)
             
-            # DIAGNOSTIC: Calculate prediction variance
-            epoch_predictions = np.vstack(epoch_predictions)
-            epoch_targets = np.vstack(epoch_targets)
-            pred_variance = np.var(epoch_predictions)
-            target_variance = np.var(epoch_targets)
-            prediction_variances.append(pred_variance)
-            
-            # Store current learning rate
-            current_lr = optimizer.param_groups[0]['lr']
-            learning_rates.append(current_lr)
-            
             # Evaluation step
             model.eval()
             total_val_loss = 0
-            val_predictions = []
-            val_targets = []
             
             with torch.no_grad():
                 for batch_data in test_loader:
@@ -234,8 +158,6 @@ def train_model(pipeline, target_idx=None, data_list=None):
                             target = batch_data.y.view(-1, num_targets)
                         val_loss = nn.MSELoss()(pred, target)
                     
-                    val_predictions.append(pred.cpu().numpy())
-                    val_targets.append(target.cpu().numpy())
                     total_val_loss += val_loss.item() * batch_data.num_graphs
             
             avg_val_loss = total_val_loss / len(test_dataset)
@@ -244,24 +166,9 @@ def train_model(pipeline, target_idx=None, data_list=None):
             # Update learning rate
             scheduler.step(avg_val_loss)
             
-            # DIAGNOSTIC: Print detailed progress
+            # Print progress
             if epoch % 10 == 0 or epoch == 1 or epoch == pipeline.num_epochs:
-                val_predictions = np.vstack(val_predictions)
-                val_targets = np.vstack(val_targets)
-                val_pred_variance = np.var(val_predictions)
-                val_target_variance = np.var(val_targets)
-                
-                print(f"📊 Epoch {epoch:03d}:")
-                print(f"   Loss: Train={avg_train_loss:.4f}, Val={avg_val_loss:.4f}")
-                print(f"   Pred Variance: Train={pred_variance:.6f}, Val={val_pred_variance:.6f}")
-                print(f"   Target Variance: Train={target_variance:.6f}, Val={val_target_variance:.6f}")
-                print(f"   Grad Norm: {total_norm:.6f}, LR: {current_lr:.6f}")
-                
-                # Check for constant predictions
-                if pred_variance < 1e-6:
-                    print(f"⚠️  WARNING: Predictions have very low variance ({pred_variance:.8f}) - model may be stuck!")
-                if total_norm < 1e-6:
-                    print(f"⚠️  WARNING: Gradients are very small ({total_norm:.8f}) - learning may have stopped!")
+                print(f"Epoch {epoch:03d}: Train Loss = {avg_train_loss:.4f}, Val Loss = {avg_val_loss:.4f}")
             
             # Early stopping
             if avg_val_loss < best_val_loss:
@@ -271,7 +178,7 @@ def train_model(pipeline, target_idx=None, data_list=None):
             else:
                 patience_counter += 1
                 if patience_counter >= pipeline.patience:
-                    print(f"🛑 Early stopping at epoch {epoch}")
+                    print(f"Early stopping at epoch {epoch}")
                     break
         
         # Load best model for evaluation

@@ -73,10 +73,13 @@ def create_explainer_sparsified_graph(pipeline, model, target_idx=0, importance_
         print("Using adaptive thresholding for family mode...")
         
         if len(non_zero_importance) > 0:
-            # Use percentile-based selection to keep top edges
-            top_percentile = 80  # Keep top 20% of edges
+            # Simple mapping: importance_threshold directly controls percentage of edges to keep
+            # 0.1 -> keep 10%, 0.2 -> keep 20%, 0.3 -> keep 30%, etc.
+            percentage_to_keep = importance_threshold * 100
+            top_percentile = max(5, min(95, 100 - percentage_to_keep))  # Convert to percentile
             threshold_value = torch.quantile(non_zero_importance, top_percentile / 100.0).item()
-            print(f"  Using {100-top_percentile}th percentile threshold: {threshold_value:.6f}")
+            print(f"  Keeping top {percentage_to_keep:.0f}% of edges (using {top_percentile:.0f}th percentile)")
+            print(f"  Threshold value: {threshold_value:.6f}")
         else:
             # Fallback to very low absolute threshold
             threshold_value = importance_threshold * 0.1
