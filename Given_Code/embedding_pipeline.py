@@ -67,9 +67,9 @@ class EmbeddingPipeline:
                  patience=20,
                  num_folds=5,
                  save_dir='./embedding_results',
-                 importance_threshold=0.3,
+                 importance_threshold=0.3,  # Use default threshold - pipeline_explainer has adaptive thresholding
                  use_fast_correlation=True,
-                 graph_mode='otu',
+                 graph_mode='family',  # Changed default to family
                  family_filter_mode='relaxed',
                  single_model_type=None):
         """
@@ -88,9 +88,9 @@ class EmbeddingPipeline:
             patience: Patience for early stopping
             num_folds: Number of folds for cross-validation
             save_dir: Directory to save results
-            importance_threshold: Threshold for edge importance in GNNExplainer sparsification
+            importance_threshold: Threshold for edge importance in GNNExplainer sparsification (lowered to 0.1)
             use_fast_correlation: If True, use fast correlation-based graph construction
-            graph_mode: Mode for graph construction ('otu' or 'family')
+            graph_mode: Mode for graph construction ('otu' or 'family') - now defaults to 'family'
             family_filter_mode: Mode for family filtering ('relaxed' or 'strict')
             single_model_type: If specified ('gcn', 'rggc', 'gat'), only use this model type throughout the entire pipeline
         """
@@ -121,6 +121,8 @@ class EmbeddingPipeline:
         else:
             self.gnn_models_to_train = ['gcn', 'rggc', 'gat']
             print("Pipeline configured for MIXED model comparison")
+        
+        print(f"Using graph mode: {graph_mode} (family-level nodes)")
         
         # Create comprehensive save directories (matching regression pipeline structure)
         os.makedirs(save_dir, exist_ok=True)
@@ -305,15 +307,6 @@ class EmbeddingPipeline:
             r2 = r2_score(all_targets, all_preds)
             mae = mean_absolute_error(all_targets, all_preds)
             
-            # Create detailed plots for this fold
-            metrics_dict = {'mse': mse, 'rmse': rmse, 'r2': r2, 'mae': mae}
-            
-            # Plot training curves
-            self.plot_training_curves(train_losses, val_losses, fold_num, model_type, target_name, phase)
-            
-            # Plot prediction scatter
-            self.plot_prediction_scatter(all_targets, all_preds, metrics_dict, model_type, target_name, fold_num, phase)
-            
             # Save model
             model_path = f"{self.save_dir}/gnn_models/{model_type}_{target_name}_fold{fold_num}_{phase}.pt"
             torch.save(model.state_dict(), model_path)
@@ -348,7 +341,7 @@ class EmbeddingPipeline:
         
         print(f"  Average - MSE: {avg_metrics['mse']:.4f}, RMSE: {avg_metrics['rmse']:.4f}, R²: {avg_metrics['r2']:.4f}, MAE: {avg_metrics['mae']:.4f}")
         
-        # Create overall plots
+        # Create overall plots (only overall, no individual fold plots)
         self.plot_overall_gnn_results(fold_results, model_type, target_name, phase)
         
         # Save detailed metrics
@@ -480,54 +473,20 @@ class EmbeddingPipeline:
         return ml_results
 
     def create_explainer_sparsified_graph(self, model, target_idx=0):
-        """Create sparsified graph using GNNExplainer"""
+        """Create sparsified graph using GNNExplainer - uses existing pipeline_explainer function"""
         print(f"\nCreating GNNExplainer sparsified graph for target: {self.target_names[target_idx]}")
+        print(f"Using importance threshold: {self.importance_threshold}")
         
-        # Use the explainer from the existing pipeline
-        explainer = GNNExplainerRegression(
+        # Use the existing function from pipeline_explainer.py
+        sparsified_data_list = create_explainer_sparsified_graph(
+            pipeline=self,  # Pass self as pipeline
             model=model,
-            device=device
+            target_idx=target_idx,
+            importance_threshold=self.importance_threshold
         )
         
-        sparsified_data_list = []
+        print(f"GNNExplainer sparsification complete: {len(sparsified_data_list)} samples created")
         
-        for i, data in enumerate(self.dataset.data_list):
-            data = data.to(device)
-            
-            # Get explanation using the explain_graph method
-            edge_importance_matrix, explanation = explainer.explain_graph(
-                data=data,
-                target_idx=target_idx
-            )
-            
-            # Convert importance matrix to edge mask
-            edge_importance = []
-            for edge_idx in range(data.edge_index.shape[1]):
-                u, v = data.edge_index[0, edge_idx], data.edge_index[1, edge_idx]
-                importance = edge_importance_matrix[u, v].item()
-                edge_importance.append(importance)
-            
-            edge_importance = torch.tensor(edge_importance, device=device)
-            
-            # Apply threshold to create sparsified graph
-            important_edges = edge_importance > self.importance_threshold
-            
-            if important_edges.sum() > 0:
-                # Create new edge_index with only important edges
-                new_edge_index = data.edge_index[:, important_edges]
-                
-                # Create new data object
-                new_data = Data(
-                    x=data.x.cpu(),
-                    edge_index=new_edge_index.cpu(),
-                    y=data.y.cpu()
-                )
-                sparsified_data_list.append(new_data)
-            else:
-                # If no edges pass threshold, keep original data
-                sparsified_data_list.append(data.cpu())
-        
-        print(f"Created sparsified graph with {len(sparsified_data_list)} samples")
         return sparsified_data_list
 
     def plot_results(self, gnn_results, ml_results, target_idx):
@@ -542,48 +501,52 @@ class EmbeddingPipeline:
         ax1 = axes[0, 0]
         gnn_models = list(gnn_results.keys())
         gnn_r2_scores = [gnn_results[model]['avg_metrics']['r2'] for model in gnn_models]
+        gnn_mse_scores = [gnn_results[model]['avg_metrics']['mse'] for model in gnn_models]
         
         bars1 = ax1.bar(gnn_models, gnn_r2_scores, color=['skyblue', 'lightcoral', 'lightgreen'])
         ax1.set_title('GNN Models R² Comparison')
         ax1.set_ylabel('R² Score')
         ax1.set_ylim(0, max(gnn_r2_scores) * 1.1)
         
-        # Add value labels on bars
-        for bar, score in zip(bars1, gnn_r2_scores):
+        # Add value labels on bars with MSE
+        for bar, score, mse in zip(bars1, gnn_r2_scores, gnn_mse_scores):
             ax1.text(bar.get_x() + bar.get_width()/2, bar.get_height() + 0.01,
-                    f'{score:.3f}', ha='center', va='bottom')
+                    f'R²:{score:.3f}\nMSE:{mse:.3f}', ha='center', va='bottom', fontsize=9)
         
         # Plot 2: ML Model Comparison (R² scores)
         ax2 = axes[0, 1]
         ml_models = list(ml_results.keys())
         ml_r2_scores = [ml_results[model]['avg_metrics']['r2'] for model in ml_models]
+        ml_mse_scores = [ml_results[model]['avg_metrics']['mse'] for model in ml_models]
         
         bars2 = ax2.bar(ml_models, ml_r2_scores, color=['orange', 'purple'])
         ax2.set_title('ML Models on Embeddings R² Comparison')
         ax2.set_ylabel('R² Score')
         ax2.set_ylim(0, max(ml_r2_scores) * 1.1)
         
-        # Add value labels on bars
-        for bar, score in zip(bars2, ml_r2_scores):
+        # Add value labels on bars with MSE
+        for bar, score, mse in zip(bars2, ml_r2_scores, ml_mse_scores):
             ax2.text(bar.get_x() + bar.get_width()/2, bar.get_height() + 0.01,
-                    f'{score:.3f}', ha='center', va='bottom')
+                    f'R²:{score:.3f}\nMSE:{mse:.3f}', ha='center', va='bottom', fontsize=9)
         
         # Plot 3: Overall Comparison
         ax3 = axes[0, 2]
         all_models = gnn_models + ml_models
         all_r2_scores = gnn_r2_scores + ml_r2_scores
+        all_mse_scores = gnn_mse_scores + ml_mse_scores
         colors = ['skyblue', 'lightcoral', 'lightgreen', 'orange', 'purple']
         
-        bars3 = ax3.bar(all_models, all_r2_scores, color=colors[:len(all_models)])
+        bars3 = ax3.bar(range(len(all_models)), all_r2_scores, color=colors[:len(all_models)])
         ax3.set_title('All Models R² Comparison')
         ax3.set_ylabel('R² Score')
         ax3.set_ylim(0, max(all_r2_scores) * 1.1)
-        ax3.tick_params(axis='x', rotation=45)
+        ax3.set_xticks(range(len(all_models)))
+        ax3.set_xticklabels(all_models, rotation=45, ha='right')
         
-        # Add value labels on bars
-        for bar, score in zip(bars3, all_r2_scores):
+        # Add value labels with MSE
+        for bar, score, mse in zip(bars3, all_r2_scores, all_mse_scores):
             ax3.text(bar.get_x() + bar.get_width()/2, bar.get_height() + 0.01,
-                    f'{score:.3f}', ha='center', va='bottom')
+                    f'R²:{score:.3f}\nMSE:{mse:.3f}', ha='center', va='bottom', fontsize=8)
         
         # Plot 4: RMSE Comparison
         ax4 = axes[1, 0]
@@ -591,16 +554,23 @@ class EmbeddingPipeline:
         ml_rmse_scores = [ml_results[model]['avg_metrics']['rmse'] for model in ml_models]
         all_rmse_scores = gnn_rmse_scores + ml_rmse_scores
         
-        bars4 = ax4.bar(all_models, all_rmse_scores, color=colors[:len(all_models)])
+        bars4 = ax4.bar(range(len(all_models)), all_rmse_scores, color=colors[:len(all_models)])
         ax4.set_title('All Models RMSE Comparison')
         ax4.set_ylabel('RMSE')
-        ax4.tick_params(axis='x', rotation=45)
+        ax4.set_xticks(range(len(all_models)))
+        ax4.set_xticklabels(all_models, rotation=45, ha='right')
+        
+        # Add MSE values on RMSE bars
+        for bar, rmse, mse in zip(bars4, all_rmse_scores, all_mse_scores):
+            ax4.text(bar.get_x() + bar.get_width()/2, bar.get_height() + 0.01,
+                    f'RMSE:{rmse:.3f}\nMSE:{mse:.3f}', ha='center', va='bottom', fontsize=8)
         
         # Plot 5: Prediction scatter plot for best model
         ax5 = axes[1, 1]
         
         # Find best model overall
         best_model_name = all_models[np.argmax(all_r2_scores)]
+        best_mse = all_mse_scores[np.argmax(all_r2_scores)]
         if best_model_name in gnn_results:
             best_results = gnn_results[best_model_name]
         else:
@@ -620,7 +590,7 @@ class EmbeddingPipeline:
         max_val = max(max(all_targets), max(all_preds))
         ax5.plot([min_val, max_val], [min_val, max_val], 'r--')
         
-        ax5.set_title(f'Best Model: {best_model_name}\nR² = {max(all_r2_scores):.3f}')
+        ax5.set_title(f'Best Model: {best_model_name}\nR² = {max(all_r2_scores):.3f}, MSE = {best_mse:.3f}')
         ax5.set_xlabel('True Values')
         ax5.set_ylabel('Predicted Values')
         ax5.grid(True, alpha=0.3)
@@ -634,15 +604,17 @@ class EmbeddingPipeline:
         for i, model_name in enumerate(all_models):
             if model_name in gnn_results:
                 fold_r2s = [fold['r2'] for fold in gnn_results[model_name]['fold_results']]
+                model_mse = gnn_results[model_name]['avg_metrics']['mse']
             else:
                 fold_r2s = [fold['r2'] for fold in ml_results[model_name]['fold_results']]
+                model_mse = ml_results[model_name]['avg_metrics']['mse']
             
-            ax6.plot(fold_numbers, fold_r2s, marker='o', label=model_name, color=colors[i])
+            ax6.plot(fold_numbers, fold_r2s, marker='o', label=f'{model_name} (MSE:{model_mse:.3f})', color=colors[i])
         
         ax6.set_title('Cross-Validation Consistency')
         ax6.set_xlabel('Fold Number')
         ax6.set_ylabel('R² Score')
-        ax6.legend()
+        ax6.legend(fontsize=8)
         ax6.grid(True, alpha=0.3)
         
         plt.tight_layout()
@@ -956,54 +928,6 @@ class EmbeddingPipeline:
         
         return all_results
 
-    def plot_training_curves(self, train_losses, val_losses, fold_num, model_type, target_name, phase):
-        """Plot training and validation loss curves"""
-        plt.figure(figsize=(10, 6))
-        plt.plot(train_losses, label='Training Loss', color='blue', alpha=0.7)
-        plt.plot(val_losses, label='Validation Loss', color='red', alpha=0.7)
-        plt.xlabel('Epoch')
-        plt.ylabel('Loss')
-        plt.title(f'{model_type.upper()} Training Curves - {target_name} (Fold {fold_num}, {phase})')
-        plt.legend()
-        plt.grid(True, alpha=0.3)
-        
-        # Save plot
-        plot_path = f"{self.save_dir}/plots/{model_type}_{target_name}_fold{fold_num}_{phase}_loss.png"
-        plt.savefig(plot_path, dpi=300, bbox_inches='tight')
-        plt.close()
-        
-        return plot_path
-
-    def plot_prediction_scatter(self, y_true, y_pred, metrics, model_type, target_name, fold_num, phase):
-        """Plot prediction vs actual scatter plot"""
-        plt.figure(figsize=(8, 8))
-        
-        # Create scatter plot
-        plt.scatter(y_true, y_pred, alpha=0.6, edgecolor='k', facecolor='none')
-        
-        # Add diagonal line (perfect prediction)
-        min_val = min(min(y_true), min(y_pred))
-        max_val = max(max(y_true), max(y_pred))
-        plt.plot([min_val, max_val], [min_val, max_val], 'r--', alpha=0.8, linewidth=2)
-        
-        # Add metrics text
-        textstr = f"R² = {metrics['r2']:.3f}\nRMSE = {metrics['rmse']:.3f}\nMAE = {metrics['mae']:.3f}"
-        props = dict(boxstyle='round', facecolor='wheat', alpha=0.8)
-        plt.text(0.05, 0.95, textstr, transform=plt.gca().transAxes, fontsize=12,
-                verticalalignment='top', bbox=props)
-        
-        plt.xlabel('True Values')
-        plt.ylabel('Predicted Values')
-        plt.title(f'{model_type.upper()} Predictions - {target_name} (Fold {fold_num}, {phase})')
-        plt.grid(True, alpha=0.3)
-        
-        # Save plot
-        plot_path = f"{self.save_dir}/plots/{model_type}_{target_name}_fold{fold_num}_{phase}_pred.png"
-        plt.savefig(plot_path, dpi=300, bbox_inches='tight')
-        plt.close()
-        
-        return plot_path
-
     def plot_overall_gnn_results(self, fold_results, model_type, target_name, phase):
         """Plot overall results across all folds for a GNN model"""
         fig, axes = plt.subplots(1, 2, figsize=(15, 6))
@@ -1033,7 +957,7 @@ class EmbeddingPipeline:
         max_val = max(max(all_targets), max(all_preds))
         axes[0].plot([min_val, max_val], [min_val, max_val], 'r--', alpha=0.8, linewidth=2)
         
-        textstr = f"Overall R² = {overall_r2:.3f}\nRMSE = {overall_rmse:.3f}\nMAE = {overall_mae:.3f}"
+        textstr = f"Overall R² = {overall_r2:.3f}\nRMSE = {overall_rmse:.3f}\nMAE = {overall_mae:.3f}\nMSE = {overall_mse:.3f}"
         props = dict(boxstyle='round', facecolor='wheat', alpha=0.8)
         axes[0].text(0.05, 0.95, textstr, transform=axes[0].transAxes, fontsize=12,
                     verticalalignment='top', bbox=props)
@@ -1046,7 +970,7 @@ class EmbeddingPipeline:
         # Plot 2: R² across folds
         fold_nums = range(1, len(fold_r2s) + 1)
         axes[1].bar(fold_nums, fold_r2s, alpha=0.7, color='skyblue', edgecolor='navy')
-        axes[1].axhline(y=overall_r2, color='red', linestyle='--', linewidth=2, label=f'Overall R² = {overall_r2:.3f}')
+        axes[1].axhline(y=overall_r2, color='red', linestyle='--', linewidth=2, label=f'Overall R² = {overall_r2:.3f} (MSE: {overall_mse:.3f})')
         axes[1].set_xlabel('Fold Number')
         axes[1].set_ylabel('R² Score')
         axes[1].set_title(f'{model_type.upper()} R² Across Folds - {target_name} ({phase})')
@@ -1123,6 +1047,7 @@ class EmbeddingPipeline:
 
     def plot_ml_model_results(self, ml_results, target_name, embeddings_source):
         """Plot ML model results with detailed fold-by-fold analysis"""
+        # Create comprehensive comparison plot
         fig, axes = plt.subplots(2, 2, figsize=(15, 12))
         fig.suptitle(f'ML Models on {embeddings_source} Embeddings - {target_name}', fontsize=16)
         
@@ -1137,10 +1062,11 @@ class EmbeddingPipeline:
             fold_r2s = [fold['r2'] for fold in results['fold_results']]
             ax1.plot(fold_nums, fold_r2s, marker='o', label=model_name, color=colors[i], linewidth=2)
             
-            # Add average line
+            # Add average line with MSE
             avg_r2 = results['avg_metrics']['r2']
+            avg_mse = results['avg_metrics']['mse']
             ax1.axhline(y=avg_r2, color=colors[i], linestyle='--', alpha=0.7, 
-                       label=f'{model_name} Avg = {avg_r2:.3f}')
+                       label=f'{model_name} Avg = {avg_r2:.3f} (MSE: {avg_mse:.3f})')
         
         ax1.set_xlabel('Fold Number')
         ax1.set_ylabel('R² Score')
@@ -1156,12 +1082,13 @@ class EmbeddingPipeline:
         
         for i, (model_name, results) in enumerate(ml_results.items()):
             values = [results['avg_metrics'][metric] for metric in metrics]
+            mse_val = results['avg_metrics']['mse']
             # Normalize RMSE and MAE for better visualization
             if len(values) > 1:
                 values[1] = values[1] / max(values[1], 1)  # Normalize RMSE
                 values[2] = values[2] / max(values[2], 1)  # Normalize MAE
             
-            ax2.bar(x + i*width, values, width, label=model_name, color=colors[i], alpha=0.7)
+            ax2.bar(x + i*width, values, width, label=f'{model_name} (MSE: {mse_val:.3f})', color=colors[i], alpha=0.7)
         
         ax2.set_xlabel('Metrics')
         ax2.set_ylabel('Normalized Values')
@@ -1189,7 +1116,8 @@ class EmbeddingPipeline:
         ax3.plot([min_val, max_val], [min_val, max_val], 'r--', alpha=0.8, linewidth=2)
         
         best_r2 = best_results['avg_metrics']['r2']
-        textstr = f"Best Model: {best_model_name}\nR² = {best_r2:.3f}"
+        best_mse = best_results['avg_metrics']['mse']
+        textstr = f"Best Model: {best_model_name}\nR² = {best_r2:.3f}\nMSE = {best_mse:.3f}"
         props = dict(boxstyle='round', facecolor='wheat', alpha=0.8)
         ax3.text(0.05, 0.95, textstr, transform=ax3.transAxes, fontsize=12,
                 verticalalignment='top', bbox=props)
@@ -1209,7 +1137,8 @@ class EmbeddingPipeline:
                 all_targets.extend(fold_result['targets'])
             
             errors = np.array(all_targets) - np.array(all_preds)
-            ax4.hist(errors, bins=20, alpha=0.6, label=model_name, color=colors[i])
+            mse_val = results['avg_metrics']['mse']
+            ax4.hist(errors, bins=20, alpha=0.6, label=f'{model_name} (MSE: {mse_val:.3f})', color=colors[i])
         
         ax4.set_xlabel('Prediction Error')
         ax4.set_ylabel('Frequency')
@@ -1219,10 +1148,100 @@ class EmbeddingPipeline:
         
         plt.tight_layout()
         
-        # Save plot
+        # Save comprehensive plot
         plot_path = f"{self.save_dir}/plots/ml_models_{target_name}_{embeddings_source}_comprehensive.png"
         plt.savefig(plot_path, dpi=300, bbox_inches='tight')
         plt.close()
+        
+        # Create individual plots for each ML model
+        for model_name, results in ml_results.items():
+            self.plot_individual_ml_model(model_name, results, target_name, embeddings_source)
+        
+        return plot_path
+
+    def plot_individual_ml_model(self, model_name, results, target_name, embeddings_source):
+        """Create individual plot for a specific ML model"""
+        fig, axes = plt.subplots(2, 2, figsize=(12, 10))
+        fig.suptitle(f'{model_name} on {embeddings_source} Embeddings - {target_name}', fontsize=16)
+        
+        # Collect all predictions and targets
+        all_preds = []
+        all_targets = []
+        fold_r2s = []
+        fold_rmses = []
+        fold_mses = []
+        
+        for fold_result in results['fold_results']:
+            all_preds.extend(fold_result['predictions'])
+            all_targets.extend(fold_result['targets'])
+            fold_r2s.append(fold_result['r2'])
+            fold_rmses.append(fold_result['rmse'])
+            fold_mses.append(fold_result['mse'])
+        
+        all_preds = np.array(all_preds)
+        all_targets = np.array(all_targets)
+        
+        # Plot 1: Prediction scatter
+        ax1 = axes[0, 0]
+        ax1.scatter(all_targets, all_preds, alpha=0.6, edgecolor='k', facecolor='none')
+        min_val = min(min(all_targets), min(all_preds))
+        max_val = max(max(all_targets), max(all_preds))
+        ax1.plot([min_val, max_val], [min_val, max_val], 'r--', alpha=0.8, linewidth=2)
+        
+        r2 = results['avg_metrics']['r2']
+        rmse = results['avg_metrics']['rmse']
+        mae = results['avg_metrics']['mae']
+        mse = results['avg_metrics']['mse']
+        
+        textstr = f"R² = {r2:.3f}\nRMSE = {rmse:.3f}\nMAE = {mae:.3f}\nMSE = {mse:.3f}"
+        props = dict(boxstyle='round', facecolor='wheat', alpha=0.8)
+        ax1.text(0.05, 0.95, textstr, transform=ax1.transAxes, fontsize=12,
+                verticalalignment='top', bbox=props)
+        
+        ax1.set_xlabel('True Values')
+        ax1.set_ylabel('Predicted Values')
+        ax1.set_title('Predictions vs True Values')
+        ax1.grid(True, alpha=0.3)
+        
+        # Plot 2: R² across folds
+        ax2 = axes[0, 1]
+        fold_nums = range(1, len(fold_r2s) + 1)
+        ax2.bar(fold_nums, fold_r2s, alpha=0.7, color='skyblue', edgecolor='navy')
+        ax2.axhline(y=r2, color='red', linestyle='--', linewidth=2, label=f'Average R² = {r2:.3f} (MSE: {mse:.3f})')
+        ax2.set_xlabel('Fold Number')
+        ax2.set_ylabel('R² Score')
+        ax2.set_title('R² Score Across Folds')
+        ax2.legend()
+        ax2.grid(True, alpha=0.3)
+        
+        # Plot 3: Error distribution
+        ax3 = axes[1, 0]
+        errors = all_targets - all_preds
+        ax3.hist(errors, bins=20, alpha=0.7, color='lightcoral', edgecolor='darkred')
+        ax3.axvline(x=0, color='black', linestyle='--', alpha=0.8)
+        ax3.set_xlabel('Prediction Error')
+        ax3.set_ylabel('Frequency')
+        ax3.set_title(f'Error Distribution (MSE: {mse:.3f})')
+        ax3.grid(True, alpha=0.3)
+        
+        # Plot 4: MSE across folds (changed from RMSE to MSE)
+        ax4 = axes[1, 1]
+        ax4.bar(fold_nums, fold_mses, alpha=0.7, color='lightgreen', edgecolor='darkgreen')
+        ax4.axhline(y=mse, color='red', linestyle='--', linewidth=2, label=f'Average MSE = {mse:.3f}')
+        ax4.set_xlabel('Fold Number')
+        ax4.set_ylabel('MSE')
+        ax4.set_title('MSE Across Folds')
+        ax4.legend()
+        ax4.grid(True, alpha=0.3)
+        
+        plt.tight_layout()
+        
+        # Save individual plot
+        plot_path = f"{self.save_dir}/plots/{model_name}_{target_name}_{embeddings_source}_individual.png"
+        plt.savefig(plot_path, dpi=300, bbox_inches='tight')
+        plt.close()
+        
+        print(f"Individual {model_name} plot saved: {plot_path}")
         
         return plot_path
 
@@ -1357,9 +1376,9 @@ class EmbeddingPipeline:
 
 # Example usage
 if __name__ == "__main__":
-    # Option 1: GAT-ONLY Pipeline (entire flow uses only GAT)
+    # Option 1: GAT-ONLY Pipeline (entire flow uses only GAT) with family-level nodes
     print("="*60)
-    print("OPTION 1: GAT-ONLY PIPELINE")
+    print("OPTION 1: GAT-ONLY PIPELINE (FAMILY-LEVEL NODES)")
     print("="*60)
     
     gat_pipeline = EmbeddingPipeline(
@@ -1368,25 +1387,29 @@ if __name__ == "__main__":
         hidden_dim=64,
         num_epochs=50,  # Reduced for faster testing
         num_folds=5,
-        save_dir="./gat_only_results",
-        single_model_type='gat'  # This ensures GAT-only flow
+        save_dir="./gat_family_results",
+        single_model_type='gat',  # This ensures GAT-only flow
+        graph_mode='family',  # Use family-level nodes
+        importance_threshold=0.3,  # Use default threshold - pipeline_explainer has adaptive thresholding
     )
     
     # Run GAT-only pipeline
     gat_results = gat_pipeline.run_pipeline()
     
     print("\n" + "="*60)
-    print("OPTION 2: MIXED PIPELINE (for comparison)")
+    print("OPTION 2: MIXED PIPELINE (FAMILY-LEVEL NODES)")
     print("="*60)
     
-    # Option 2: Mixed Pipeline (compare all models)
+    # Option 2: Mixed Pipeline (compare all models) with family-level nodes
     mixed_pipeline = EmbeddingPipeline(
         data_path="../Data/New_data.csv",
         k_neighbors=10,
         hidden_dim=64,
         num_epochs=50,  # Reduced for faster testing
         num_folds=5,
-        save_dir="./mixed_results"
+        save_dir="./mixed_family_results",
+        graph_mode='family',  # Use family-level nodes
+        importance_threshold=0.3,  # Use default threshold - pipeline_explainer has adaptive thresholding
         # single_model_type=None (default) - trains all models
     )
     
@@ -1396,8 +1419,14 @@ if __name__ == "__main__":
     print("\n" + "="*80)
     print("COMPARISON SUMMARY")
     print("="*80)
-    print("GAT-only results saved to: ./gat_only_results/")
-    print("Mixed results saved to: ./mixed_results/")
+    print("GAT-only results saved to: ./gat_family_results/")
+    print("Mixed results saved to: ./mixed_family_results/")
+    print("\nKey improvements:")
+    print("- Using family-level nodes instead of OTU-level")
+    print("- Improved GNNExplainer sparsification (threshold=0.3)")
+    print("- Individual plots for both ExtraTrees and LinearSVR")
+    print("- No individual fold plots (only overall results)")
+    print("- Better sparsification monitoring and debugging")
     print("\nGAT-only pipeline ensures:")
     print("- Only GAT models are trained")
     print("- GAT model is used for GNNExplainer")
