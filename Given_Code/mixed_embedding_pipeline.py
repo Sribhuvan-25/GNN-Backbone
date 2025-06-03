@@ -40,24 +40,24 @@ print(f"Using device: {device}")
 torch.manual_seed(42)
 np.random.seed(42)
 
-class EmbeddingPipeline:
+class MixedEmbeddingPipeline:
     """
     Complete pipeline for graph-based regression using GNN embeddings with ML models.
     
     Pipeline Flow:
     1. Generate graph from data
     2. Create KNN graph sparsification
-    3. Train GNN models (plus versions for embeddings)
-    4. Use GNNExplainer to get sparsified graph
-    5. Train GNN models on sparsified graph
-    6. Extract embeddings from best GNN model
+    3. Train ALL GNN models (plus versions for embeddings)
+    4. Use best GNN model for GNNExplainer to get sparsified graph
+    5. Train ALL GNN models on sparsified graph
+    6. Extract embeddings from best overall GNN model
     7. Train ML models (LinearSVR, ExtraTrees) on embeddings with 5-fold CV
     """
     
     def __init__(self, 
                  data_path,
                  k_neighbors=5,
-                 mantel_threshold=0.2,
+                 mantel_threshold=0.05,
                  hidden_dim=64,
                  dropout_rate=0.3,
                  batch_size=8,
@@ -66,14 +66,13 @@ class EmbeddingPipeline:
                  num_epochs=200,
                  patience=20,
                  num_folds=5,
-                 save_dir='./embedding_results',
-                 importance_threshold=0.3,  # Use default threshold - pipeline_explainer has adaptive thresholding
+                 save_dir='./mixed_embedding_results',
+                 importance_threshold=0.2,  # Use default threshold - pipeline_explainer has adaptive thresholding
                  use_fast_correlation=False,
                  graph_mode='family',  # Changed default to family
-                 family_filter_mode='relaxed',
-                 single_model_type=None):
+                 family_filter_mode='strict'):
         """
-        Initialize the embedding pipeline
+        Initialize the mixed embedding pipeline
         
         Args:
             data_path: Path to the CSV file with data
@@ -88,11 +87,10 @@ class EmbeddingPipeline:
             patience: Patience for early stopping
             num_folds: Number of folds for cross-validation
             save_dir: Directory to save results
-            importance_threshold: Threshold for edge importance in GNNExplainer sparsification (lowered to 0.1)
+            importance_threshold: Threshold for edge importance in GNNExplainer sparsification
             use_fast_correlation: If True, use fast correlation-based graph construction
             graph_mode: Mode for graph construction ('otu' or 'family') - now defaults to 'family'
             family_filter_mode: Mode for family filtering ('relaxed' or 'strict')
-            single_model_type: If specified ('gcn', 'rggc', 'gat'), only use this model type throughout the entire pipeline
         """
         self.data_path = data_path
         self.k_neighbors = k_neighbors
@@ -110,17 +108,10 @@ class EmbeddingPipeline:
         self.use_fast_correlation = use_fast_correlation
         self.graph_mode = graph_mode
         self.family_filter_mode = family_filter_mode
-        self.single_model_type = single_model_type
         
-        # Determine which models to train
-        if single_model_type:
-            if single_model_type not in ['gcn', 'rggc', 'gat']:
-                raise ValueError(f"single_model_type must be one of ['gcn', 'rggc', 'gat'], got {single_model_type}")
-            self.gnn_models_to_train = [single_model_type]
-            print(f"Pipeline configured for {single_model_type.upper()}-ONLY flow")
-        else:
-            self.gnn_models_to_train = ['gcn', 'rggc', 'gat']
-            print("Pipeline configured for MIXED model comparison")
+        # Always train all three models in mixed approach
+        self.gnn_models_to_train = ['gcn', 'rggc', 'gat']
+        print("Pipeline configured for MIXED model comparison")
         
         print(f"Using graph mode: {graph_mode} (family-level nodes)")
         
@@ -331,15 +322,25 @@ class EmbeddingPipeline:
             
             print(f"    MSE: {mse:.4f}, RMSE: {rmse:.4f}, R²: {r2:.4f}, MAE: {mae:.4f}")
         
-        # Calculate average metrics
-        avg_metrics = {
-            'mse': np.mean([r['mse'] for r in fold_results]),
-            'rmse': np.mean([r['rmse'] for r in fold_results]),
-            'r2': np.mean([r['r2'] for r in fold_results]),
-            'mae': np.mean([r['mae'] for r in fold_results])
+        # Calculate overall metrics from all validation samples combined
+        all_fold_preds = []
+        all_fold_targets = []
+        for fold_result in fold_results:
+            all_fold_preds.extend(fold_result['predictions'])
+            all_fold_targets.extend(fold_result['targets'])
+        
+        all_fold_preds = np.array(all_fold_preds)
+        all_fold_targets = np.array(all_fold_targets)
+        
+        # Calculate overall metrics (replaces avg_metrics)
+        overall_metrics = {
+            'mse': mean_squared_error(all_fold_targets, all_fold_preds),
+            'rmse': np.sqrt(mean_squared_error(all_fold_targets, all_fold_preds)),
+            'r2': r2_score(all_fold_targets, all_fold_preds),
+            'mae': mean_absolute_error(all_fold_targets, all_fold_preds)
         }
         
-        print(f"  Average - MSE: {avg_metrics['mse']:.4f}, RMSE: {avg_metrics['rmse']:.4f}, R²: {avg_metrics['r2']:.4f}, MAE: {avg_metrics['mae']:.4f}")
+        print(f"  Overall - MSE: {overall_metrics['mse']:.4f}, RMSE: {overall_metrics['rmse']:.4f}, R²: {overall_metrics['r2']:.4f}, MAE: {overall_metrics['mae']:.4f}")
         
         # Create overall plots (only overall, no individual fold plots)
         self.plot_overall_gnn_results(fold_results, model_type, target_name, phase)
@@ -354,7 +355,7 @@ class EmbeddingPipeline:
         return {
             'model': final_model,
             'fold_results': fold_results,
-            'avg_metrics': avg_metrics,
+            'avg_metrics': overall_metrics,  # Now contains overall metrics instead of averages
             'model_type': model_type,
             'target_name': target_name,
             'target_idx': target_idx,
@@ -445,15 +446,25 @@ class EmbeddingPipeline:
                 
                 print(f"    Fold {fold_num}: MSE: {mse:.4f}, RMSE: {rmse:.4f}, R²: {r2:.4f}, MAE: {mae:.4f}")
             
-            # Calculate average metrics
-            avg_metrics = {
-                'mse': np.mean([r['mse'] for r in fold_results]),
-                'rmse': np.mean([r['rmse'] for r in fold_results]),
-                'r2': np.mean([r['r2'] for r in fold_results]),
-                'mae': np.mean([r['mae'] for r in fold_results])
+            # Calculate overall metrics from all validation samples combined
+            all_fold_preds = []
+            all_fold_targets = []
+            for fold_result in fold_results:
+                all_fold_preds.extend(fold_result['predictions'])
+                all_fold_targets.extend(fold_result['targets'])
+            
+            all_fold_preds = np.array(all_fold_preds)
+            all_fold_targets = np.array(all_fold_targets)
+            
+            # Calculate overall metrics (replaces avg_metrics)
+            overall_metrics = {
+                'mse': mean_squared_error(all_fold_targets, all_fold_preds),
+                'rmse': np.sqrt(mean_squared_error(all_fold_targets, all_fold_preds)),
+                'r2': r2_score(all_fold_targets, all_fold_preds),
+                'mae': mean_absolute_error(all_fold_targets, all_fold_preds)
             }
             
-            print(f"    Average - MSE: {avg_metrics['mse']:.4f}, RMSE: {avg_metrics['rmse']:.4f}, R²: {avg_metrics['r2']:.4f}, MAE: {avg_metrics['mae']:.4f}")
+            print(f"    Overall - MSE: {overall_metrics['mse']:.4f}, RMSE: {overall_metrics['rmse']:.4f}, R²: {overall_metrics['r2']:.4f}, MAE: {overall_metrics['mae']:.4f}")
             
             # Train final model on all data
             final_model = Pipeline([
@@ -465,7 +476,7 @@ class EmbeddingPipeline:
             ml_results[model_name] = {
                 'model': final_model,
                 'fold_results': fold_results,
-                'avg_metrics': avg_metrics,
+                'avg_metrics': overall_metrics,  # Now contains overall metrics instead of averages
                 'target_name': target_name,
                 'target_idx': target_idx
             }
@@ -536,7 +547,7 @@ class EmbeddingPipeline:
         all_mse_scores = gnn_mse_scores + ml_mse_scores
         colors = ['skyblue', 'lightcoral', 'lightgreen', 'orange', 'purple']
         
-        bars3 = ax3.bar(range(len(all_models)), all_r2_scores, color=colors[:len(all_models)])
+        bars3 = ax3.bar(range(len(all_models)), all_r2_scores, color=[colors[i % len(colors)] for i in range(len(all_models))])
         ax3.set_title('All Models R² Comparison')
         ax3.set_ylabel('R² Score')
         ax3.set_ylim(0, max(all_r2_scores) * 1.1)
@@ -554,7 +565,7 @@ class EmbeddingPipeline:
         ml_rmse_scores = [ml_results[model]['avg_metrics']['rmse'] for model in ml_models]
         all_rmse_scores = gnn_rmse_scores + ml_rmse_scores
         
-        bars4 = ax4.bar(range(len(all_models)), all_rmse_scores, color=colors[:len(all_models)])
+        bars4 = ax4.bar(range(len(all_models)), all_rmse_scores, color=[colors[i % len(colors)] for i in range(len(all_models))])
         ax4.set_title('All Models RMSE Comparison')
         ax4.set_ylabel('RMSE')
         ax4.set_xticks(range(len(all_models)))
@@ -609,7 +620,8 @@ class EmbeddingPipeline:
                 fold_r2s = [fold['r2'] for fold in ml_results[model_name]['fold_results']]
                 model_mse = ml_results[model_name]['avg_metrics']['mse']
             
-            ax6.plot(fold_numbers, fold_r2s, marker='o', label=f'{model_name} (MSE:{model_mse:.3f})', color=colors[i])
+            # Use modulo to prevent index errors
+            ax6.plot(fold_numbers, fold_r2s, marker='o', label=f'{model_name} (MSE:{model_mse:.3f})', color=colors[i % len(colors)])
         
         ax6.set_title('Cross-Validation Consistency')
         ax6.set_xlabel('Fold Number')
@@ -672,21 +684,16 @@ class EmbeddingPipeline:
 
     def run_pipeline(self):
         """
-        Run the complete embedding pipeline:
-        1. Train GNN models on KNN-sparsified graph
+        Run the complete mixed embedding pipeline:
+        1. Train ALL GNN models on KNN-sparsified graph
         2. Create GNNExplainer-sparsified graph using best model
-        3. Train GNN models on explainer-sparsified graph
-        4. Extract embeddings from best GNN model
+        3. Train ALL GNN models on explainer-sparsified graph
+        4. Extract embeddings from best explainer-trained model
         5. Train ML models on embeddings with 5-fold CV
         6. Compare and analyze all results
-        
-        If single_model_type is specified, the entire pipeline uses only that model type.
         """
         print("\n" + "="*80)
-        if self.single_model_type:
-            print(f"EMBEDDING PIPELINE - {self.single_model_type.upper()}-ONLY ANALYSIS")
-        else:
-            print("EMBEDDING PIPELINE - COMPREHENSIVE GNN + ML ANALYSIS")
+        print("MIXED EMBEDDING PIPELINE - COMPREHENSIVE GNN + ML ANALYSIS")
         print("="*80)
         
         all_results = {}
@@ -699,12 +706,9 @@ class EmbeddingPipeline:
             
             target_results = {}
             
-            # Step 1: Train GNN models on KNN-sparsified graph
-            print(f"\nSTEP 1: Training GNN models on KNN-sparsified graph")
-            if self.single_model_type:
-                print(f"Training only {self.single_model_type.upper()} model")
-            else:
-                print("Training all GNN models (GCN, RGGC, GAT)")
+            # Step 1: Train ALL GNN models on KNN-sparsified graph
+            print(f"\nSTEP 1: Training ALL GNN models on KNN-sparsified graph")
+            print("Training all GNN models (GCN, RGGC, GAT)")
             print("-" * 50)
             
             knn_results = {}
@@ -718,24 +722,18 @@ class EmbeddingPipeline:
             
             target_results['knn'] = knn_results
             
-            # Find best GNN model for this target (or use the single model)
-            if self.single_model_type:
-                best_gnn_model = knn_results[self.single_model_type]['model']
-                best_gnn_r2 = knn_results[self.single_model_type]['avg_metrics']['r2']
-                best_gnn_type = self.single_model_type
-                print(f"\nUsing {best_gnn_type.upper()} model (R² = {best_gnn_r2:.4f})")
-            else:
-                best_gnn_model = None
-                best_gnn_r2 = -float('inf')
-                best_gnn_type = None
-                
-                for model_type, results in knn_results.items():
-                    if results['avg_metrics']['r2'] > best_gnn_r2:
-                        best_gnn_r2 = results['avg_metrics']['r2']
-                        best_gnn_model = results['model']
-                        best_gnn_type = model_type
-                
-                print(f"\nBest GNN model: {best_gnn_type.upper()} (R² = {best_gnn_r2:.4f})")
+            # Find best GNN model for this target
+            best_gnn_model = None
+            best_gnn_r2 = -float('inf')
+            best_gnn_type = None
+            
+            for model_type, results in knn_results.items():
+                if results['avg_metrics']['r2'] > best_gnn_r2:
+                    best_gnn_r2 = results['avg_metrics']['r2']
+                    best_gnn_model = results['model']
+                    best_gnn_type = model_type
+            
+            print(f"\nBest KNN GNN model: {best_gnn_type.upper()} (R² = {best_gnn_r2:.4f})")
             
             # Step 2: Create GNNExplainer-sparsified graph
             print(f"\nSTEP 2: Creating GNNExplainer-sparsified graph")
@@ -747,12 +745,9 @@ class EmbeddingPipeline:
                 target_idx=target_idx
             )
             
-            # Step 3: Train GNN models on explainer-sparsified graph
-            print(f"\nSTEP 3: Training GNN models on explainer-sparsified graph")
-            if self.single_model_type:
-                print(f"Training only {self.single_model_type.upper()} model")
-            else:
-                print("Training all GNN models (GCN, RGGC, GAT)")
+            # Step 3: Train ALL GNN models on explainer-sparsified graph
+            print(f"\nSTEP 3: Training ALL GNN models on explainer-sparsified graph")
+            print("Training all GNN models (GCN, RGGC, GAT)")
             print("-" * 50)
             
             explainer_results = {}
@@ -766,58 +761,33 @@ class EmbeddingPipeline:
             
             target_results['explainer'] = explainer_results
             
-            # Find best model overall (KNN vs Explainer)
-            if self.single_model_type:
-                # Compare only the single model type between KNN and explainer phases
-                knn_r2 = knn_results[self.single_model_type]['avg_metrics']['r2']
-                explainer_r2 = explainer_results[self.single_model_type]['avg_metrics']['r2']
-                
-                if explainer_r2 > knn_r2:
-                    best_overall_model = explainer_results[self.single_model_type]['model']
-                    best_overall_r2 = explainer_r2
-                    best_overall_type = f"{self.single_model_type}_explainer"
-                    embedding_data = explainer_data
-                    print(f"\nBest {self.single_model_type.upper()} model: Explainer-sparsified (R² = {best_overall_r2:.4f})")
-                else:
-                    best_overall_model = knn_results[self.single_model_type]['model']
-                    best_overall_r2 = knn_r2
-                    best_overall_type = self.single_model_type
-                    embedding_data = self.dataset.data_list
-                    print(f"\nBest {self.single_model_type.upper()} model: KNN-sparsified (R² = {best_overall_r2:.4f})")
-            else:
-                # Compare all models across both phases
-                all_gnn_results = {**knn_results, **{f"{k}_explainer": v for k, v in explainer_results.items()}}
-                best_overall_model = None
-                best_overall_r2 = -float('inf')
-                best_overall_type = None
-                
-                for model_name, results in all_gnn_results.items():
-                    if results['avg_metrics']['r2'] > best_overall_r2:
-                        best_overall_r2 = results['avg_metrics']['r2']
-                        best_overall_model = results['model']
-                        best_overall_type = model_name
-                
-                # Use the appropriate data list based on best model
-                if 'explainer' in best_overall_type:
-                    embedding_data = explainer_data
-                else:
-                    embedding_data = self.dataset.data_list
-                
-                print(f"\nBest overall GNN model: {best_overall_type} (R² = {best_overall_r2:.4f})")
+            # Find best model from explainer-sparsified graph ONLY (not KNN models)
+            # Only consider the 3 models trained on explainer-sparsified graph
+            best_explainer_model = None
+            best_explainer_r2 = -float('inf')
+            best_explainer_type = None
+            
+            for model_type, results in explainer_results.items():
+                if results['avg_metrics']['r2'] > best_explainer_r2:
+                    best_explainer_r2 = results['avg_metrics']['r2']
+                    best_explainer_model = results['model']
+                    best_explainer_type = model_type
+            
+            # Always use explainer data since we're selecting from explainer-trained models
+            embedding_data = explainer_data
+            
+            print(f"\nBest explainer-trained GNN model: {best_explainer_type.upper()} (R² = {best_explainer_r2:.4f})")
+            print("Using explainer-sparsified graph for embedding extraction")
             
             # Step 4: Extract embeddings from best model
-            print(f"\nSTEP 4: Extracting embeddings from best {best_gnn_type.upper()} model")
+            print(f"\nSTEP 4: Extracting embeddings from best GNN model")
             print("-" * 50)
             
-            embeddings, targets = self.extract_embeddings(best_overall_model, embedding_data)
+            embeddings, targets = self.extract_embeddings(best_explainer_model, embedding_data)
             
-            # Save embeddings with model type info
-            if self.single_model_type:
-                embedding_filename = f"{target_name}_{self.single_model_type}_embeddings.npy"
-                targets_filename = f"{target_name}_{self.single_model_type}_targets.npy"
-            else:
-                embedding_filename = f"{target_name}_embeddings.npy"
-                targets_filename = f"{target_name}_targets.npy"
+            # Save embeddings
+            embedding_filename = f"{target_name}_embeddings.npy"
+            targets_filename = f"{target_name}_targets.npy"
             
             np.save(f"{self.save_dir}/embeddings/{embedding_filename}", embeddings)
             np.save(f"{self.save_dir}/embeddings/{targets_filename}", targets)
@@ -826,14 +796,14 @@ class EmbeddingPipeline:
             print(f"Saved as: {embedding_filename}")
             
             # Step 5: Train ML models on embeddings
-            print(f"\nSTEP 5: Training ML models on {best_gnn_type.upper()} embeddings")
+            print(f"\nSTEP 5: Training ML models on embeddings")
             print("-" * 50)
             
             ml_results = self.train_ml_models(embeddings, targets, target_idx)
             target_results['ml_models'] = ml_results
             
             # Determine embeddings source for naming
-            embeddings_source = f"{best_gnn_type.upper()}_{best_overall_type.split('_')[-1] if '_' in best_overall_type else 'knn'}"
+            embeddings_source = f"{best_explainer_type.upper()}"
             
             # Plot ML model results
             self.plot_ml_model_results(ml_results, target_name, embeddings_source)
@@ -845,15 +815,8 @@ class EmbeddingPipeline:
             print(f"\nSTEP 6: Creating comprehensive plots")
             print("-" * 50)
             
-            if self.single_model_type:
-                # For single model, show KNN vs Explainer comparison
-                gnn_plot_results = {
-                    f"{self.single_model_type}_knn": knn_results[self.single_model_type],
-                    f"{self.single_model_type}_explainer": explainer_results[self.single_model_type]
-                }
-            else:
-                # For mixed models, show all models
-                gnn_plot_results = {**knn_results, **{f"{k}_explainer": v for k, v in explainer_results.items()}}
+            # For mixed models, show all models
+            gnn_plot_results = {**knn_results, **{f"{k}_explainer": v for k, v in explainer_results.items()}}
             
             self.plot_results(
                 gnn_results=gnn_plot_results,
@@ -902,20 +865,14 @@ class EmbeddingPipeline:
                     for model_type, results in target_results[phase].items():
                         if results['avg_metrics']['r2'] > best_r2:
                             best_r2 = results['avg_metrics']['r2']
-                            if self.single_model_type:
-                                best_model_info = f"{model_type.upper()} ({phase})"
-                            else:
-                                best_model_info = f"{model_type.upper()} ({phase})"
+                            best_model_info = f"{model_type.upper()} ({phase})"
             
             # Check ML models
             if 'ml_models' in target_results:
                 for model_type, results in target_results['ml_models'].items():
                     if results['avg_metrics']['r2'] > best_r2:
                         best_r2 = results['avg_metrics']['r2']
-                        if self.single_model_type:
-                            best_model_info = f"{model_type} (on {self.single_model_type.upper()} embeddings)"
-                        else:
-                            best_model_info = f"{model_type} (embeddings)"
+                        best_model_info = f"{model_type} (embeddings)"
             
             print(f"{target_name}: {best_model_info} - R² = {best_r2:.4f}")
         
@@ -926,7 +883,7 @@ class EmbeddingPipeline:
         print(f"  - plots/: Comprehensive visualization plots")
         print(f"  - embeddings/: Extracted embeddings and targets")
         
-        return all_results
+        return all_results 
 
     def plot_overall_gnn_results(self, fold_results, model_type, target_name, phase):
         """Plot overall results across all folds for a GNN model"""
@@ -1052,7 +1009,7 @@ class EmbeddingPipeline:
         fig.suptitle(f'ML Models on {embeddings_source} Embeddings - {target_name}', fontsize=16)
         
         model_names = list(ml_results.keys())
-        colors = ['orange', 'purple']
+        colors = ['skyblue', 'lightcoral', 'lightgreen', 'orange', 'purple']
         
         # Plot 1: R² comparison across folds
         ax1 = axes[0, 0]
@@ -1066,7 +1023,7 @@ class EmbeddingPipeline:
             avg_r2 = results['avg_metrics']['r2']
             avg_mse = results['avg_metrics']['mse']
             ax1.axhline(y=avg_r2, color=colors[i], linestyle='--', alpha=0.7, 
-                       label=f'{model_name} Avg = {avg_r2:.3f} (MSE: {avg_mse:.3f})')
+                       label=f'{model_name} Overall = {avg_r2:.3f} (MSE: {avg_mse:.3f})')
         
         ax1.set_xlabel('Fold Number')
         ax1.set_ylabel('R² Score')
@@ -1207,7 +1164,7 @@ class EmbeddingPipeline:
         ax2 = axes[0, 1]
         fold_nums = range(1, len(fold_r2s) + 1)
         ax2.bar(fold_nums, fold_r2s, alpha=0.7, color='skyblue', edgecolor='navy')
-        ax2.axhline(y=r2, color='red', linestyle='--', linewidth=2, label=f'Average R² = {r2:.3f} (MSE: {mse:.3f})')
+        ax2.axhline(y=r2, color='red', linestyle='--', linewidth=2, label=f'Overall R² = {r2:.3f} (MSE: {mse:.3f})')
         ax2.set_xlabel('Fold Number')
         ax2.set_ylabel('R² Score')
         ax2.set_title('R² Score Across Folds')
@@ -1227,7 +1184,7 @@ class EmbeddingPipeline:
         # Plot 4: MSE across folds (changed from RMSE to MSE)
         ax4 = axes[1, 1]
         ax4.bar(fold_nums, fold_mses, alpha=0.7, color='lightgreen', edgecolor='darkgreen')
-        ax4.axhline(y=mse, color='red', linestyle='--', linewidth=2, label=f'Average MSE = {mse:.3f}')
+        ax4.axhline(y=mse, color='red', linestyle='--', linewidth=2, label=f'Overall MSE = {mse:.3f}')
         ax4.set_xlabel('Fold Number')
         ax4.set_ylabel('MSE')
         ax4.set_title('MSE Across Folds')
@@ -1309,7 +1266,7 @@ class EmbeddingPipeline:
             
             # ML results
             if 'ml_models' in target_results:
-                embeddings_source = f"{self.single_model_type.upper()}" if self.single_model_type else "Best GNN"
+                embeddings_source = "Best GNN"
                 for model_type, results in target_results['ml_models'].items():
                     comparison_data.append({
                         'model': f"{model_type} (on {embeddings_source} embeddings)",
@@ -1376,59 +1333,37 @@ class EmbeddingPipeline:
 
 # Example usage
 if __name__ == "__main__":
-    # Option 1: GAT-ONLY Pipeline (entire flow uses only GAT) with family-level nodes
-    print("="*60)
-    print("OPTION 1: GAT-ONLY PIPELINE (FAMILY-LEVEL NODES)")
-    print("="*60)
+    print("="*80)
+    print("MIXED EMBEDDING PIPELINE")
+    print("="*80)
+    print("This pipeline trains all 3 GNN models, selects best for explainer,")
+    print("then trains all 3 models again on sparsified graph")
     
-    gat_pipeline = EmbeddingPipeline(
+    # Create mixed pipeline
+    mixed_pipeline = MixedEmbeddingPipeline(
         data_path="../Data/New_data.csv",
         k_neighbors=10,
         hidden_dim=64,
-        num_epochs=50,  # Reduced for faster testing
+        num_epochs=200,  # Reduced for faster testing
         num_folds=5,
-        save_dir="./gat_family_results",
-        single_model_type='gat',  # This ensures GAT-only flow
-        graph_mode='family',  # Use family-level nodes
-        importance_threshold=0.3,  # Use default threshold - pipeline_explainer has adaptive thresholding
-    )
-    
-    # Run GAT-only pipeline
-    gat_results = gat_pipeline.run_pipeline()
-    
-    print("\n" + "="*60)
-    print("OPTION 2: MIXED PIPELINE (FAMILY-LEVEL NODES)")
-    print("="*60)
-    
-    # Option 2: Mixed Pipeline (compare all models) with family-level nodes
-    mixed_pipeline = EmbeddingPipeline(
-        data_path="../Data/New_data.csv",
-        k_neighbors=10,
-        hidden_dim=64,
-        num_epochs=50,  # Reduced for faster testing
-        num_folds=5,
-        save_dir="./mixed_family_results",
-        graph_mode='family',  # Use family-level nodes
-        importance_threshold=0.3,  # Use default threshold - pipeline_explainer has adaptive thresholding
-        # single_model_type=None (default) - trains all models
+        save_dir="./mixed_embedding_results",
+        graph_mode='family',
+        importance_threshold=0.2,
+        
     )
     
     # Run mixed pipeline
-    mixed_results = mixed_pipeline.run_pipeline()
+    results = mixed_pipeline.run_pipeline()
     
     print("\n" + "="*80)
-    print("COMPARISON SUMMARY")
+    print("MIXED PIPELINE ANALYSIS COMPLETE!")
     print("="*80)
-    print("GAT-only results saved to: ./gat_family_results/")
-    print("Mixed results saved to: ./mixed_family_results/")
-    print("\nKey improvements:")
-    print("- Using family-level nodes instead of OTU-level")
-    print("- Improved GNNExplainer sparsification (threshold=0.3)")
-    print("- Individual plots for both ExtraTrees and LinearSVR")
-    print("- No individual fold plots (only overall results)")
-    print("- Better sparsification monitoring and debugging")
-    print("\nGAT-only pipeline ensures:")
-    print("- Only GAT models are trained")
-    print("- GAT model is used for GNNExplainer")
-    print("- GAT embeddings are used for ML models")
-    print("- End-to-end GAT consistency") 
+    print("Results saved to: ./mixed_embedding_results/")
+    print("\nKey features of this pipeline:")
+    print("- Trains ALL 3 GNN models (GCN, RGGC, GAT) on KNN graph")
+    print("- Selects BEST model for GNNExplainer sparsification")
+    print("- Trains ALL 3 GNN models again on explainer-sparsified graph")
+    print("- Selects BEST model from explainer-trained models for embedding extraction")
+    print("- Extracts embeddings from best explainer-trained model")
+    print("- Trains ML models (LinearSVR, ExtraTrees) on embeddings")
+    print("- Provides comprehensive comparison across all models and phases") 
