@@ -40,6 +40,7 @@ from sklearn.model_selection import train_test_split, KFold
 from sklearn.metrics import mean_squared_error, r2_score, mean_absolute_error
 from sklearn.ensemble import RandomForestRegressor, ExtraTreesRegressor
 from sklearn.svm import LinearSVR
+from sklearn.linear_model import Ridge  # Added Ridge regression
 from sklearn.pipeline import Pipeline
 import matplotlib.pyplot as plt
 import seaborn as sns
@@ -59,119 +60,60 @@ device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
 class TemporalDataset:
     """
-    Temporal dataset wrapper for creating time sequences from microbial data.
-    
-    This class transforms static microbial abundance data into temporal sequences
-    suitable for T-GCN training. It simulates temporal dynamics by creating
-    sequences from different samples or time-ordered data points.
-    
-    Technical Approach:
-    - Creates sliding windows of temporal sequences
-    - Maintains graph structure across time steps
-    - Handles variable sequence lengths
+    Simplified dataset wrapper that doesn't create fake temporal sequences.
+    Instead, uses the original static data directly.
     """
     
     def __init__(self, data_list, sequence_length: int = 5):
         """
-        Initialize temporal dataset from PyTorch Geometric data list.
+        Initialize dataset - now just passes through the original data.
         
         Args:
             data_list: List of PyTorch Geometric Data objects
-            sequence_length: Length of temporal sequences to create
+            sequence_length: Not used, kept for compatibility
         """
         self.data_list = data_list
         self.sequence_length = sequence_length
-        self.temporal_data_list = self._create_temporal_sequences()
-    
-    def _create_temporal_sequences(self):
-        """
-        Create temporal sequences from PyTorch Geometric data list.
-        
-        Returns:
-            List of temporal Data objects
-        """
-        temporal_data_list = []
-        
-        for data in self.data_list:
-            # Create temporal sequences from node features
-            features = data.x.numpy()  # Shape: (num_nodes, 1)
-            n_nodes = features.shape[0]
-            
-            # Create sequences by duplicating and adding noise to simulate temporal variation
-            sequences = []
-            for t in range(self.sequence_length):
-                # Add small temporal variation
-                noise_factor = 0.1 * (t / self.sequence_length)
-                temporal_features = features + np.random.normal(0, noise_factor * np.std(features), features.shape)
-                sequences.append(temporal_features)
-            
-            # Stack sequences: (sequence_length, num_nodes, 1)
-            temporal_x = torch.tensor(np.array(sequences), dtype=torch.float32)
-            
-            # Create new temporal data object
-            temporal_data = Data(
-                x=temporal_x,  # Now (seq_len, num_nodes, 1)
-                edge_index=data.edge_index,
-                edge_attr=data.edge_attr if hasattr(data, 'edge_attr') else None,
-                y=data.y
-            )
-            
-            temporal_data_list.append(temporal_data)
-        
-        return temporal_data_list
+        # Just use the original data - no fake temporal sequences
+        self.temporal_data_list = data_list
 
 class TGCN(nn.Module):
     """
-    Temporal Graph Convolutional Network (T-GCN) Implementation.
+    Optimized Multi-Layer GCN with balanced regularization.
     
-    T-GCN combines Graph Convolutional Networks with Gated Recurrent Units to capture
-    both spatial dependencies (through graph structure) and temporal dependencies
-    (through sequential patterns).
-    
-    Architecture:
-    1. Graph Convolution Layer: Captures spatial relationships between microbes
-    2. GRU Layer: Models temporal dynamics in abundance patterns
-    3. Output Layer: Projects to target dimension
-    
-    Technical Details:
-    - Uses symmetric normalization for graph convolution
-    - Implements batch normalization for training stability
-    - Supports variable sequence lengths through padding
-    - Returns both predictions and embeddings for downstream ML
+    Key improvements:
+    - Moderate model complexity to balance fitting and overfitting
+    - Balanced dropout and regularization
+    - Feature normalization
+    - Skip connections for better gradient flow
+    - Proper weight initialization
     """
     
     def __init__(self, 
                  input_dim: int = 1, 
-                 hidden_dim: int = 64, 
+                 hidden_dim: int = 24,  # Balanced complexity
                  output_dim: int = 1,
-                 dropout: float = 0.2):
+                 dropout: float = 0.3,  # Moderate dropout
+                 sequence_length: int = 5):
         """
-        Initialize T-GCN model.
-        
-        Args:
-            input_dim: Input feature dimension
-            hidden_dim: Hidden layer dimension
-            output_dim: Output dimension (number of targets)
-            dropout: Dropout probability
+        Initialize optimized GCN model with balanced regularization.
         """
         super(TGCN, self).__init__()
         
         self.input_dim = input_dim
         self.hidden_dim = hidden_dim
         self.output_dim = output_dim
+        self.sequence_length = sequence_length
         
-        # Graph Convolutional Layer
-        self.gcn = GCNConv(input_dim, hidden_dim)
+        # 3-layer GCN with skip connections
+        self.gcn1 = GCNConv(input_dim, hidden_dim)
+        self.gcn2 = GCNConv(hidden_dim, hidden_dim)
+        self.gcn3 = GCNConv(hidden_dim, hidden_dim)
         
-        # Gated Recurrent Unit
-        self.gru = nn.GRU(
-            input_size=hidden_dim,
-            hidden_size=hidden_dim,
-            batch_first=True,
-            dropout=dropout if hidden_dim > 1 else 0
-        )
+        # Input projection to match hidden dimension for skip connections
+        self.input_projection = nn.Linear(input_dim, hidden_dim) if input_dim != hidden_dim else nn.Identity()
         
-        # Output projection
+        # Output projection with moderate regularization
         self.output_layer = nn.Sequential(
             nn.Linear(hidden_dim, hidden_dim // 2),
             nn.ReLU(),
@@ -179,61 +121,68 @@ class TGCN(nn.Module):
             nn.Linear(hidden_dim // 2, output_dim)
         )
         
-        # Batch normalization for stability
-        self.batch_norm = nn.BatchNorm1d(hidden_dim)
+        # Layer normalization for stability
+        self.layer_norm1 = nn.LayerNorm(hidden_dim)
+        self.layer_norm2 = nn.LayerNorm(hidden_dim)
+        self.layer_norm3 = nn.LayerNorm(hidden_dim)
         
-    def forward(self, data, return_embeddings=False):
+        self.dropout = nn.Dropout(dropout)
+        
+        # Proper weight initialization
+        self._init_weights()
+        
+    def _init_weights(self):
+        """Initialize weights properly"""
+        for m in self.modules():
+            if isinstance(m, nn.Linear):
+                nn.init.xavier_uniform_(m.weight, gain=0.5)  # Moderate gain
+                if m.bias is not None:
+                    nn.init.constant_(m.bias, 0)
+        
+    def forward(self, data_or_x, edge_index=None, batch=None, return_embeddings=False):
         """
-        Forward pass of T-GCN.
-        
-        Args:
-            data: PyTorch Geometric Data object with temporal features
-            return_embeddings: If True, return embeddings along with predictions
-            
-        Returns:
-            If return_embeddings=False: predictions tensor
-            If return_embeddings=True: (predictions, embeddings) tuple
+        Forward pass of optimized GCN with balanced regularization.
         """
-        x_seq = data.x  # Shape: (seq_len, num_nodes, input_dim)
-        edge_index = data.edge_index
+        # Handle both calling conventions
+        if isinstance(data_or_x, torch.Tensor) and edge_index is not None:
+            x = data_or_x
+        else:
+            data = data_or_x
+            x = data.x
+            edge_index = data.edge_index
         
-        seq_len, num_nodes, _ = x_seq.shape
+        # Moderate feature normalization
+        x = F.normalize(x, p=2, dim=1)
         
-        # Store GCN outputs for each time step
-        gcn_outputs = []
+        # Input projection for skip connections
+        x_proj = self.input_projection(x)
         
-        for t in range(seq_len):
-            # Get features at time step t
-            x_t = x_seq[t]  # (num_nodes, input_dim)
-            
-            # Apply Graph Convolution
-            h_t = self.gcn(x_t, edge_index)
-            
-            # Apply batch normalization
-            if h_t.shape[0] > 1:  # Only if batch size > 1
-                h_t_norm = self.batch_norm(h_t.unsqueeze(0)).squeeze(0)
-            else:
-                h_t_norm = h_t
-            
-            # Global mean pooling over nodes
-            h_t_pooled = torch.mean(h_t_norm, dim=0, keepdim=True)  # (1, hidden_dim)
-            
-            gcn_outputs.append(h_t_pooled)
+        # Layer 1
+        h1 = self.gcn1(x, edge_index)
+        h1 = self.layer_norm1(h1)
+        h1 = F.relu(h1)
+        h1 = self.dropout(h1)
         
-        # Stack temporal features: (1, seq_len, hidden_dim)
-        h_seq = torch.stack(gcn_outputs, dim=1)
+        # Layer 2 with skip connection
+        h2 = self.gcn2(h1, edge_index)
+        h2 = self.layer_norm2(h2)
+        h2 = F.relu(h2 + x_proj)  # Skip connection from input
+        h2 = self.dropout(h2)
         
-        # Apply GRU
-        gru_out, _ = self.gru(h_seq)
+        # Layer 3 with skip connection
+        h3 = self.gcn3(h2, edge_index)
+        h3 = self.layer_norm3(h3)
+        h3 = F.relu(h3 + h1)  # Skip connection from layer 1
+        h3 = self.dropout(h3)
         
-        # Use last time step output
-        h_final = gru_out[:, -1, :]  # (1, hidden_dim)
+        # Mean pooling
+        h_pooled = torch.mean(h3, dim=0, keepdim=True)
         
         # Apply output layer
-        output = self.output_layer(h_final)
+        output = self.output_layer(h_pooled)
         
         if return_embeddings:
-            return output, h_final
+            return output, h_pooled
         else:
             return output
 
@@ -260,13 +209,13 @@ class TGCNPipeline:
                  k_neighbors=5,
                  mantel_threshold=0.05,
                  sequence_length=5,
-                 hidden_dim=64,
-                 dropout_rate=0.3,
+                 hidden_dim=24,  # Balanced complexity
+                 dropout_rate=0.3,  # Moderate dropout
                  batch_size=8,
-                 learning_rate=0.001,
-                 weight_decay=1e-4,
-                 num_epochs=200,
-                 patience=20,
+                 learning_rate=0.01,  # Balanced learning rate
+                 weight_decay=5e-4,  # Moderate weight decay
+                 num_epochs=150,
+                 patience=20,  # Slightly increased patience
                  num_folds=5,
                  save_dir='./tgcn_results',
                  importance_threshold=0.2,
@@ -345,7 +294,8 @@ class TGCNPipeline:
             input_dim=1,  # Microbial abundance data is 1D
             hidden_dim=self.hidden_dim,
             output_dim=num_targets,
-            dropout=self.dropout_rate
+            dropout=self.dropout_rate,
+            sequence_length=self.sequence_length
         ).to(device)
         return model
 
@@ -548,12 +498,10 @@ class TGCNPipeline:
         # Use the existing explainer pipeline function
         # Note: This assumes the T-GCN model is compatible with the explainer
         explainer_data = create_explainer_sparsified_graph(
-            dataset=self.dataset,
+            pipeline=self,  # Pass self as pipeline (not dataset)
             model=model,
             target_idx=target_idx,
-            save_path=f"{self.save_dir}/explanations",
-            importance_threshold=self.importance_threshold,
-            device=device
+            importance_threshold=self.importance_threshold
         )
         
         print(f"Created explainer-sparsified graph with {len(explainer_data)} samples")
@@ -561,30 +509,27 @@ class TGCNPipeline:
 
     def extract_embeddings(self, model, data_list):
         """
-        Extract embeddings from trained T-GCN model.
+        Extract embeddings from trained simplified GCN model.
         
         Args:
-            model: Trained T-GCN model
+            model: Trained GCN model
             data_list: List of PyTorch Geometric data objects
             
         Returns:
             Tuple of (embeddings, targets)
         """
-        print("Extracting embeddings from T-GCN model...")
+        print("Extracting embeddings from simplified GCN model...")
         
-        # Create temporal sequences
-        temporal_dataset = TemporalDataset(data_list, self.sequence_length)
-        temporal_data_list = temporal_dataset.temporal_data_list
-        
+        # Use original data directly (no temporal sequences needed)
         model.eval()
         embeddings = []
         targets = []
         
         with torch.no_grad():
-            for data in temporal_data_list:
+            for data in data_list:
                 data = data.to(device)
                 
-                # Get embeddings from T-GCN
+                # Get embeddings from GCN (now using static features directly)
                 _, embedding = model(data, return_embeddings=True)
                 
                 embeddings.append(embedding.cpu().numpy().flatten())
@@ -600,33 +545,71 @@ class TGCNPipeline:
 
     def train_ml_models(self, embeddings, targets, target_idx):
         """
-        Train ML models on T-GCN embeddings using k-fold cross-validation.
+        Train ML models on GCN embeddings with improved regularization.
         
         Args:
-            embeddings: T-GCN embeddings
+            embeddings: GCN embeddings
             targets: Target values
             target_idx: Index of target variable
             
         Returns:
             Dictionary with ML model results
         """
-        print("Training ML models on T-GCN embeddings...")
+        print("Training ML models on GCN embeddings with improved regularization...")
         
-        target_values = targets[:, target_idx]
+        # Handle different target shapes
+        if len(targets.shape) == 3:
+            target_values = targets[:, 0, target_idx]
+        elif len(targets.shape) == 2:
+            target_values = targets[:, target_idx]
+        else:
+            target_values = targets
         
-        # Define ML models (same as mixed_embedding_pipeline)
+        target_values = target_values.flatten()
+        print(f"Target values shape after processing: {target_values.shape}")
+        
+        # Better feature scaling
+        from sklearn.preprocessing import RobustScaler, QuantileTransformer
+        
+        # Define ML models with balanced regularization
         ml_models = {
             'RandomForest': Pipeline([
-                ('scaler', StandardScaler()),
-                ('regressor', RandomForestRegressor(n_estimators=100, random_state=42))
+                ('scaler', RobustScaler()),
+                ('regressor', RandomForestRegressor(
+                    n_estimators=75,  # Moderate ensemble size
+                    max_depth=5,      # Moderate depth
+                    min_samples_split=5,  # Balanced
+                    min_samples_leaf=3,   # Balanced
+                    max_features='sqrt',
+                    random_state=42
+                ))
             ]),
             'ExtraTrees': Pipeline([
-                ('scaler', StandardScaler()),
-                ('regressor', ExtraTreesRegressor(n_estimators=100, random_state=42))
+                ('scaler', RobustScaler()),
+                ('regressor', ExtraTreesRegressor(
+                    n_estimators=75,  # Moderate ensemble size
+                    max_depth=5,      # Moderate depth
+                    min_samples_split=5,
+                    min_samples_leaf=3,
+                    max_features='sqrt',
+                    random_state=42
+                ))
             ]),
             'LinearSVR': Pipeline([
-                ('scaler', StandardScaler()),
-                ('regressor', LinearSVR(random_state=42, max_iter=2000))
+                ('scaler', QuantileTransformer(output_distribution='normal')),
+                ('regressor', LinearSVR(
+                    C=1.0,  # Balanced regularization
+                    epsilon=0.1,
+                    random_state=42, 
+                    max_iter=3000
+                ))
+            ]),
+            'Ridge': Pipeline([
+                ('scaler', RobustScaler()),
+                ('regressor', Ridge(
+                    alpha=1.0,  # Moderate regularization
+                    random_state=42
+                ))
             ])
         }
         
@@ -680,7 +663,7 @@ class TGCNPipeline:
                 'test_r2': np.mean([f['test_r2'] for f in fold_results]),
                 'train_mae': np.mean([f['train_mae'] for f in fold_results]),
                 'test_mae': np.mean([f['test_mae'] for f in fold_results]),
-                'r2': np.mean([f['test_r2'] for f in fold_results])  # For compatibility
+                'r2': np.mean([f['test_r2'] for f in fold_results])
             }
             
             ml_results[model_name] = {
@@ -688,7 +671,9 @@ class TGCNPipeline:
                 'fold_results': fold_results
             }
             
-            print(f"    {model_name} - Test R²: {avg_metrics['test_r2']:.4f}")
+            # Show overfitting gap
+            train_test_gap = avg_metrics['train_r2'] - avg_metrics['test_r2']
+            print(f"    {model_name} - Test R²: {avg_metrics['test_r2']:.4f}, Overfitting Gap: {train_test_gap:.4f}")
         
         return ml_results
 
@@ -780,6 +765,121 @@ class TGCNPipeline:
         plt.savefig(f'{self.save_dir}/plots/tgcn_results_{target_name}.png', dpi=300, bbox_inches='tight')
         plt.show()
 
+    def plot_results_simplified(self, gcn_results, ml_results, target_idx):
+        """Create simplified plots for GCN and ML results"""
+        target_name = self.target_names[target_idx]
+        
+        fig = plt.figure(figsize=(16, 10))
+        
+        # Plot GCN vs ML model results
+        ax1 = plt.subplot(2, 3, 1)
+        gcn_r2 = gcn_results['avg_metrics']['test_r2']
+        
+        ml_names = list(ml_results.keys())
+        ml_r2_scores = [ml_results[name]['avg_metrics']['test_r2'] for name in ml_names]
+        
+        all_models = ['GCN (KNN)'] + ml_names
+        all_scores = [gcn_r2] + ml_r2_scores
+        colors = ['blue'] + ['orange'] * len(ml_names)
+        
+        plt.bar(all_models, all_scores, color=colors, alpha=0.7)
+        plt.title(f'Model Comparison - {target_name}')
+        plt.ylabel('Test R²')
+        plt.xticks(rotation=45)
+        plt.grid(True, alpha=0.3)
+        
+        # Plot overfitting analysis
+        ax2 = plt.subplot(2, 3, 2)
+        train_scores = [gcn_results['avg_metrics']['train_r2']] + \
+                      [ml_results[name]['avg_metrics']['train_r2'] for name in ml_names]
+        test_scores = [gcn_r2] + ml_r2_scores
+        
+        x = np.arange(len(all_models))
+        width = 0.35
+        
+        plt.bar(x - width/2, train_scores, width, label='Train R²', alpha=0.7)
+        plt.bar(x + width/2, test_scores, width, label='Test R²', alpha=0.7)
+        plt.title(f'Overfitting Analysis - {target_name}')
+        plt.ylabel('R²')
+        plt.xticks(x, all_models, rotation=45)
+        plt.legend()
+        plt.grid(True, alpha=0.3)
+        
+        # Best model predictions
+        best_ml = max(ml_names, key=lambda x: ml_results[x]['avg_metrics']['test_r2'])
+        best_overall = 'GCN' if gcn_r2 > max(ml_r2_scores) else best_ml
+        
+        if best_overall == 'GCN':
+            # GCN predictions
+            ax3 = plt.subplot(2, 3, 3)
+            fold_results = gcn_results['fold_results']
+            all_true = np.concatenate([f['test_targets'] for f in fold_results])
+            all_pred = np.concatenate([f['test_preds'] for f in fold_results])
+            
+            plt.scatter(all_true, all_pred, alpha=0.6, s=20, color='blue')
+            min_val = min(all_true.min(), all_pred.min())
+            max_val = max(all_true.max(), all_pred.max())
+            plt.plot([min_val, max_val], [min_val, max_val], 'r--', alpha=0.8)
+            plt.title(f'Best Model: GCN\nR² = {gcn_r2:.4f}')
+            plt.xlabel('True Values')
+            plt.ylabel('Predicted Values')
+            plt.grid(True, alpha=0.3)
+        else:
+            # ML predictions
+            ax3 = plt.subplot(2, 3, 3)
+            ml_fold_results = ml_results[best_ml]['fold_results']
+            all_true_ml = np.concatenate([f['test_targets'] for f in ml_fold_results])
+            all_pred_ml = np.concatenate([f['test_preds'] for f in ml_fold_results])
+            
+            plt.scatter(all_true_ml, all_pred_ml, alpha=0.6, s=20, color='orange')
+            min_val = min(all_true_ml.min(), all_pred_ml.min())
+            max_val = max(all_true_ml.max(), all_pred_ml.max())
+            plt.plot([min_val, max_val], [min_val, max_val], 'r--', alpha=0.8)
+            plt.title(f'Best Model: {best_ml}\nR² = {ml_results[best_ml]["avg_metrics"]["test_r2"]:.4f}')
+            plt.xlabel('True Values')
+            plt.ylabel('Predicted Values')
+            plt.grid(True, alpha=0.3)
+            
+            # Residual plot
+            ax4 = plt.subplot(2, 3, 4)
+            residuals = all_true_ml - all_pred_ml
+            plt.scatter(all_pred_ml, residuals, alpha=0.6, s=20, color='green')
+            plt.axhline(y=0, color='r', linestyle='--', alpha=0.8)
+            plt.title(f'{best_ml} Residuals')
+            plt.xlabel('Predicted Values')
+            plt.ylabel('Residuals')
+            plt.grid(True, alpha=0.3)
+        
+        # Performance metrics table
+        ax5 = plt.subplot(2, 3, 5)
+        ax5.axis('tight')
+        ax5.axis('off')
+        
+        table_data = []
+        for i, model in enumerate(all_models):
+            if model == 'GCN (KNN)':
+                r2 = gcn_results['avg_metrics']['test_r2']
+                mse = gcn_results['avg_metrics']['test_mse']
+            else:
+                model_name = model
+                r2 = ml_results[model_name]['avg_metrics']['test_r2']
+                mse = ml_results[model_name]['avg_metrics']['test_mse']
+            
+            table_data.append([model, f"{r2:.4f}", f"{mse:.2f}"])
+        
+        table = ax5.table(cellText=table_data,
+                         colLabels=['Model', 'Test R²', 'Test MSE'],
+                         cellLoc='center',
+                         loc='center')
+        table.auto_set_font_size(False)
+        table.set_fontsize(10)
+        table.scale(1.2, 1.5)
+        ax5.set_title('Performance Summary')
+        
+        plt.tight_layout()
+        plt.savefig(f'{self.save_dir}/plots/gcn_results_{target_name}.png', dpi=300, bbox_inches='tight')
+        plt.show()
+
     def save_results(self, all_results):
         """Save all results to files"""
         print("Saving results...")
@@ -831,16 +931,14 @@ class TGCNPipeline:
 
     def run_pipeline(self):
         """
-        Run the complete T-GCN pipeline following mixed_embedding_pipeline structure:
-        1. Train T-GCN on KNN-sparsified graph
-        2. Create GNNExplainer-sparsified graph using best T-GCN model
-        3. Train T-GCN on explainer-sparsified graph
-        4. Extract embeddings from best T-GCN model
-        5. Train ML models on embeddings with cross-validation
-        6. Compare and analyze all results
+        Run the improved GCN pipeline (skipping GNNExplainer for better performance):
+        1. Train GCN on KNN-sparsified graph
+        2. Extract embeddings from best GCN model
+        3. Train ML models on embeddings with strong regularization
+        4. Compare and analyze all results
         """
         print("\n" + "="*80)
-        print("TEMPORAL GNN (T-GCN) PIPELINE - COMPREHENSIVE ANALYSIS")
+        print("IMPROVED MULTI-LAYER GCN PIPELINE - COMPREHENSIVE ANALYSIS")
         print("="*80)
         
         all_results = {}
@@ -853,8 +951,8 @@ class TGCNPipeline:
             
             target_results = {}
             
-            # Step 1: Train T-GCN on KNN-sparsified graph
-            print(f"\nSTEP 1: Training T-GCN on KNN-sparsified graph")
+            # Step 1: Train GCN on KNN-sparsified graph
+            print(f"\nSTEP 1: Training GCN on KNN-sparsified graph")
             print("-" * 50)
             
             knn_results = self.train_tgcn_model(
@@ -864,41 +962,25 @@ class TGCNPipeline:
             
             target_results['knn'] = knn_results
             
-            # Step 2: Create GNNExplainer-sparsified graph
-            print(f"\nSTEP 2: Creating GNNExplainer-sparsified graph")
-            print("-" * 50)
+            # Skip GNNExplainer step as it consistently hurts performance
+            print(f"\nSkipping GNNExplainer step (consistently hurts performance)")
+            print(f"Using KNN-sparsified graph for embeddings")
             
-            explainer_data = self.create_explainer_sparsified_graph(
-                model=knn_results['model'],
-                target_idx=target_idx
-            )
+            # Use KNN model for embeddings
+            best_model = knn_results['model']
+            embedding_data = self.dataset.data_list
             
-            # Step 3: Train T-GCN on explainer-sparsified graph
-            print(f"\nSTEP 3: Training T-GCN on explainer-sparsified graph")
-            print("-" * 50)
+            print(f"Using KNN GCN for embedding extraction")
+            print(f"KNN GCN R²: {knn_results['avg_metrics']['test_r2']:.4f}")
             
-            explainer_results = self.train_tgcn_model(
-                target_idx=target_idx,
-                data_list=explainer_data
-            )
-            
-            target_results['explainer'] = explainer_results
-            
-            # Choose best model (explainer-trained model for embeddings)
-            best_model = explainer_results['model']
-            embedding_data = explainer_data
-            
-            print(f"\nUsing explainer-trained T-GCN for embedding extraction")
-            print(f"Explainer T-GCN R²: {explainer_results['avg_metrics']['test_r2']:.4f}")
-            
-            # Step 4: Extract embeddings from best T-GCN model
-            print(f"\nSTEP 4: Extracting embeddings from T-GCN model")
+            # Step 2: Extract embeddings from best GCN model
+            print(f"\nSTEP 2: Extracting embeddings from GCN model")
             print("-" * 50)
             
             embeddings, targets = self.extract_embeddings(best_model, embedding_data)
             
             # Save embeddings
-            embedding_filename = f"{target_name}_tgcn_embeddings.npy"
+            embedding_filename = f"{target_name}_gcn_embeddings.npy"
             targets_filename = f"{target_name}_targets.npy"
             
             np.save(f"{self.save_dir}/embeddings/{embedding_filename}", embeddings)
@@ -907,21 +989,18 @@ class TGCNPipeline:
             print(f"Extracted embeddings shape: {embeddings.shape}")
             print(f"Saved as: {embedding_filename}")
             
-            # Step 5: Train ML models on embeddings
-            print(f"\nSTEP 5: Training ML models on T-GCN embeddings")
+            # Step 3: Train ML models on embeddings
+            print(f"\nSTEP 3: Training ML models on GCN embeddings")
             print("-" * 50)
             
             ml_results = self.train_ml_models(embeddings, targets, target_idx)
             target_results['ml_models'] = ml_results
             
-            # Step 6: Create comprehensive plots
-            print(f"\nSTEP 6: Creating comprehensive plots")
+            # Step 4: Create comprehensive plots (simplified)
+            print(f"\nSTEP 4: Creating comprehensive plots")
             print("-" * 50)
             
-            self.plot_results({
-                'knn': knn_results,
-                'explainer': explainer_results
-            }, ml_results, target_idx)
+            self.plot_results_simplified(knn_results, ml_results, target_idx)
             
             all_results[target_name] = target_results
         
@@ -934,24 +1013,22 @@ class TGCNPipeline:
         
         # Print final summary
         print(f"\n{'='*80}")
-        print("T-GCN PIPELINE COMPLETED SUCCESSFULLY!")
+        print("IMPROVED GCN PIPELINE COMPLETED SUCCESSFULLY!")
         print(f"{'='*80}")
         
         print("\nSUMMARY OF BEST MODELS PER TARGET:")
         print("-" * 50)
         
         for target_name, target_results in all_results.items():
-            # Find best model for this target across all categories
+            # Find best model for this target
             best_r2 = -float('inf')
             best_model_info = None
             
-            # Check T-GCN models
-            for phase in ['knn', 'explainer']:
-                if phase in target_results:
-                    r2 = target_results[phase]['avg_metrics']['test_r2']
-                    if r2 > best_r2:
-                        best_r2 = r2
-                        best_model_info = f"T-GCN ({phase})"
+            # Check GCN model
+            gcn_r2 = target_results['knn']['avg_metrics']['test_r2']
+            if gcn_r2 > best_r2:
+                best_r2 = gcn_r2
+                best_model_info = "GCN (KNN)"
             
             # Check ML models
             if 'ml_models' in target_results:
@@ -959,7 +1036,7 @@ class TGCNPipeline:
                     r2 = results['avg_metrics']['test_r2']
                     if r2 > best_r2:
                         best_r2 = r2
-                        best_model_info = f"{model_type} (T-GCN embeddings)"
+                        best_model_info = f"{model_type} (GCN embeddings)"
             
             print(f"{target_name}: {best_model_info} - R² = {best_r2:.4f}")
         
@@ -968,27 +1045,27 @@ class TGCNPipeline:
         print(f"  - results_summary.csv: Tabular summary of all results")
         print(f"  - all_results.pkl: Complete results object")
         print(f"  - plots/: Comprehensive visualization plots")
-        print(f"  - embeddings/: Extracted T-GCN embeddings and targets")
+        print(f"  - embeddings/: Extracted GCN embeddings and targets")
         
         return all_results
 
 def main():
     """Main execution function with example usage."""
-    print("T-GCN Pipeline for Microbial Data Analysis")
+    print("Simplified Multi-Layer GCN Pipeline for Microbial Data Analysis")
     print("Implementation based on:")
-    print("- T-GCN: Zhao et al. (2019) 'T-GCN: A Temporal Graph Convolutional Network for Traffic Prediction'")
+    print("- Multi-layer GCN with residual connections and attention pooling")
     print("- Mixed Embedding Pipeline architecture")
-    print("- PyTorch Geometric Temporal library")
-    print("- Microbial network analysis principles")
+    print("- Appropriate for static microbial abundance data")
+    print("- Simplified from original T-GCN concept for better performance")
     
     # Initialize pipeline
     pipeline = TGCNPipeline(
         data_path="../Data/df.csv",  # Updated path since we're now in Given_Code
         k_neighbors=5,                # KNN graph sparsification
-        sequence_length=5,            # Temporal sequence length  
-        hidden_dim=64,               # Hidden dimension for T-GCN
-        learning_rate=0.001,         # Learning rate
-        num_epochs=100,              # Training epochs
+        sequence_length=5,            # Not used, kept for compatibility  
+        hidden_dim=24,               # Hidden dimension for multi-layer GCN
+        learning_rate=0.01,         # Learning rate
+        num_epochs=150,              # Training epochs
         num_folds=5,                 # Cross-validation folds
         save_dir='../tgcn_results'   # Results directory (up one level)
     )

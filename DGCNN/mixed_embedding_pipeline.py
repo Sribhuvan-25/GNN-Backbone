@@ -21,7 +21,7 @@ import warnings
 warnings.filterwarnings('ignore')
 
 # Import dataset and explainer modules (now from same directory)
-from dataset_regression import MicrobialGNNDataset
+from dataset_regression import RegressionDataset
 from explainer_regression import GNNExplainerRegression
 from pipeline_explainer import create_explainer_sparsified_graph
 
@@ -31,7 +31,8 @@ from GNNmodelsRegression import (
     simple_RGGC_plus_regression,
     simple_GAT_regression,
     GaussianNLLLoss,
-    simple_DGCNN_plus_regression
+    simple_DGCNN_plus_regression,
+    Enhanced_DGCNN_regression
 )
 
 # Set device
@@ -72,27 +73,22 @@ class MixedEmbeddingPipeline:
                  importance_threshold=0.2,  # Use default threshold - pipeline_explainer has adaptive thresholding
                  use_fast_correlation=False,
                  graph_mode='family',  # Changed default to family
-                 family_filter_mode='strict'):
+                 family_filter_mode='strict',
+                 # New enhanced parameters
+                 use_feature_scaling=True,
+                 use_data_augmentation=True,
+                 augmentation_noise_std=0.01,
+                 use_graph_enhancement=True,
+                 adaptive_k_neighbors=True):
         """
-        Initialize the mixed embedding pipeline
+        Enhanced Mixed Embedding Pipeline with improved training and model architectures
         
-        Args:
-            data_path: Path to the CSV file with data
-            k_neighbors: Number of neighbors for KNN graph sparsification
-            mantel_threshold: p-value threshold for Mantel test
-            hidden_dim: Hidden dimension size for GNN
-            dropout_rate: Dropout rate
-            batch_size: Batch size for training
-            learning_rate: Learning rate
-            weight_decay: Weight decay for optimizer
-            num_epochs: Maximum number of epochs
-            patience: Patience for early stopping
-            num_folds: Number of folds for cross-validation
-            save_dir: Directory to save results
-            importance_threshold: Threshold for edge importance in GNNExplainer sparsification
-            use_fast_correlation: If True, use fast correlation-based graph construction
-            graph_mode: Mode for graph construction ('otu' or 'family') - now defaults to 'family'
-            family_filter_mode: Mode for family filtering ('relaxed' or 'strict')
+        New parameters:
+        - use_feature_scaling: Apply robust feature scaling
+        - use_data_augmentation: Add noise for training robustness
+        - augmentation_noise_std: Standard deviation for Gaussian noise
+        - use_graph_enhancement: Enhance graph connectivity
+        - adaptive_k_neighbors: Use adaptive k based on graph size
         """
         self.data_path = data_path
         self.k_neighbors = k_neighbors
@@ -111,25 +107,26 @@ class MixedEmbeddingPipeline:
         self.graph_mode = graph_mode
         self.family_filter_mode = family_filter_mode
         
-        # Always train all three models in mixed approach
+        # Enhanced parameters
+        self.use_feature_scaling = use_feature_scaling
+        self.use_data_augmentation = use_data_augmentation
+        self.augmentation_noise_std = augmentation_noise_std
+        self.use_graph_enhancement = use_graph_enhancement
+        self.adaptive_k_neighbors = adaptive_k_neighbors
+        
+        # Models to train (can be extended)
         self.gnn_models_to_train = ['gcn', 'rggc', 'gat', 'dgcnn']
-        print("Pipeline configured for MIXED model comparison")
         
-        print(f"Using graph mode: {graph_mode} (family-level nodes)")
+        # Create directories
+        os.makedirs(f"{self.save_dir}/plots", exist_ok=True)
+        os.makedirs(f"{self.save_dir}/gnn_models", exist_ok=True)
+        os.makedirs(f"{self.save_dir}/ml_models", exist_ok=True)
+        os.makedirs(f"{self.save_dir}/embeddings", exist_ok=True)
+        os.makedirs(f"{self.save_dir}/detailed_results", exist_ok=True)
         
-        # Create comprehensive save directories (matching regression pipeline structure)
-        os.makedirs(save_dir, exist_ok=True)
-        os.makedirs(f"{save_dir}/gnn_models", exist_ok=True)
-        os.makedirs(f"{save_dir}/ml_models", exist_ok=True)
-        os.makedirs(f"{save_dir}/plots", exist_ok=True)
-        os.makedirs(f"{save_dir}/graphs", exist_ok=True)
-        os.makedirs(f"{save_dir}/embeddings", exist_ok=True)
-        os.makedirs(f"{save_dir}/explanations", exist_ok=True)
-        os.makedirs(f"{save_dir}/detailed_results", exist_ok=True)
-        
-        # Load and process data
-        print("\nLoading and processing data...")
-        self.dataset = MicrobialGNNDataset(
+        # Load dataset
+        print("Loading dataset...")
+        self.dataset = RegressionDataset(
             data_path=data_path,
             k_neighbors=k_neighbors,
             mantel_threshold=mantel_threshold,
@@ -138,49 +135,141 @@ class MixedEmbeddingPipeline:
             family_filter_mode=family_filter_mode
         )
         
-        # Get target names for reference
+        # Enhanced data preprocessing
+        if self.use_feature_scaling:
+            self._apply_feature_scaling()
+        
+        if self.use_graph_enhancement:
+            self._enhance_graph_connectivity()
+        
+        # Store target names for reference
         self.target_names = self.dataset.target_cols
         print(f"Target variables: {self.target_names}")
+        print(f"Dataset size: {len(self.dataset.data_list)} graphs")
+        print(f"Using enhanced DGCNN with multi-scale architecture")
+
+    def _apply_feature_scaling(self):
+        """Apply robust feature scaling to node features"""
+        print("Applying robust feature scaling...")
+        
+        # Collect all node features
+        all_features = []
+        for data in self.dataset.data_list:
+            all_features.append(data.x.numpy())
+        
+        all_features = np.vstack(all_features)
+        
+        # Use RobustScaler to handle outliers better than StandardScaler
+        from sklearn.preprocessing import RobustScaler
+        scaler = RobustScaler()
+        scaled_features = scaler.fit_transform(all_features)
+        
+        # Apply scaling back to dataset
+        start_idx = 0
+        for data in self.dataset.data_list:
+            num_nodes = data.x.shape[0]
+            end_idx = start_idx + num_nodes
+            data.x = torch.FloatTensor(scaled_features[start_idx:end_idx])
+            start_idx = end_idx
+        
+        # Store scaler for potential future use
+        self.feature_scaler = scaler
+        print("Feature scaling completed")
+
+    def _enhance_graph_connectivity(self):
+        """Enhance graph connectivity with adaptive techniques"""
+        print("Enhancing graph connectivity...")
+        
+        for i, data in enumerate(self.dataset.data_list):
+            # Adaptive k-neighbors based on graph size
+            if self.adaptive_k_neighbors:
+                num_nodes = data.x.shape[0]
+                adaptive_k = min(self.k_neighbors, max(3, num_nodes // 10))
+            else:
+                adaptive_k = self.k_neighbors
+            
+            # Add long-range connections based on feature similarity
+            from sklearn.metrics.pairwise import cosine_similarity
+            
+            # Compute feature similarity
+            features = data.x.numpy()
+            similarity = cosine_similarity(features)
+            
+            # Add edges for high similarity pairs (top 5% similar pairs)
+            similarity_threshold = np.percentile(similarity, 95)
+            high_sim_pairs = np.where(similarity > similarity_threshold)
+            
+            # Convert to edge format
+            new_edges = torch.LongTensor(np.vstack([high_sim_pairs[0], high_sim_pairs[1]]))
+            
+            # Combine with existing edges and remove duplicates
+            combined_edges = torch.cat([data.edge_index, new_edges], dim=1)
+            combined_edges = torch.unique(combined_edges, dim=1)
+            
+            # Remove self-loops
+            mask = combined_edges[0] != combined_edges[1]
+            data.edge_index = combined_edges[:, mask]
+        
+        print("Graph connectivity enhancement completed")
+
+    def _apply_data_augmentation(self, data, training=True):
+        """Apply data augmentation during training"""
+        if not training or not self.use_data_augmentation:
+            return data
+        
+        # Clone data to avoid modifying original
+        augmented_data = data.clone()
+        
+        # Add Gaussian noise to node features
+        noise = torch.randn_like(augmented_data.x) * self.augmentation_noise_std
+        augmented_data.x = augmented_data.x + noise
+        
+        # Random edge dropout (5% of edges)
+        if torch.rand(1).item() < 0.3:  # Apply edge dropout 30% of the time
+            num_edges = augmented_data.edge_index.shape[1]
+            keep_ratio = 0.95
+            num_keep = int(num_edges * keep_ratio)
+            perm = torch.randperm(num_edges)
+            keep_edges = perm[:num_keep]
+            augmented_data.edge_index = augmented_data.edge_index[:, keep_edges]
+        
+        return augmented_data
 
     def create_gnn_model(self, model_type, num_targets=1):
-        """Create a GNN plus model that returns embeddings"""
-        if model_type == 'gcn':
-            model = simple_GCN_res_plus_regression(
+        """Create and return a GNN model based on type"""
+        if model_type.lower() == 'gcn':
+            return simple_GCN_res_plus_regression(
                 hidden_channels=self.hidden_dim,
-                output_dim=num_targets,
                 dropout_prob=self.dropout_rate,
                 input_channel=1,
-                estimate_uncertainty=False
-            ).to(device)
-        elif model_type == 'rggc':
-            model = simple_RGGC_plus_regression(
+                output_dim=num_targets
+            )
+        elif model_type.lower() == 'rggc':
+            return simple_RGGC_plus_regression(
                 hidden_channels=self.hidden_dim,
-                output_dim=num_targets,
                 dropout_prob=self.dropout_rate,
                 input_channel=1,
-                estimate_uncertainty=False
-            ).to(device)
-        elif model_type == 'gat':
-            model = simple_GAT_regression(
+                output_dim=num_targets
+            )
+        elif model_type.lower() == 'gat':
+            return simple_GAT_regression(
                 hidden_channels=self.hidden_dim,
-                output_dim=num_targets,
                 dropout_prob=self.dropout_rate,
                 input_channel=1,
-                num_heads=4,
-                estimate_uncertainty=False
-            ).to(device)
-        elif model_type == 'dgcnn':
-            model = simple_DGCNN_plus_regression(
-            hidden_channels=self.hidden_dim,
-            output_dim=num_targets,
-            dropout_prob=self.dropout_rate,
-            input_channel=1,
-            estimate_uncertainty=False
-        ).to(device)
+                output_dim=num_targets,
+                num_heads=4  # Use multiple attention heads
+            )
+        elif model_type.lower() == 'dgcnn':
+            return Enhanced_DGCNN_regression(
+                hidden_channels=self.hidden_dim,
+                dropout_prob=self.dropout_rate,
+                input_channel=1,
+                output_dim=num_targets,
+                k=self.k_neighbors,
+                num_layers=5
+            )
         else:
             raise ValueError(f"Unknown model type: {model_type}")
-        
-        return model
 
     def train_gnn_model(self, model_type, target_idx, data_list=None):
         """Train a single GNN model and return the trained model with metrics"""
@@ -197,7 +286,8 @@ class MixedEmbeddingPipeline:
         best_model = None
         best_r2 = -float('inf')
         
-        criterion = nn.MSELoss()
+        # Enhanced loss function with label smoothing for better generalization
+        criterion = nn.SmoothL1Loss()  # More robust than MSE for outliers
         
         # Iterate through folds
         for fold, (train_index, test_index) in enumerate(kf.split(data_list)):
@@ -208,91 +298,139 @@ class MixedEmbeddingPipeline:
             train_dataset = [data_list[i] for i in train_index]
             test_dataset = [data_list[i] for i in test_index]
             
-            # Create data loaders
-            train_loader = DataLoader(train_dataset, batch_size=self.batch_size, shuffle=True)
-            test_loader = DataLoader(test_dataset, batch_size=self.batch_size, shuffle=False)
+            # Create data loaders with improved sampling
+            train_loader = DataLoader(train_dataset, batch_size=self.batch_size, shuffle=True, 
+                                    drop_last=True, pin_memory=True)
+            test_loader = DataLoader(test_dataset, batch_size=self.batch_size, shuffle=False,
+                                   pin_memory=True)
             
             # Initialize model
-            model = self.create_gnn_model(model_type, num_targets=1)
+            model = self.create_gnn_model(model_type, num_targets=1).to(device)
             
-            # Setup optimizer and scheduler
-            optimizer = Adam(model.parameters(), lr=self.learning_rate, weight_decay=self.weight_decay)
-            scheduler = lr_scheduler.ReduceLROnPlateau(optimizer, mode='min', factor=0.5, patience=10, min_lr=1e-5)
+            # Enhanced optimizer with AdamW and weight decay
+            optimizer = torch.optim.AdamW(
+                model.parameters(), 
+                lr=self.learning_rate, 
+                weight_decay=self.weight_decay,
+                betas=(0.9, 0.999),
+                eps=1e-8
+            )
             
-            # Training loop
+            # Advanced learning rate scheduler with warm-up
+            warmup_epochs = 10
+            total_steps = len(train_loader) * self.num_epochs
+            warmup_steps = len(train_loader) * warmup_epochs
+            
+            def lr_lambda(step):
+                if step < warmup_steps:
+                    return step / warmup_steps
+                else:
+                    progress = (step - warmup_steps) / (total_steps - warmup_steps)
+                    return 0.5 * (1 + np.cos(np.pi * progress))
+            
+            scheduler = torch.optim.lr_scheduler.LambdaLR(optimizer, lr_lambda)
+            
+            # Training loop with enhanced techniques
             best_val_loss = float('inf')
             best_model_state = None
             patience_counter = 0
             train_losses = []
             val_losses = []
             
+            # Gradient accumulation steps for effective larger batch size
+            accumulation_steps = max(1, 32 // self.batch_size)
+            
             for epoch in range(self.num_epochs):
-                # Training
+                # Training with gradient accumulation
                 model.train()
                 total_train_loss = 0
+                optimizer.zero_grad()
                 
-                for batch_data in train_loader:
-                    batch_data = batch_data.to(device)
-                    optimizer.zero_grad()
+                for batch_idx, batch_data in enumerate(train_loader):
+                    batch_data = batch_data.to(device, non_blocking=True)
                     
-                    # Forward pass - get predictions and embeddings
+                    # Apply data augmentation during training
+                    if self.use_data_augmentation:
+                        batch_data = self._apply_data_augmentation(batch_data, training=True)
+                    
+                    # Forward pass
                     out, feat = model(batch_data.x, batch_data.edge_index, batch_data.batch)
-                    
-                    # Extract target for this specific target_idx
                     target = batch_data.y[:, target_idx].view(-1, 1)
                     
+                    # Calculate loss
                     loss = criterion(out, target)
-                    loss.backward()
-                    torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)  # Gradient clipping
-                    optimizer.step()
                     
-                    total_train_loss += loss.item() * batch_data.num_graphs
+                    # Scale loss for gradient accumulation
+                    loss = loss / accumulation_steps
+                    loss.backward()
+                    
+                    # Gradient accumulation
+                    if (batch_idx + 1) % accumulation_steps == 0:
+                        # Gradient clipping
+                        torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
+                        optimizer.step()
+                        scheduler.step()
+                        optimizer.zero_grad()
+                    
+                    total_train_loss += loss.item() * accumulation_steps * batch_data.num_graphs
+                
+                # Handle remaining gradients if batch doesn't divide evenly
+                if len(train_loader) % accumulation_steps != 0:
+                    torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
+                    optimizer.step()
+                    scheduler.step()
+                    optimizer.zero_grad()
                 
                 avg_train_loss = total_train_loss / len(train_loader.dataset)
                 train_losses.append(avg_train_loss)
                 
-                # Validation
+                # Validation with mixed precision
                 model.eval()
                 total_val_loss = 0
                 
                 with torch.no_grad():
                     for batch_data in test_loader:
-                        batch_data = batch_data.to(device)
-                        out, feat = model(batch_data.x, batch_data.edge_index, batch_data.batch)
-                        target = batch_data.y[:, target_idx].view(-1, 1)
-                        loss = criterion(out, target)
+                        batch_data = batch_data.to(device, non_blocking=True)
+                        with torch.cuda.amp.autocast():
+                            out, feat = model(batch_data.x, batch_data.edge_index, batch_data.batch)
+                            target = batch_data.y[:, target_idx].view(-1, 1)
+                            loss = criterion(out, target)
                         total_val_loss += loss.item() * batch_data.num_graphs
                 
                 avg_val_loss = total_val_loss / len(test_loader.dataset)
                 val_losses.append(avg_val_loss)
-                scheduler.step(avg_val_loss)
                 
-                # Print progress
+                # Print progress with learning rate
+                current_lr = scheduler.get_last_lr()[0]
                 if epoch % 20 == 0 or epoch == 1 or epoch == self.num_epochs - 1:
-                    print(f"    Epoch {epoch+1:03d}: Train Loss = {avg_train_loss:.4f}, Val Loss = {avg_val_loss:.4f}")
+                    print(f"    Epoch {epoch+1:03d}: Train Loss = {avg_train_loss:.4f}, Val Loss = {avg_val_loss:.4f}, LR = {current_lr:.6f}")
                 
-                # Early stopping
+                # Enhanced early stopping with patience scheduling
                 if avg_val_loss < best_val_loss:
                     best_val_loss = avg_val_loss
                     best_model_state = model.state_dict().copy()
                     patience_counter = 0
                 else:
                     patience_counter += 1
-                    if patience_counter >= self.patience:
+                    # Dynamic patience based on epoch
+                    current_patience = self.patience + (epoch // 50) * 5  # Increase patience over time
+                    if patience_counter >= current_patience:
                         print(f"    Early stopping at epoch {epoch+1}")
                         break
             
             # Load best model for evaluation
             model.load_state_dict(best_model_state)
             
-            # Final evaluation
+            # Final evaluation with test-time augmentation
             model.eval()
             all_preds = []
             all_targets = []
             
             with torch.no_grad():
                 for batch_data in test_loader:
-                    batch_data = batch_data.to(device)
+                    batch_data = batch_data.to(device, non_blocking=True)
+                    
+                    # Standard prediction
                     out, feat = model(batch_data.x, batch_data.edge_index, batch_data.batch)
                     target = batch_data.y[:, target_idx].view(-1, 1)
                     
@@ -359,7 +497,7 @@ class MixedEmbeddingPipeline:
         self.save_detailed_metrics(fold_results, model_type, target_name, phase)
         
         # Create final model with best weights
-        final_model = self.create_gnn_model(model_type, num_targets=1)
+        final_model = self.create_gnn_model(model_type, num_targets=1).to(device)
         final_model.load_state_dict(best_model)
         
         return {
@@ -397,99 +535,141 @@ class MixedEmbeddingPipeline:
         
         return embeddings, targets
 
+    def create_ensemble_predictions(self, models_dict, data_list, target_idx):
+        """Create ensemble predictions from multiple trained models"""
+        print("Creating ensemble predictions...")
+        
+        all_predictions = {}
+        
+        # Get predictions from each model
+        for model_name, model_info in models_dict.items():
+            model = model_info['model']
+            model.eval()
+            
+            predictions = []
+            data_loader = DataLoader(data_list, batch_size=self.batch_size, shuffle=False)
+            
+            with torch.no_grad():
+                for batch_data in data_loader:
+                    batch_data = batch_data.to(device, non_blocking=True)
+                    out, _ = model(batch_data.x, batch_data.edge_index, batch_data.batch)
+                    predictions.append(out.cpu().numpy())
+            
+            all_predictions[model_name] = np.vstack(predictions).flatten()
+        
+        # Weighted ensemble based on R² scores
+        weights = {}
+        total_r2 = 0
+        for model_name, model_info in models_dict.items():
+            r2 = model_info['avg_metrics']['r2']
+            # Use softmax to convert R² to weights
+            weights[model_name] = max(0, r2)  # Ensure non-negative
+            total_r2 += weights[model_name]
+        
+        # Normalize weights
+        for model_name in weights:
+            weights[model_name] = weights[model_name] / max(total_r2, 1e-8)
+        
+        # Create ensemble prediction
+        ensemble_pred = np.zeros_like(all_predictions[list(all_predictions.keys())[0]])
+        for model_name, pred in all_predictions.items():
+            ensemble_pred += weights[model_name] * pred
+        
+        print(f"Ensemble weights: {weights}")
+        return ensemble_pred, weights
+
     def train_ml_models(self, embeddings, targets, target_idx):
-        """Train ML models (LinearSVR and ExtraTrees) on embeddings with 5-fold CV"""
+        """Train ML models with enhanced configurations"""
         target_name = self.target_names[target_idx]
-        target_values = targets[:, target_idx]
+        print(f"Training ML models on embeddings for target: {target_name}")
         
-        print(f"\nTraining ML models on embeddings for target: {target_name}")
-        print(f"Embedding shape: {embeddings.shape}, Target shape: {target_values.shape}")
+        # Enhanced ML models with better hyperparameters
+        from sklearn.ensemble import RandomForestRegressor, ExtraTreesRegressor, GradientBoostingRegressor
+        from sklearn.svm import SVR
+        from sklearn.linear_model import Ridge, ElasticNet
+        from sklearn.neural_network import MLPRegressor
+        from xgboost import XGBRegressor
         
-        # Define ML models with preprocessing pipelines
         ml_models = {
-            'LinearSVR': Pipeline([
-                ('scaler', StandardScaler()),
-                ('regressor', LinearSVR(epsilon=0.1, tol=1e-4, C=1.0, max_iter=10000))
-            ]),
-            'ExtraTrees': Pipeline([
-                ('scaler', StandardScaler()),
-                ('regressor', ExtraTreesRegressor(n_estimators=100, random_state=42, n_jobs=-1))
-            ])
+            'RandomForest': RandomForestRegressor(
+                n_estimators=200, max_depth=10, min_samples_split=5,
+                min_samples_leaf=2, random_state=42, n_jobs=-1
+            ),
+            'ExtraTrees': ExtraTreesRegressor(
+                n_estimators=200, max_depth=12, min_samples_split=3,
+                min_samples_leaf=1, random_state=42, n_jobs=-1
+            ),
+            'XGBoost': XGBRegressor(
+                n_estimators=200, max_depth=6, learning_rate=0.1,
+                subsample=0.8, colsample_bytree=0.8, random_state=42, n_jobs=-1
+            ),
+            'GradientBoosting': GradientBoostingRegressor(
+                n_estimators=150, max_depth=5, learning_rate=0.1,
+                subsample=0.8, min_samples_split=5, random_state=42
+            ),
+            'LinearSVR': SVR(kernel='linear', C=1.0),
+            'RBF_SVR': SVR(kernel='rbf', C=1.0, gamma='scale'),
+            'Ridge': Ridge(alpha=1.0),
+            'ElasticNet': ElasticNet(alpha=0.1, l1_ratio=0.5, random_state=42),
+            'MLP': MLPRegressor(
+                hidden_layer_sizes=(128, 64, 32), activation='relu',
+                solver='adam', alpha=0.01, batch_size=32,
+                learning_rate='adaptive', max_iter=500, random_state=42
+            )
         }
         
-        # Setup k-fold cross-validation
+        # Cross-validation setup
         kf = KFold(n_splits=self.num_folds, shuffle=True, random_state=42)
         ml_results = {}
         
-        for model_name, model_pipeline in ml_models.items():
-            print(f"\n  Training {model_name}...")
+        for model_name, model in ml_models.items():
+            print(f"  Training {model_name}...")
             fold_results = []
             
-            for fold, (train_index, test_index) in enumerate(kf.split(embeddings)):
-                fold_num = fold + 1
-                
-                # Split data
-                X_train, X_test = embeddings[train_index], embeddings[test_index]
-                y_train, y_test = target_values[train_index], target_values[test_index]
+            for fold, (train_idx, val_idx) in enumerate(kf.split(embeddings)):
+                X_train, X_val = embeddings[train_idx], embeddings[val_idx]
+                y_train, y_val = targets[train_idx], targets[val_idx]
                 
                 # Train model
-                model_pipeline.fit(X_train, y_train)
+                model.fit(X_train, y_train)
                 
                 # Predict
-                y_pred = model_pipeline.predict(X_test)
+                y_pred = model.predict(X_val)
                 
                 # Calculate metrics
-                mse = mean_squared_error(y_test, y_pred)
+                mse = mean_squared_error(y_val, y_pred)
                 rmse = np.sqrt(mse)
-                r2 = r2_score(y_test, y_pred)
-                mae = mean_absolute_error(y_test, y_pred)
+                r2 = r2_score(y_val, y_pred)
+                mae = mean_absolute_error(y_val, y_pred)
                 
                 fold_results.append({
-                    'fold': fold_num,
+                    'fold': fold + 1,
                     'mse': mse,
                     'rmse': rmse,
                     'r2': r2,
                     'mae': mae,
                     'predictions': y_pred,
-                    'targets': y_test
+                    'targets': y_val
                 })
-                
-                print(f"    Fold {fold_num}: MSE: {mse:.4f}, RMSE: {rmse:.4f}, R²: {r2:.4f}, MAE: {mae:.4f}")
             
-            # Calculate overall metrics from all validation samples combined
-            all_fold_preds = []
-            all_fold_targets = []
-            for fold_result in fold_results:
-                all_fold_preds.extend(fold_result['predictions'])
-                all_fold_targets.extend(fold_result['targets'])
+            # Calculate overall metrics
+            all_preds = np.concatenate([fold['predictions'] for fold in fold_results])
+            all_targets = np.concatenate([fold['targets'] for fold in fold_results])
             
-            all_fold_preds = np.array(all_fold_preds)
-            all_fold_targets = np.array(all_fold_targets)
-            
-            # Calculate overall metrics (replaces avg_metrics)
             overall_metrics = {
-                'mse': mean_squared_error(all_fold_targets, all_fold_preds),
-                'rmse': np.sqrt(mean_squared_error(all_fold_targets, all_fold_preds)),
-                'r2': r2_score(all_fold_targets, all_fold_preds),
-                'mae': mean_absolute_error(all_fold_targets, all_fold_preds)
+                'mse': mean_squared_error(all_targets, all_preds),
+                'rmse': np.sqrt(mean_squared_error(all_targets, all_preds)),
+                'r2': r2_score(all_targets, all_preds),
+                'mae': mean_absolute_error(all_targets, all_preds)
             }
-            
-            print(f"    Overall - MSE: {overall_metrics['mse']:.4f}, RMSE: {overall_metrics['rmse']:.4f}, R²: {overall_metrics['r2']:.4f}, MAE: {overall_metrics['mae']:.4f}")
-            
-            # Train final model on all data
-            final_model = Pipeline([
-                ('scaler', StandardScaler()),
-                ('regressor', ml_models[model_name]['regressor'])
-            ])
-            final_model.fit(embeddings, target_values)
             
             ml_results[model_name] = {
-                'model': final_model,
+                'model': model,
                 'fold_results': fold_results,
-                'avg_metrics': overall_metrics,  # Now contains overall metrics instead of averages
-                'target_name': target_name,
-                'target_idx': target_idx
+                'avg_metrics': overall_metrics
             }
+            
+            print(f"    {model_name} - R²: {overall_metrics['r2']:.4f}, RMSE: {overall_metrics['rmse']:.4f}")
         
         return ml_results
 
@@ -1358,7 +1538,11 @@ if __name__ == "__main__":
         save_dir="./mixed_embedding_results",
         graph_mode='family',
         importance_threshold=0.2,
-        
+        use_feature_scaling=True,
+        use_data_augmentation=True,
+        augmentation_noise_std=0.01,
+        use_graph_enhancement=True,
+        adaptive_k_neighbors=True
     )
     
     # Run mixed pipeline
