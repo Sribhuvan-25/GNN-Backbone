@@ -493,6 +493,18 @@ class DomainExpertCasesPipeline(MixedEmbeddingPipeline):
         with open(f"{self.save_dir}/hyperparameters/{model_type}_{phase}_best_hyperparameters.pkl", 'wb') as f:
             pickle.dump(best_hyperparam_summary, f)
         
+        # Also save as CSV for easier reporting
+        best_hp_csv = pd.DataFrame([{
+            'model_type': model_type,
+            'phase': phase,
+            'best_hidden_dim': best_params['hidden_dim'],
+            'best_dropout_rate': best_params['dropout_rate'],
+            'best_r2': best_r2,
+            'best_mse': -best_neg_mse,
+            'case_type': self.case_type
+        }])
+        best_hp_csv.to_csv(f"{self.save_dir}/hyperparameters/{model_type}_{phase}_best_hyperparameters.csv", index=False)
+        
         # Restore original settings
         self.config.hidden_dim = orig_hidden_dim
         self.config.dropout_rate = orig_dropout_rate
@@ -1609,7 +1621,7 @@ def run_all_cases(data_path="../Data/New_data.csv"):
     """Run all domain expert cases with proper configuration"""
     print("Running all domain expert cases...")
     
-    cases = ['case1'] # 'case2', 'case3', 'case4', 'case5'
+    cases = ['case2']
     all_results = {}
     
     for case in cases:
@@ -1637,7 +1649,7 @@ def run_all_cases(data_path="../Data/New_data.csv"):
                 data_path=data_path,
                 case_type=case,
                 config=test_config,
-                save_dir=f'./domain_expert_results/{case}_h2_hydrogenotrophic_only',
+                save_dir=f'./domain_expert_results/{case}',
                 importance_threshold=0.2,
                 use_fast_correlation=False,
                 graph_mode='family',
@@ -1663,8 +1675,108 @@ def run_all_cases(data_path="../Data/New_data.csv"):
     with open('./domain_expert_results/all_cases_results.pkl', 'wb') as f:
         pickle.dump(all_results, f)
     
+    # Create overall hyperparameter summary
+    create_hyperparameter_summary()
+    
     print("All cases completed!")
     print("Domain expert cases pipeline completed!")
+
+
+def create_hyperparameter_summary():
+    """Create a summary CSV of all hyperparameter tuning results"""
+    print("Creating hyperparameter summary...")
+    
+    import glob
+    import os
+    
+    # Find all hyperparameter CSV files
+    hp_files = glob.glob("./domain_expert_results/*/hyperparameters/*_hyperparameter_tuning.csv")
+    
+    all_hp_results = []
+    
+    for hp_file in hp_files:
+        try:
+            # Extract case and model info from filename
+            parts = hp_file.split('/')
+            case_part = parts[2]  # domain_expert_results/case1_h2_hydrogenotrophic_only/...
+            model_phase = parts[-1].replace('_hyperparameter_tuning.csv', '')
+            
+            # Parse case type
+            if 'case1' in case_part:
+                case_type = 'case1'
+                case_description = 'H2-km with hydrogenotrophic features only'
+            elif 'case2' in case_part:
+                case_type = 'case2'
+                case_description = 'ACE-km with acetoclastic features only'
+            elif 'case3' in case_part:
+                case_type = 'case3'
+                case_description = 'ACE-km with all feature groups'
+            elif 'case4' in case_part:
+                case_type = 'case4'
+                case_description = 'ACE-km conditional (acetoclastic vs all groups)'
+            elif 'case5' in case_part:
+                case_type = 'case5'
+                case_description = 'H2-km conditional (hydrogenotrophic vs all groups)'
+            else:
+                case_type = 'unknown'
+                case_description = 'unknown'
+            
+            # Load hyperparameter results
+            hp_df = pd.read_csv(hp_file)
+            
+            # Add metadata
+            hp_df['case_type'] = case_type
+            hp_df['case_description'] = case_description
+            hp_df['model_phase'] = model_phase
+            
+            all_hp_results.append(hp_df)
+            
+        except Exception as e:
+            print(f"Error processing {hp_file}: {e}")
+    
+    if all_hp_results:
+        # Combine all results
+        combined_hp_df = pd.concat(all_hp_results, ignore_index=True)
+        
+        # Save combined hyperparameter results
+        combined_hp_df.to_csv('./domain_expert_results/all_hyperparameter_results.csv', index=False)
+        
+        # Create summary of best hyperparameters for each case/model
+        best_hp_summary = []
+        
+        for case_type in combined_hp_df['case_type'].unique():
+            case_data = combined_hp_df[combined_hp_df['case_type'] == case_type]
+            
+            for model_phase in case_data['model_phase'].unique():
+                model_data = case_data[case_data['model_phase'] == model_phase]
+                
+                # Find best hyperparameters (highest R²)
+                best_idx = model_data['avg_r2'].idxmax()
+                best_row = model_data.loc[best_idx]
+                
+                best_hp_summary.append({
+                    'case_type': case_type,
+                    'case_description': best_row['case_description'],
+                    'model_phase': model_phase,
+                    'best_hidden_dim': best_row['hidden_dim'],
+                    'best_dropout_rate': best_row['dropout_rate'],
+                    'best_r2': best_row['avg_r2'],
+                    'best_mse': best_row['avg_mse'],
+                    'std_r2': best_row['std_r2'],
+                    'std_mse': best_row['std_mse']
+                })
+        
+        # Save best hyperparameters summary
+        best_hp_df = pd.DataFrame(best_hp_summary)
+        best_hp_df.to_csv('./domain_expert_results/best_hyperparameters_summary.csv', index=False)
+        
+        print(f"Hyperparameter summary saved:")
+        print(f"  - All results: ./domain_expert_results/all_hyperparameter_results.csv")
+        print(f"  - Best hyperparameters: ./domain_expert_results/best_hyperparameters_summary.csv")
+        print(f"  - Total hyperparameter combinations tested: {len(combined_hp_df)}")
+        print(f"  - Cases with results: {len(best_hp_df)}")
+    else:
+        print("No hyperparameter files found!")
 
 
 if __name__ == "__main__":
