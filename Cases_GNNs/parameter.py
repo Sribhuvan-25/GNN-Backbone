@@ -1442,8 +1442,8 @@ class DomainExpertCasesPipeline(MixedEmbeddingPipeline):
         print(f"Summary: {len(summary_data)} model results across both subsets")
 
     def plot_results(self, gnn_results, ml_results, target_idx):
-        """Use parent class plotting method for consistent results"""
-        # Call parent class method
+        """Use parent class plotting method"""
+        # Simply call the parent class plotting method
         super().plot_results(gnn_results, ml_results, target_idx)
 
     def _train_single_fold(self, model_type, target_idx, train_data, val_data):
