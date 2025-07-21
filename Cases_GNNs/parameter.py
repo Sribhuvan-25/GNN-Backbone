@@ -37,9 +37,55 @@ from GNNmodelsRegression import (
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 print(f"Using device: {device}")
 
+# Additional device safety checks
+if torch.cuda.is_available():
+    print(f"CUDA device: {torch.cuda.get_device_name()}")
+    print(f"CUDA memory allocated: {torch.cuda.memory_allocated() / 1024**2:.2f} MB")
+    # Clear cache to start fresh
+    torch.cuda.empty_cache()
+else:
+    print("CUDA not available, using CPU")
+
 # Reproducibility
 torch.manual_seed(42)
 np.random.seed(42)
+
+def ensure_data_on_device(data_list, target_device):
+    """Ensure all tensors in data_list are on the specified device"""
+    if not data_list:
+        return data_list
+    
+    device_moved_count = 0
+    for i, data in enumerate(data_list):
+        if hasattr(data, 'x') and data.x is not None:
+            if data.x.device != target_device:
+                data.x = data.x.to(target_device)
+                device_moved_count += 1
+        if hasattr(data, 'edge_index') and data.edge_index is not None:
+            if data.edge_index.device != target_device:
+                data.edge_index = data.edge_index.to(target_device)
+                device_moved_count += 1
+        if hasattr(data, 'y') and data.y is not None:
+            if data.y.device != target_device:
+                data.y = data.y.to(target_device)
+                device_moved_count += 1
+        if hasattr(data, 'batch') and data.batch is not None:
+            if data.batch.device != target_device:
+                data.batch = data.batch.to(target_device)
+                device_moved_count += 1
+        # Handle any other tensor attributes that might exist
+        for attr_name in dir(data):
+            if not attr_name.startswith('_'):
+                attr = getattr(data, attr_name)
+                if isinstance(attr, torch.Tensor):
+                    if attr.device != target_device:
+                        setattr(data, attr_name, attr.to(target_device))
+                        device_moved_count += 1
+    
+    if device_moved_count > 0:
+        print(f"  Moved {device_moved_count} tensors to {target_device}")
+    
+    return data_list
 
 @dataclass
 class PipelineConfig:
@@ -365,6 +411,9 @@ class DomainExpertCasesPipeline(MixedEmbeddingPipeline):
         print(f"Dataset size: {len(self.dataset.data_list)} graphs")
         print(f"Number of features: {len(self.dataset.node_feature_names)}")
         print(f"Feature names: {self.dataset.node_feature_names}")
+        
+        # Ensure all dataset data is on the correct device
+        self.dataset.data_list = ensure_data_on_device(self.dataset.data_list, device)
 
     def _tune_gnn_hyperparams(self, model_type, target_idx, data_list, phase="knn"):
         """
@@ -423,6 +472,10 @@ class DomainExpertCasesPipeline(MixedEmbeddingPipeline):
                         # Split data for this fold
                         train_data = [data_list[i] for i in train_idx]
                         val_data = [data_list[i] for i in val_idx]
+                        
+                        # Ensure split data is on the correct device
+                        train_data = ensure_data_on_device(train_data, device)
+                        val_data = ensure_data_on_device(val_data, device)
                         
                         # Train model on train data using our overridden method
                         fold_result = self._train_single_fold(model_type, target_idx, train_data, val_data)
@@ -513,6 +566,9 @@ class DomainExpertCasesPipeline(MixedEmbeddingPipeline):
 
     def train_gnn_model(self, model_type, target_idx, data_list, phase="knn"):
         """Train GNN with nested CV hyperparameter tuning"""
+        # Ensure data is on the correct device
+        data_list = ensure_data_on_device(data_list, device)
+        
         # Inner CV for hyperparameter tuning
         best_params = self._tune_gnn_hyperparams(model_type, target_idx, data_list, phase)
         
@@ -691,6 +747,9 @@ class DomainExpertCasesPipeline(MixedEmbeddingPipeline):
         # This is the key fix - don't create new datasets, just subset the data
         subset_data_list = [self.dataset.data_list[i] for i in subset_indices]
         
+        # Ensure all subset data is on the same device
+        subset_data_list = ensure_data_on_device(subset_data_list, device)
+        
         # DON'T create a new dataset - just use the original one with subset data
         # This ensures consistent feature dimensions across all subcases
         original_data_list = self.dataset.data_list
@@ -783,10 +842,13 @@ class DomainExpertCasesPipeline(MixedEmbeddingPipeline):
                     model=best_gnn_model,
                     target_idx=target_idx
                 )
+                # Ensure explainer data is on the correct device
+                explainer_data = ensure_data_on_device(explainer_data, device)
             except Exception as e:
                 print(f"ERROR: Failed to create explainer graph: {e}")
                 # Fallback to using original data
                 explainer_data = self.dataset.data_list
+                explainer_data = ensure_data_on_device(explainer_data, device)
                 print("Using original data as fallback")
             
             # Step 3: Train ALL GNN models on explainer-sparsified graph (using parent class method)
@@ -837,6 +899,8 @@ class DomainExpertCasesPipeline(MixedEmbeddingPipeline):
                     break
             
             try:
+                # Ensure explainer data is on the correct device for embedding extraction
+                explainer_data = ensure_data_on_device(explainer_data, device)
                 embeddings, targets = self.extract_embeddings(best_explainer_model, explainer_data)
                 
                 # Memory cleanup
@@ -1364,6 +1428,9 @@ class DomainExpertCasesPipeline(MixedEmbeddingPipeline):
         # Create subset data from the ORIGINAL dataset to maintain consistent dimensions
         subset_data_list = [self.dataset.data_list[i] for i in subset_indices]
         
+        # Ensure all subset data is on the same device
+        subset_data_list = ensure_data_on_device(subset_data_list, device)
+        
         # DON'T create a new dataset - just use the original one with subset data
         # This ensures consistent feature dimensions across all subcases
         original_data_list = self.dataset.data_list
@@ -1472,6 +1539,10 @@ class DomainExpertCasesPipeline(MixedEmbeddingPipeline):
             dict: Training results with metrics
         """
         try:
+            # Ensure all data is on the same device
+            train_data = ensure_data_on_device(train_data, device)
+            val_data = ensure_data_on_device(val_data, device)
+            
             # Create data loaders
             train_loader = DataLoader(train_data, batch_size=self.config.batch_size, shuffle=True)
             val_loader = DataLoader(val_data, batch_size=self.config.batch_size, shuffle=False)
