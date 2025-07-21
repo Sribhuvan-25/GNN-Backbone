@@ -74,13 +74,14 @@ def ensure_data_on_device(data_list, target_device):
                 data.batch = data.batch.to(target_device)
                 device_moved_count += 1
         # Handle any other tensor attributes that might exist
-        for attr_name in dir(data):
-            if not attr_name.startswith('_'):
+        # Only check attributes that are likely to be tensors
+        tensor_attrs = ['pos', 'face', 'normal', 'edge_attr', 'edge_weight']
+        for attr_name in tensor_attrs:
+            if hasattr(data, attr_name):
                 attr = getattr(data, attr_name)
-                if isinstance(attr, torch.Tensor):
-                    if attr.device != target_device:
-                        setattr(data, attr_name, attr.to(target_device))
-                        device_moved_count += 1
+                if isinstance(attr, torch.Tensor) and attr.device != target_device:
+                    setattr(data, attr_name, attr.to(target_device))
+                    device_moved_count += 1
     
     if device_moved_count > 0:
         print(f"  Moved {device_moved_count} tensors to {target_device}")
