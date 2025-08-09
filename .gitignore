@@ -83,4 +83,9 @@ flow.md
 CLAUDE.md
 
 # Other directories to exclude
-gnn_backbone/
+.claude/
+adaptive_gnn
+Cases_GNNs/
+Data/
+Given_Code/
+Misc/

@@ -34,13 +34,13 @@ except ImportError:
     LIGHTGBM_AVAILABLE = False
     print("Warning: LightGBM not available. Install with: pip install lightgbm")
 
-# Import dataset and explainer modules (now from same directory)
-from dataset_regression import MicrobialGNNDataset
-from explainer_regression import GNNExplainerRegression
-from pipeline_explainer import create_explainer_sparsified_graph
+# Import dataset and explainer modules
+from datasets.dataset_regression import MicrobialGNNDataset
+from explainers.explainer_regression import GNNExplainerRegression
+from explainers.pipeline_explainer import create_explainer_sparsified_graph
 
-# Import the plus models that return embeddings (now from same directory)
-from GNNmodelsRegression import (
+# Import the plus models that return embeddings
+from models.GNNmodelsRegression import (
     simple_GCN_res_plus_regression,
     simple_RGGC_plus_regression,
     simple_GAT_regression,

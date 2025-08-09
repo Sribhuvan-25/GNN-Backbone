@@ -2,7 +2,7 @@ import torch
 import numpy as np
 from scipy.stats import pearsonr
 from torch_geometric.data import Data
-from explainer_regression import GNNExplainerRegression
+from explainers.explainer_regression import GNNExplainerRegression
 
 # Set device
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
