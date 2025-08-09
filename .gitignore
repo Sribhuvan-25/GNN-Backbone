@@ -17,11 +17,25 @@ Data/
 *.xlsx
 *.xls
 
-# Result directories
-Given_Code/*results*/
-Given_Code/*_results/
-Given_Code/graph_visualizations/
+# Result directories - comprehensive patterns
+*results*/
+*_results/
+*results/
+domain_expert_results/
+mixed_embedding_results/
+mixed_embedding_results-*/
+methane_results/
+methane_results_v2/
 gat_test_results/
+graph_visualizations/
+
+# Generated output directories
+embeddings/
+plots/
+graphs/
+models/
+explanations/
+Grid_Search/
 
 # Model files
 *.pt
@@ -61,5 +75,12 @@ Thumbs.db
 env/
 venv/
 
-# Other directories
+# Temporary files
+*.tmp
+*.temp
+fix_*.py
+flow.md
+CLAUDE.md
+
+# Other directories to exclude
 gnn_backbone/

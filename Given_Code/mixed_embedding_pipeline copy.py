@@ -44,6 +44,7 @@ from GNNmodelsRegression import (
     simple_GCN_res_plus_regression,
     simple_RGGC_plus_regression,
     simple_GAT_regression,
+    GaussianNLLLoss
 )
 
 # Set device
@@ -160,17 +161,6 @@ class MixedEmbeddingPipeline:
         self.target_names = self.dataset.target_cols
         print(f"Target variables: {self.target_names}")
 
-    def extract_mean_value(self, metric_value):
-        """Extract mean value from mean ± std format or return the value directly"""
-        if isinstance(metric_value, str) and "±" in metric_value:
-            # Extract mean from "mean ± std" format
-            return float(metric_value.split("±")[0].strip())
-        elif isinstance(metric_value, dict) and "mean" in metric_value:
-            # Extract from dict with mean/std keys
-            return metric_value["mean"]
-        else:
-            # Return the value directly if it is already a number
-            return float(metric_value)
     def create_gnn_model(self, model_type, num_targets=1):
         """Create a GNN plus model that returns embeddings"""
         if model_type == 'gcn':
@@ -376,29 +366,26 @@ class MixedEmbeddingPipeline:
                 best_model = model.state_dict().copy()
             
             print(f"    MSE: {mse:.4f}, RMSE: {rmse:.4f}, R²: {r2:.4f}, MAE: {mae:.4f}")
-        # Calculate mean ± std metrics across all folds
-        mse_values = [fold["mse"] for fold in fold_results]
-        rmse_values = [fold["rmse"] for fold in fold_results]
-        r2_values = [fold["r2"] for fold in fold_results]
-        mae_values = [fold["mae"] for fold in fold_results]
         
+        # Calculate overall metrics from all validation samples combined
+        all_fold_preds = []
+        all_fold_targets = []
+        for fold_result in fold_results:
+            all_fold_preds.extend(fold_result['predictions'])
+            all_fold_targets.extend(fold_result['targets'])
+        
+        all_fold_preds = np.array(all_fold_preds)
+        all_fold_targets = np.array(all_fold_targets)
+        
+        # Calculate overall metrics (replaces avg_metrics)
         overall_metrics = {
-            "mse": f"{np.mean(mse_values):.4f} ± {np.std(mse_values):.4f}",
-            "rmse": f"{np.mean(rmse_values):.4f} ± {np.std(rmse_values):.4f}",
-            "r2": f"{np.mean(r2_values):.4f} ± {np.std(r2_values):.4f}",
-            "mae": f"{np.mean(mae_values):.4f} ± {np.std(mae_values):.4f}",
-            "mse_mean": np.mean(mse_values),
-            "rmse_mean": np.mean(rmse_values),
-            "r2_mean": np.mean(r2_values),
-            "mae_mean": np.mean(mae_values),
-            "mse_std": np.std(mse_values),
-            "rmse_std": np.std(rmse_values),
-            "r2_std": np.std(r2_values),
-            "mae_std": np.std(mae_values)
+            'mse': mean_squared_error(all_fold_targets, all_fold_preds),
+            'rmse': np.sqrt(mean_squared_error(all_fold_targets, all_fold_preds)),
+            'r2': r2_score(all_fold_targets, all_fold_preds),
+            'mae': mean_absolute_error(all_fold_targets, all_fold_preds)
         }
         
-        
-        print(f"  Overall - MSE: {overall_metrics['mse']}, RMSE: {overall_metrics['rmse']}, R²: {overall_metrics['r2']}, MAE: {overall_metrics['mae']}")
+        print(f"  Overall - MSE: {overall_metrics['mse']:.4f}, RMSE: {overall_metrics['rmse']:.4f}, R²: {overall_metrics['r2']:.4f}, MAE: {overall_metrics['mae']:.4f}")
         
         # Create overall plots (only overall, no individual fold plots)
         self.plot_overall_gnn_results(fold_results, model_type, target_name, phase)
@@ -598,27 +585,24 @@ class MixedEmbeddingPipeline:
             
             print(f"    MSE: {mse:.4f}, RMSE: {rmse:.4f}, R²: {r2:.4f}, MAE: {mae:.4f}")
         
-        # Calculate mean ± std metrics across all folds
-        mse_values = [fold["mse"] for fold in fold_results]
-        rmse_values = [fold["rmse"] for fold in fold_results]
-        r2_values = [fold["r2"] for fold in fold_results]
-        mae_values = [fold["mae"] for fold in fold_results]
+        # Calculate overall metrics (same as before)
+        all_fold_preds = []
+        all_fold_targets = []
+        for fold_result in fold_results:
+            all_fold_preds.extend(fold_result['predictions'])
+            all_fold_targets.extend(fold_result['targets'])
+        
+        all_fold_preds = np.array(all_fold_preds)
+        all_fold_targets = np.array(all_fold_targets)
         
         overall_metrics = {
-            "mse": f"{np.mean(mse_values):.4f} ± {np.std(mse_values):.4f}",
-            "rmse": f"{np.mean(rmse_values):.4f} ± {np.std(rmse_values):.4f}",
-            "r2": f"{np.mean(r2_values):.4f} ± {np.std(r2_values):.4f}",
-            "mae": f"{np.mean(mae_values):.4f} ± {np.std(mae_values):.4f}",
-            "mse_mean": np.mean(mse_values),
-            "rmse_mean": np.mean(rmse_values),
-            "r2_mean": np.mean(r2_values),
-            "mae_mean": np.mean(mae_values),
-            "mse_std": np.std(mse_values),
-            "rmse_std": np.std(rmse_values),
-            "r2_std": np.std(r2_values),
-            "mae_std": np.std(mae_values)
+            'mse': mean_squared_error(all_fold_targets, all_fold_preds),
+            'rmse': np.sqrt(mean_squared_error(all_fold_targets, all_fold_preds)),
+            'r2': r2_score(all_fold_targets, all_fold_preds),
+            'mae': mean_absolute_error(all_fold_targets, all_fold_preds)
         }
         
+        print(f"  Enhanced Overall - MSE: {overall_metrics['mse']:.4f}, RMSE: {overall_metrics['rmse']:.4f}, R²: {overall_metrics['r2']:.4f}, MAE: {overall_metrics['mae']:.4f}")
         
         # Create plots and save results (same as before)
         self.plot_overall_gnn_results(fold_results, model_type, target_name, phase)
@@ -765,27 +749,16 @@ class MixedEmbeddingPipeline:
             
             all_fold_preds = np.array(all_fold_preds)
             all_fold_targets = np.array(all_fold_targets)
-            # Calculate mean ± std metrics across all folds
-            mse_values = [fold["mse"] for fold in fold_results]
-            rmse_values = [fold["rmse"] for fold in fold_results]
-            r2_values = [fold["r2"] for fold in fold_results]
-            mae_values = [fold["mae"] for fold in fold_results]
             
+            # Calculate overall metrics (replaces avg_metrics)
             overall_metrics = {
-                "mse": f"{np.mean(mse_values):.4f} ± {np.std(mse_values):.4f}",
-                "rmse": f"{np.mean(rmse_values):.4f} ± {np.std(rmse_values):.4f}",
-                "r2": f"{np.mean(r2_values):.4f} ± {np.std(r2_values):.4f}",
-                "mae": f"{np.mean(mae_values):.4f} ± {np.std(mae_values):.4f}",
-                "mse_mean": np.mean(mse_values),
-                "rmse_mean": np.mean(rmse_values),
-                "r2_mean": np.mean(r2_values),
-                "mae_mean": np.mean(mae_values),
-                "mse_std": np.std(mse_values),
-                "rmse_std": np.std(rmse_values),
-                "r2_std": np.std(r2_values),
-                "mae_std": np.std(mae_values)
+                'mse': mean_squared_error(all_fold_targets, all_fold_preds),
+                'rmse': np.sqrt(mean_squared_error(all_fold_targets, all_fold_preds)),
+                'r2': r2_score(all_fold_targets, all_fold_preds),
+                'mae': mean_absolute_error(all_fold_targets, all_fold_preds)
             }
             
+            print(f"    Overall - MSE: {overall_metrics['mse']:.4f}, RMSE: {overall_metrics['rmse']:.4f}, R²: {overall_metrics['r2']:.4f}, MAE: {overall_metrics['mae']:.4f}")
             
             # Train final model on all data
             final_model = Pipeline([
@@ -832,8 +805,8 @@ class MixedEmbeddingPipeline:
         # Plot 1: GNN Model Comparison (R² scores)
         ax1 = axes[0, 0]
         gnn_models = list(gnn_results.keys())
-        gnn_r2_scores = [self.extract_mean_value(gnn_results[model]["avg_metrics"]["r2"]) for model in gnn_models]
-        gnn_mse_scores = [self.extract_mean_value(gnn_results[model]["avg_metrics"]["mse"]) for model in gnn_models]
+        gnn_r2_scores = [gnn_results[model]['avg_metrics']['r2'] for model in gnn_models]
+        gnn_mse_scores = [gnn_results[model]['avg_metrics']['mse'] for model in gnn_models]
         
         bars1 = ax1.bar(gnn_models, gnn_r2_scores, color=['skyblue', 'lightcoral', 'lightgreen'])
         ax1.set_title('GNN Models R² Comparison')
@@ -848,8 +821,8 @@ class MixedEmbeddingPipeline:
         # Plot 2: ML Model Comparison (R² scores)
         ax2 = axes[0, 1]
         ml_models = list(ml_results.keys())
-        ml_r2_scores = [self.extract_mean_value(ml_results[model]["avg_metrics"]["r2"]) for model in ml_models]
-        ml_mse_scores = [self.extract_mean_value(ml_results[model]["avg_metrics"]["mse"]) for model in ml_models]
+        ml_r2_scores = [ml_results[model]['avg_metrics']['r2'] for model in ml_models]
+        ml_mse_scores = [ml_results[model]['avg_metrics']['mse'] for model in ml_models]
         
         bars2 = ax2.bar(ml_models, ml_r2_scores, color=['orange', 'purple'])
         ax2.set_title('ML Models on Embeddings R² Comparison')
@@ -882,8 +855,8 @@ class MixedEmbeddingPipeline:
         
         # Plot 4: RMSE Comparison
         ax4 = axes[1, 0]
-        gnn_rmse_scores = [self.extract_mean_value(gnn_results[model]["avg_metrics"]["rmse"]) for model in gnn_models]
-        ml_rmse_scores = [self.extract_mean_value(ml_results[model]["avg_metrics"]["rmse"]) for model in ml_models]
+        gnn_rmse_scores = [gnn_results[model]['avg_metrics']['rmse'] for model in gnn_models]
+        ml_rmse_scores = [ml_results[model]['avg_metrics']['rmse'] for model in ml_models]
         all_rmse_scores = gnn_rmse_scores + ml_rmse_scores
         
         bars4 = ax4.bar(range(len(all_models)), all_rmse_scores, color=[colors[i % len(colors)] for i in range(len(all_models))])
@@ -978,10 +951,10 @@ class MixedEmbeddingPipeline:
                             'phase': phase,
                             'model_type': model_type,
                             'model_category': 'GNN',
-                            'mse': self.extract_mean_value(results["avg_metrics"]["mse"]),
-                            'rmse': self.extract_mean_value(results["avg_metrics"]["rmse"]),
-                            'r2': self.extract_mean_value(results["avg_metrics"]["r2"]),
-                            'mae': self.extract_mean_value(results["avg_metrics"]["mae"])
+                            'mse': results['avg_metrics']['mse'],
+                            'rmse': results['avg_metrics']['rmse'],
+                            'r2': results['avg_metrics']['r2'],
+                            'mae': results['avg_metrics']['mae']
                         })
             
             # ML results
@@ -992,10 +965,10 @@ class MixedEmbeddingPipeline:
                         'phase': 'embeddings',
                         'model_type': model_type,
                         'model_category': 'ML',
-                        'mse': self.extract_mean_value(results["avg_metrics"]["mse"]),
-                        'rmse': self.extract_mean_value(results["avg_metrics"]["rmse"]),
-                        'r2': self.extract_mean_value(results["avg_metrics"]["r2"]),
-                        'mae': self.extract_mean_value(results["avg_metrics"]["mae"])
+                        'mse': results['avg_metrics']['mse'],
+                        'rmse': results['avg_metrics']['rmse'],
+                        'r2': results['avg_metrics']['r2'],
+                        'mae': results['avg_metrics']['mae']
                     })
         
         summary_df = pd.DataFrame(summary_data)
@@ -1049,8 +1022,8 @@ class MixedEmbeddingPipeline:
             best_gnn_type = None
             
             for model_type, results in knn_results.items():
-                if self.extract_mean_value(results["avg_metrics"]["r2"]) > best_gnn_r2:
-                    best_gnn_r2 = self.extract_mean_value(results["avg_metrics"]["r2"])
+                if results['avg_metrics']['r2'] > best_gnn_r2:
+                    best_gnn_r2 = results['avg_metrics']['r2']
                     best_gnn_model = results['model']
                     best_gnn_type = model_type
             
@@ -1089,8 +1062,8 @@ class MixedEmbeddingPipeline:
             best_explainer_type = None
             
             for model_type, results in explainer_results.items():
-                if self.extract_mean_value(results["avg_metrics"]["r2"]) > best_explainer_r2:
-                    best_explainer_r2 = self.extract_mean_value(results["avg_metrics"]["r2"])
+                if results['avg_metrics']['r2'] > best_explainer_r2:
+                    best_explainer_r2 = results['avg_metrics']['r2']
                     best_explainer_model = results['model']
                     best_explainer_type = model_type
             
@@ -1149,9 +1122,9 @@ class MixedEmbeddingPipeline:
         
         # Visualize graphs (KNN and explainer)
         print(f"\n{'='*60}")
-        print("SKIPPING GRAPH VISUALIZATIONS (NetworkX compatibility issue)")
+        print("CREATING GRAPH VISUALIZATIONS")
         print(f"{'='*60}")
-        # self.visualize_graphs()  # Commented out to skip visualization
+        self.visualize_graphs()
         
         # Create comprehensive comparison plots
         self.create_comprehensive_comparison_plots(all_results)
@@ -1184,15 +1157,15 @@ class MixedEmbeddingPipeline:
             for phase in ['knn', 'explainer']:
                 if phase in target_results:
                     for model_type, results in target_results[phase].items():
-                        if self.extract_mean_value(results["avg_metrics"]["r2"]) > best_r2:
-                            best_r2 = self.extract_mean_value(results["avg_metrics"]["r2"])
+                        if results['avg_metrics']['r2'] > best_r2:
+                            best_r2 = results['avg_metrics']['r2']
                             best_model_info = f"{model_type.upper()} ({phase})"
             
             # Check ML models
             if 'ml_models' in target_results:
                 for model_type, results in target_results['ml_models'].items():
-                    if self.extract_mean_value(results["avg_metrics"]["r2"]) > best_r2:
-                        best_r2 = self.extract_mean_value(results["avg_metrics"]["r2"])
+                    if results['avg_metrics']['r2'] > best_r2:
+                        best_r2 = results['avg_metrics']['r2']
                         best_model_info = f"{model_type} (embeddings)"
             
             print(f"{target_name}: {best_model_info} - R² = {best_r2:.4f}")
@@ -1324,15 +1297,13 @@ class MixedEmbeddingPipeline:
         return csv_path
 
     def visualize_graphs(self):
-        """Visualize the KNN and explainer graphs - DISABLED due to NetworkX compatibility issues"""
-        print("\nSkipping graph visualizations due to NetworkX compatibility issues...")
-        print("The pipeline will continue without graph visualizations.")
-        print("All other functionality (GNN training, ML models, embeddings) will work normally.")
+        """Visualize the KNN and explainer graphs"""
+        print("\nCreating graph visualizations...")
         
-        # Comment out the actual visualization call
-        # self.dataset.visualize_graphs(save_dir=f"{self.save_dir}/graphs")
+        # Use the dataset's visualization method
+        self.dataset.visualize_graphs(save_dir=f"{self.save_dir}/graphs")
         
-        # print(f"Graph visualizations saved to {self.save_dir}/graphs/")
+        print(f"Graph visualizations saved to {self.save_dir}/graphs/")
 
     def plot_ml_model_results(self, ml_results, target_name, embeddings_source):
         """Plot ML model results with detailed fold-by-fold analysis"""
@@ -1568,10 +1539,10 @@ class MixedEmbeddingPipeline:
                 'model_name': model_name,
                 'target_name': target_name,
                 'embeddings_source': embeddings_source,
-                'mse': self.extract_mean_value(results["avg_metrics"]["mse"]),
-                'rmse': self.extract_mean_value(results["avg_metrics"]["rmse"]),
-                'r2': self.extract_mean_value(results["avg_metrics"]["r2"]),
-                'mae': self.extract_mean_value(results["avg_metrics"]["mae"])
+                'mse': results['avg_metrics']['mse'],
+                'rmse': results['avg_metrics']['rmse'],
+                'r2': results['avg_metrics']['r2'],
+                'mae': results['avg_metrics']['mae']
             })
             
             # Save to CSV
@@ -1602,9 +1573,9 @@ class MixedEmbeddingPipeline:
                         comparison_data.append({
                             'model': f"{model_type.upper()} ({phase})",
                             'type': 'GNN',
-                            'r2': self.extract_mean_value(results["avg_metrics"]["r2"]),
-                            'rmse': self.extract_mean_value(results["avg_metrics"]["rmse"]),
-                            'mae': self.extract_mean_value(results["avg_metrics"]["mae"]),
+                            'r2': results['avg_metrics']['r2'],
+                            'rmse': results['avg_metrics']['rmse'],
+                            'mae': results['avg_metrics']['mae'],
                             'mse': results['avg_metrics']['mse']
                         })
             
@@ -1615,9 +1586,9 @@ class MixedEmbeddingPipeline:
                     comparison_data.append({
                         'model': f"{model_type} (on {embeddings_source} embeddings)",
                         'type': 'ML',
-                        'r2': self.extract_mean_value(results["avg_metrics"]["r2"]),
-                        'rmse': self.extract_mean_value(results["avg_metrics"]["rmse"]),
-                        'mae': self.extract_mean_value(results["avg_metrics"]["mae"]),
+                        'r2': results['avg_metrics']['r2'],
+                        'rmse': results['avg_metrics']['rmse'],
+                        'mae': results['avg_metrics']['mae'],
                         'mse': results['avg_metrics']['mse']
                     })
             
@@ -1626,10 +1597,10 @@ class MixedEmbeddingPipeline:
             fig.suptitle(f'Comprehensive Model Comparison - {target_name}', fontsize=16)
             
             models = [item['model'] for item in comparison_data]
-            r2_scores = [self.extract_mean_value(item["r2"]) for item in comparison_data]
-            rmse_scores = [self.extract_mean_value(item["rmse"]) for item in comparison_data]
-            mae_scores = [self.extract_mean_value(item["mae"]) for item in comparison_data]
-            mse_scores = [self.extract_mean_value(item["mse"]) for item in comparison_data]
+            r2_scores = [item['r2'] for item in comparison_data]
+            rmse_scores = [item['rmse'] for item in comparison_data]
+            mae_scores = [item['mae'] for item in comparison_data]
+            mse_scores = [item['mse'] for item in comparison_data]
             colors = ['skyblue' if item['type'] == 'GNN' else 'orange' for item in comparison_data]
             
             # R² comparison
@@ -1710,7 +1681,7 @@ if __name__ == "__main__":
     
     # Create mixed pipeline
     mixed_pipeline = MixedEmbeddingPipeline(
-        data_path="../Data/New_Data.csv",
+        data_path="../Data/New_data.csv",
         k_neighbors=10,
         hidden_dim=64,
         num_epochs=200,  # Reduced for faster testing

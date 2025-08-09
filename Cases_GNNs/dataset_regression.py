@@ -608,17 +608,21 @@ class MicrobialGNNDataset:
         
         # Create layout - handle NetworkX version compatibility
         try:
-            # Try new NetworkX version syntax
-            pos = nx.spring_layout(G, k=0.3, seed=42)
+            # Try newest NetworkX version syntax (random_state parameter)
+            pos = nx.spring_layout(G, k=0.3, random_state=42)
         except (TypeError, nx.NetworkXError):
             try:
-                # Try older NetworkX version syntax
-                import random
-                random.seed(42)
-                pos = nx.spring_layout(G, k=0.3)
-            except:
-                # Fallback to basic layout
-                pos = nx.spring_layout(G)
+                # Try newer NetworkX version syntax (seed parameter)
+                pos = nx.spring_layout(G, k=0.3, seed=42)
+            except (TypeError, nx.NetworkXError):
+                try:
+                    # Try older NetworkX version syntax (no seed parameter)
+                    import random
+                    random.seed(42)
+                    pos = nx.spring_layout(G, k=0.3)
+                except:
+                    # Fallback to basic layout without any parameters
+                    pos = nx.spring_layout(G)
         
         # Calculate node size based on degree centrality
         node_size = []

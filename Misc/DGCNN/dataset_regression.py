@@ -8,6 +8,14 @@ from scipy.stats import pearsonr
 from torch_geometric.data import Data
 import networkx as nx
 
+# Optional import for community detection
+try:
+    from community import best_partition
+    HAS_COMMUNITY = True
+except ImportError:
+    HAS_COMMUNITY = False
+    print("Warning: community package not found. Graph community detection will be disabled.")
+
 class MicrobialGNNDataset:
     """Dataset class for GNN-based regression on microbial data"""
     
@@ -606,47 +614,8 @@ class MicrobialGNNDataset:
             edge_t = edge_type[i].item()
             G.add_edge(u, v, weight=weight, type=edge_t)
         
-        # Create layout with bulletproof NetworkX handling
-        def create_custom_layout(G):
-            """Create a custom circular layout as fallback"""
-            import math
-            pos = {}
-            nodes = list(G.nodes())
-            n = len(nodes)
-            for i, node in enumerate(nodes):
-                angle = 2 * math.pi * i / n
-                pos[node] = (math.cos(angle), math.sin(angle))
-            return pos
-        
-        # Try NetworkX layout with multiple fallbacks
-        pos = None
-        try:
-            # Try basic spring_layout first
-            pos = nx.spring_layout(G, k=0.3)
-        except Exception as e1:
-            try:
-                # Try with seed parameter
-                pos = nx.spring_layout(G, k=0.3, seed=42)
-            except Exception as e2:
-                try:
-                    # Try with random_state parameter
-                    pos = nx.spring_layout(G, k=0.3, random_state=42)
-                except Exception as e3:
-                    try:
-                        # Try without any parameters
-                        pos = nx.spring_layout(G)
-                    except Exception as e4:
-                        try:
-                            # Try circular layout
-                            pos = nx.circular_layout(G)
-                        except Exception as e5:
-                            try:
-                                # Try shell layout
-                                pos = nx.shell_layout(G)
-                            except Exception as e6:
-                                # Final fallback - custom circular layout
-                                print(f"NetworkX layout failed, using custom layout. Errors: {e1}, {e2}, {e3}, {e4}, {e5}, {e6}")
-                                pos = create_custom_layout(G)
+        # Create layout
+        pos = nx.spring_layout(G, k=0.3, seed=42)
         
         # Calculate node size based on degree centrality
         node_size = []
@@ -671,9 +640,12 @@ class MicrobialGNNDataset:
         
         # Try to find communities for node coloring
         try:
-            from community import best_partition
-            partition = best_partition(G)
-            node_colors = [partition[node] for node in G.nodes()]
+            if HAS_COMMUNITY:
+                partition = best_partition(G)
+                node_colors = [partition[node] for node in G.nodes()]
+            else:
+                # Fallback if community detection not available
+                node_colors = list(range(len(G.nodes)))
         except:
             # Fallback if community detection fails
             node_colors = list(range(len(G.nodes)))
