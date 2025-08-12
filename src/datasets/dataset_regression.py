@@ -417,9 +417,13 @@ class MicrobialGNNDataset:
                 )
                 
                 if p < self.mantel_threshold:  # Significant correlation
+                    # Calculate correlation coefficient to get the sign
+                    corr, _ = pearsonr(self.feature_matrix[i], self.feature_matrix[j])
+                    # Use actual signed correlation as edge weight (preserve sign information)
+                    signed_weight = corr
                     edge_i += [i, j]
                     edge_j += [j, i]
-                    edge_weights += [abs(r), abs(r)]  # Use correlation strength as edge weight
+                    edge_weights += [signed_weight, signed_weight]  # Use signed correlation as edge weight
         
         # Create edge types based on correlation sign
         edge_types = []
@@ -456,15 +460,20 @@ class MicrobialGNNDataset:
         # KNN sparsification
         adj_matrix_np = adj_matrix.numpy()
         
-        # For each node, keep only the k strongest connections
+        # For each node, keep only the k strongest connections by absolute value
         for i in range(num_nodes):
             # Get weights of all neighbors
             neighbors = adj_matrix_np[i]
             
-            # Sort neighbors by weight and keep only top k
-            if np.sum(neighbors > 0) > k:
-                threshold = np.sort(neighbors)[-k]
-                adj_matrix_np[i, neighbors < threshold] = 0
+            # Find non-zero connections and keep only top k by absolute weight
+            nonzero_mask = neighbors != 0
+            if np.sum(nonzero_mask) > k:
+                # Sort by absolute value to get strongest connections regardless of sign
+                abs_neighbors = np.abs(neighbors)
+                threshold = np.sort(abs_neighbors[nonzero_mask])[-k]
+                # Keep only edges with absolute weight >= threshold
+                keep_mask = abs_neighbors >= threshold
+                adj_matrix_np[i, ~keep_mask] = 0
         
         # Make matrix symmetric (undirected graph)
         adj_matrix_np = np.maximum(adj_matrix_np, adj_matrix_np.T)
@@ -476,13 +485,12 @@ class MicrobialGNNDataset:
         
         for i in range(num_nodes):
             for j in range(num_nodes):
-                if adj_matrix_np[i, j] > 0:
+                if adj_matrix_np[i, j] != 0:  # Check for non-zero (can be positive or negative)
                     new_edge_index.append([i, j])
                     new_edge_weight.append(adj_matrix_np[i, j])
                     
-                    # Determine edge type (sign of correlation)
-                    corr, _ = pearsonr(self.feature_matrix[i], self.feature_matrix[j])
-                    new_edge_type.append(1 if corr > 0 else 0)
+                    # Determine edge type based on sign of the weight
+                    new_edge_type.append(1 if adj_matrix_np[i, j] > 0 else 0)
         
         new_edge_index = torch.tensor(new_edge_index).t().contiguous()
         new_edge_weight = torch.tensor(new_edge_weight, dtype=torch.float32)
@@ -648,26 +656,31 @@ class MicrobialGNNDataset:
                                 print(f"NetworkX layout failed, using custom layout. Errors: {e1}, {e2}, {e3}, {e4}, {e5}, {e6}")
                                 pos = create_custom_layout(G)
         
-        # Calculate node size based on degree centrality
-        node_size = []
-        for node in G.nodes():
-            # Use degree centrality
-            degree = G.degree(node, weight='weight')
-            node_size.append(100 + 500 * degree)
+        # Calculate node size - make uniform for better visualization
+        # Option 1: Uniform node size for cleaner visualization
+        node_size = [800] * len(G.nodes())  # Uniform size for all nodes
+        
+        # Option 2: Size based on absolute sum of edge weights (commented out)
+        # node_size = []
+        # for node in G.nodes():
+        #     # Use sum of absolute edge weights as node importance
+        #     abs_weight_sum = sum(abs(data['weight']) for u, v, data in G.edges(node, data=True))
+        #     node_size.append(200 + abs_weight_sum * 1000)  # Scale to visible range
         
         # Scale edge width by correlation strength and color by type
         edge_colors = []
         edge_width = []
         
         for u, v, data in G.edges(data=True):
-            # Edge type determines color: 0 = negative correlation, 1 = positive correlation
-            if data['type'] == 0:
+            # Edge color based on weight sign: negative = red, positive = blue/green
+            weight = data['weight']
+            if weight < 0:
                 edge_colors.append('red')  # negative correlation
             else:
-                edge_colors.append('green')  # positive correlation
+                edge_colors.append('blue')  # positive correlation
             
-            # Width based on weight
-            edge_width.append(abs(data['weight']) * 2 + 0.5)
+            # Width based on absolute weight (strength of correlation)
+            edge_width.append(abs(weight) * 3 + 0.5)  # Scale for better visibility
         
         # Try to find communities for node coloring
         try:
@@ -695,8 +708,8 @@ class MicrobialGNNDataset:
             ax=ax
         )
         
-        # Create a legend for edge types
-        ax.plot([], [], 'g-', linewidth=2, label='Positive correlation')
+        # Create a legend for edge types (updated colors)
+        ax.plot([], [], 'b-', linewidth=2, label='Positive correlation')
         ax.plot([], [], 'r-', linewidth=2, label='Negative correlation')
         ax.legend(loc='upper right')
         
