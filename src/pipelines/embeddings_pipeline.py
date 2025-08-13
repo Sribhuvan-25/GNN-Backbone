@@ -88,7 +88,10 @@ class MixedEmbeddingPipeline:
                  family_filter_mode='strict',
                  use_enhanced_training=True,  # New parameter for enhanced training
                  adaptive_hyperparameters=True,  # New parameter for adaptive hyperparameters
-                 use_nested_cv=True):  # New parameter for nested CV hyperparameter tuning
+                 use_nested_cv=True,  # New parameter for nested CV hyperparameter tuning
+                 use_node_sparsification=False,  # New parameter for node sparsification
+                 node_importance_threshold=0.1,  # Threshold for node importance
+                 min_nodes_to_keep=10):  # Minimum number of nodes to keep after sparsification
         """
         Initialize the mixed embedding pipeline
         
@@ -112,6 +115,9 @@ class MixedEmbeddingPipeline:
             use_enhanced_training: If True, use enhanced training
             adaptive_hyperparameters: If True, use adaptive hyperparameters
             use_nested_cv: If True, use nested cross-validation for hyperparameter tuning
+            use_node_sparsification: If True, enable node sparsification based on importance
+            node_importance_threshold: Threshold for node importance (0.0 to 1.0)
+            min_nodes_to_keep: Minimum number of nodes to keep after sparsification
         """
         self.data_path = data_path
         self.k_neighbors = k_neighbors
@@ -132,6 +138,9 @@ class MixedEmbeddingPipeline:
         self.use_enhanced_training = use_enhanced_training
         self.adaptive_hyperparameters = adaptive_hyperparameters
         self.use_nested_cv = use_nested_cv
+        self.use_node_sparsification = use_node_sparsification
+        self.node_importance_threshold = node_importance_threshold
+        self.min_nodes_to_keep = min_nodes_to_keep
         
         # Define hyperparameter search space for nested CV
         self.gnn_hyperparams = {
@@ -1088,22 +1097,404 @@ class MixedEmbeddingPipeline:
         
         return ml_results
 
+    def compute_node_importance(self, model, data_list, target_idx=0):
+        """
+        Compute node importance scores using multiple methods.
+        
+        Args:
+            model: Trained GNN model
+            data_list: List of PyG Data objects
+            target_idx: Target variable index
+            
+        Returns:
+            dict: Node importance scores and feature names
+        """
+        import torch
+        from torch_geometric.loader import DataLoader
+        
+        print(f"\nComputing node importance for target: {self.target_names[target_idx]}")
+        
+        model.eval()
+        model.zero_grad()
+        
+        # Get feature names
+        feature_names = self.dataset.node_feature_names
+        num_features = len(feature_names)
+        
+        # Method 1: Gradient-based importance
+        gradient_importance = self._compute_gradient_importance(model, data_list, target_idx)
+        
+        # Method 2: Attention-based importance (if model has attention)
+        attention_importance = self._compute_attention_importance(model, data_list, target_idx)
+        
+        # Method 3: Permutation importance
+        permutation_importance = self._compute_permutation_importance(model, data_list, target_idx)
+        
+        # Method 4: Degree centrality importance
+        degree_importance = self._compute_degree_centrality_importance()
+        
+        # Combine importance scores (weighted average)
+        combined_importance = {}
+        for i, feature in enumerate(feature_names):
+            scores = []
+            
+            if gradient_importance is not None:
+                scores.append(gradient_importance.get(i, 0.0))
+            if attention_importance is not None:
+                scores.append(attention_importance.get(i, 0.0))
+            if permutation_importance is not None:
+                scores.append(permutation_importance.get(i, 0.0))
+            if degree_importance is not None:
+                scores.append(degree_importance.get(i, 0.0))
+            
+            # Average the available scores
+            combined_importance[i] = np.mean(scores) if scores else 0.0
+        
+        # Normalize to [0, 1]
+        max_importance = max(combined_importance.values()) if combined_importance else 1.0
+        if max_importance > 0:
+            for i in combined_importance:
+                combined_importance[i] /= max_importance
+        
+        importance_results = {
+            'combined_importance': combined_importance,
+            'gradient_importance': gradient_importance,
+            'attention_importance': attention_importance,
+            'permutation_importance': permutation_importance,
+            'degree_importance': degree_importance,
+            'feature_names': feature_names,
+            'num_features': num_features
+        }
+        
+        # Print top important features
+        sorted_importance = sorted(combined_importance.items(), key=lambda x: x[1], reverse=True)
+        print(f"Top 10 most important features:")
+        for i, (node_idx, importance) in enumerate(sorted_importance[:10]):
+            feature_name = feature_names[node_idx]
+            print(f"  {i+1}. {feature_name}: {importance:.4f}")
+        
+        return importance_results
+    
+    def _compute_gradient_importance(self, model, data_list, target_idx):
+        """Compute importance using gradient-based method."""
+        try:
+            loader = DataLoader(data_list, batch_size=len(data_list), shuffle=False)
+            
+            importance_scores = {}
+            
+            for batch in loader:
+                batch = batch.to(device)
+                batch.x.requires_grad_(True)
+                
+                # Forward pass
+                output, _ = model(batch.x, batch.edge_index, batch.batch)
+                target = batch.y[:, target_idx].view(-1, 1)
+                
+                # Compute loss
+                loss = F.mse_loss(output, target)
+                
+                # Compute gradients
+                gradients = torch.autograd.grad(
+                    outputs=loss,
+                    inputs=batch.x,
+                    create_graph=False,
+                    retain_graph=False
+                )[0]
+                
+                # Aggregate gradients by node (across samples)
+                for sample_idx in range(len(data_list)):
+                    node_mask = batch.batch == sample_idx
+                    sample_gradients = gradients[node_mask].abs()
+                    sample_features = batch.x[node_mask].abs()
+                    
+                    # Importance = |gradient * input|
+                    sample_importance = (sample_gradients * sample_features).squeeze()
+                    
+                    for node_idx, imp in enumerate(sample_importance):
+                        if node_idx not in importance_scores:
+                            importance_scores[node_idx] = []
+                        importance_scores[node_idx].append(imp.item())
+                
+                break  # Only need one batch
+            
+            # Average across samples
+            final_importance = {node: np.mean(scores) for node, scores in importance_scores.items()}
+            return final_importance
+            
+        except Exception as e:
+            print(f"Gradient importance computation failed: {e}")
+            return None
+    
+    def _compute_attention_importance(self, model, data_list, target_idx):
+        """Compute importance using attention weights (if available)."""
+        try:
+            # Check if model has attention mechanism (GAT)
+            if not hasattr(model, 'attention_weights') and 'gat' not in str(type(model)).lower():
+                return None
+            
+            loader = DataLoader(data_list, batch_size=len(data_list), shuffle=False)
+            
+            attention_scores = {}
+            
+            for batch in loader:
+                batch = batch.to(device)
+                
+                # Forward pass to get attention weights
+                output, embeddings = model(batch.x, batch.edge_index, batch.batch)
+                
+                # Try to extract attention weights (model-specific)
+                if hasattr(model, 'get_attention_weights'):
+                    attention_weights = model.get_attention_weights()
+                    
+                    # Aggregate attention weights by node
+                    for sample_idx in range(len(data_list)):
+                        node_mask = batch.batch == sample_idx
+                        sample_attention = attention_weights[node_mask]
+                        
+                        for node_idx, att in enumerate(sample_attention):
+                            if node_idx not in attention_scores:
+                                attention_scores[node_idx] = []
+                            attention_scores[node_idx].append(att.mean().item())
+                
+                break  # Only need one batch
+            
+            # Average across samples
+            final_attention = {node: np.mean(scores) for node, scores in attention_scores.items()}
+            return final_attention
+            
+        except Exception as e:
+            print(f"Attention importance computation failed: {e}")
+            return None
+    
+    def _compute_permutation_importance(self, model, data_list, target_idx):
+        """Compute importance using permutation method."""
+        try:
+            model.eval()
+            
+            # Get baseline performance
+            loader = DataLoader(data_list, batch_size=len(data_list), shuffle=False)
+            
+            with torch.no_grad():
+                for batch in loader:
+                    batch = batch.to(device)
+                    baseline_output, _ = model(batch.x, batch.edge_index, batch.batch)
+                    baseline_target = batch.y[:, target_idx].view(-1, 1)
+                    baseline_mse = F.mse_loss(baseline_output, baseline_target).item()
+                    break
+            
+            importance_scores = {}
+            num_features = len(self.dataset.node_feature_names)
+            
+            # Permute each feature and measure performance drop
+            for feature_idx in range(min(num_features, 20)):  # Limit to top 20 for efficiency
+                permuted_data = []
+                
+                for data in data_list:
+                    # Create a copy and permute feature values
+                    permuted_x = data.x.clone()
+                    feature_values = permuted_x[feature_idx::num_features, 0]  # Get this feature's values
+                    permuted_values = feature_values[torch.randperm(len(feature_values))]
+                    permuted_x[feature_idx::num_features, 0] = permuted_values
+                    
+                    permuted_data.append(Data(
+                        x=permuted_x,
+                        edge_index=data.edge_index,
+                        edge_weight=data.edge_weight,
+                        edge_attr=data.edge_attr,
+                        edge_type=data.edge_type,
+                        y=data.y,
+                        batch=data.batch if hasattr(data, 'batch') else None
+                    ))
+                
+                # Test performance with permuted feature
+                permuted_loader = DataLoader(permuted_data, batch_size=len(permuted_data), shuffle=False)
+                
+                with torch.no_grad():
+                    for batch in permuted_loader:
+                        batch = batch.to(device)
+                        permuted_output, _ = model(batch.x, batch.edge_index, batch.batch)
+                        permuted_target = batch.y[:, target_idx].view(-1, 1)
+                        permuted_mse = F.mse_loss(permuted_output, permuted_target).item()
+                        break
+                
+                # Importance = performance drop when feature is permuted
+                importance_scores[feature_idx] = max(0, permuted_mse - baseline_mse)
+            
+            return importance_scores
+            
+        except Exception as e:
+            print(f"Permutation importance computation failed: {e}")
+            return None
+    
+    def _compute_degree_centrality_importance(self):
+        """Compute importance based on node degree centrality in the graph."""
+        try:
+            # Get edge information from dataset
+            edge_index = self.dataset.edge_index
+            num_nodes = len(self.dataset.node_feature_names)
+            
+            # Compute degree centrality
+            degree_centrality = {}
+            
+            for node_idx in range(num_nodes):
+                # Count connections for this node
+                connections = torch.sum((edge_index[0] == node_idx) | (edge_index[1] == node_idx)).item()
+                degree_centrality[node_idx] = connections
+            
+            return degree_centrality
+            
+        except Exception as e:
+            print(f"Degree centrality importance computation failed: {e}")
+            return None
+    
+    def apply_node_sparsification(self, data_list, node_importance):
+        """
+        Apply node sparsification based on importance scores.
+        
+        Args:
+            data_list: Original data list
+            node_importance: Node importance dictionary
+            
+        Returns:
+            tuple: (sparsified_data_list, kept_node_indices, kept_feature_names)
+        """
+        if not self.use_node_sparsification:
+            return data_list, list(range(len(self.dataset.node_feature_names))), self.dataset.node_feature_names
+        
+        print(f"\nApplying node sparsification...")
+        print(f"Importance threshold: {self.node_importance_threshold}")
+        print(f"Minimum nodes to keep: {self.min_nodes_to_keep}")
+        
+        # Get importance scores
+        combined_importance = node_importance['combined_importance']
+        
+        # Sort nodes by importance
+        sorted_nodes = sorted(combined_importance.items(), key=lambda x: x[1], reverse=True)
+        
+        # Keep nodes above threshold or minimum number
+        kept_nodes = []
+        for node_idx, importance in sorted_nodes:
+            if importance >= self.node_importance_threshold or len(kept_nodes) < self.min_nodes_to_keep:
+                kept_nodes.append(node_idx)
+        
+        # If we still have too many nodes, keep only the top ones
+        if len(kept_nodes) > len(self.dataset.node_feature_names) * 0.8:  # Keep at most 80%
+            kept_nodes = kept_nodes[:int(len(self.dataset.node_feature_names) * 0.8)]
+        
+        kept_nodes = sorted(kept_nodes)  # Sort for consistent indexing
+        
+        print(f"Original nodes: {len(self.dataset.node_feature_names)}")
+        print(f"Kept nodes: {len(kept_nodes)}")
+        print(f"Sparsification ratio: {1 - len(kept_nodes)/len(self.dataset.node_feature_names):.2f}")
+        
+        # Create mapping from old to new node indices
+        old_to_new = {old_idx: new_idx for new_idx, old_idx in enumerate(kept_nodes)}
+        
+        # Get kept feature names
+        kept_feature_names = [self.dataset.node_feature_names[i] for i in kept_nodes]
+        
+        # Create sparsified data list
+        sparsified_data = []
+        
+        for data in data_list:
+            # Filter node features
+            new_x = data.x[kept_nodes]
+            
+            # Filter and remap edges
+            edge_index = data.edge_index
+            edge_weight = data.edge_weight
+            edge_type = data.edge_type if hasattr(data, 'edge_type') else None
+            
+            # Keep only edges between kept nodes
+            mask = torch.tensor([
+                (edge_index[0, i].item() in kept_nodes) and (edge_index[1, i].item() in kept_nodes)
+                for i in range(edge_index.shape[1])
+            ])
+            
+            if mask.any():
+                new_edge_index = edge_index[:, mask]
+                new_edge_weight = edge_weight[mask]
+                new_edge_type = edge_type[mask] if edge_type is not None else None
+                
+                # Remap node indices
+                for i in range(new_edge_index.shape[1]):
+                    new_edge_index[0, i] = old_to_new[new_edge_index[0, i].item()]
+                    new_edge_index[1, i] = old_to_new[new_edge_index[1, i].item()]
+            else:
+                # No edges remain - create empty edge structure
+                new_edge_index = torch.zeros((2, 0), dtype=torch.long)
+                new_edge_weight = torch.zeros(0, dtype=torch.float32)
+                new_edge_type = torch.zeros(0, dtype=torch.long) if edge_type is not None else None
+            
+            # Create new data object
+            new_data = Data(
+                x=new_x,
+                edge_index=new_edge_index,
+                edge_weight=new_edge_weight,
+                edge_attr=new_edge_weight.view(-1, 1) if len(new_edge_weight) > 0 else torch.zeros((0, 1)),
+                edge_type=new_edge_type,
+                y=data.y
+            )
+            
+            sparsified_data.append(new_data)
+        
+        print(f"Top 10 kept features:")
+        for i, node_idx in enumerate(kept_nodes[:10]):
+            feature_name = self.dataset.node_feature_names[node_idx]
+            importance = combined_importance[node_idx]
+            print(f"  {i+1}. {feature_name}: {importance:.4f}")
+        
+        return sparsified_data, kept_nodes, kept_feature_names
+
     def create_explainer_sparsified_graph(self, model, target_idx=0):
-        """Create sparsified graph using GNNExplainer - uses existing pipeline_explainer function"""
+        """Create sparsified graph using GNNExplainer and optional node sparsification"""
         print(f"\nCreating GNNExplainer sparsified graph for target: {self.target_names[target_idx]}")
         print(f"Using importance threshold: {self.importance_threshold}")
         
-        # Use the existing function from pipeline_explainer.py
-        sparsified_data_list = create_explainer_sparsified_graph(
+        # Step 1: Apply edge sparsification using GNNExplainer
+        edge_sparsified_data_list = create_explainer_sparsified_graph(
             pipeline=self,  # Pass self as pipeline
             model=model,
             target_idx=target_idx,
             importance_threshold=self.importance_threshold
         )
         
-        print(f"GNNExplainer sparsification complete: {len(sparsified_data_list)} samples created")
+        print(f"GNNExplainer edge sparsification complete: {len(edge_sparsified_data_list)} samples created")
         
-        return sparsified_data_list
+        # Step 2: Apply node sparsification if enabled
+        if self.use_node_sparsification:
+            print(f"\nComputing node importance for sparsification...")
+            
+            # Compute node importance using the current model
+            node_importance = self.compute_node_importance(model, edge_sparsified_data_list, target_idx)
+            
+            # Apply node sparsification
+            final_sparsified_data_list, kept_nodes, kept_feature_names = self.apply_node_sparsification(
+                edge_sparsified_data_list, node_importance
+            )
+            
+            # Save node sparsification info
+            node_sparsification_info = {
+                'kept_nodes': kept_nodes,
+                'kept_feature_names': kept_feature_names,
+                'node_importance': node_importance,
+                'original_num_nodes': len(self.dataset.node_feature_names),
+                'final_num_nodes': len(kept_nodes),
+                'sparsification_ratio': 1 - len(kept_nodes)/len(self.dataset.node_feature_names)
+            }
+            
+            # Save to file
+            import pickle
+            sparsification_file = f"{self.save_dir}/node_sparsification_info_{self.target_names[target_idx]}.pkl"
+            with open(sparsification_file, 'wb') as f:
+                pickle.dump(node_sparsification_info, f)
+            
+            print(f"Node sparsification info saved to: {sparsification_file}")
+            
+            return final_sparsified_data_list
+        else:
+            print("Node sparsification disabled - returning edge-sparsified data only")
+            return edge_sparsified_data_list
 
     def plot_results(self, gnn_results, ml_results, target_idx):
         """Create simple prediction vs actual plot for best ML model"""
