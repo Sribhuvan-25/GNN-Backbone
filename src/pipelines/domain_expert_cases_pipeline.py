@@ -21,11 +21,11 @@ import warnings
 warnings.filterwarnings('ignore')
 
 # Import the base pipeline
-from embeddings_pipeline import MixedEmbeddingPipeline
-from dataset_regression import MicrobialGNNDataset
+from .embeddings_pipeline import MixedEmbeddingPipeline
+from ..datasets.dataset_regression import MicrobialGNNDataset
 
 # Import GNN models
-from GNNmodelsRegression import (
+from ..models.GNNmodelsRegression import (
     simple_GCN_res_plus_regression,
     simple_RGGC_plus_regression,
     simple_GAT_regression,
@@ -33,7 +33,7 @@ from GNNmodelsRegression import (
 )
 
 # Import the actual GNNExplainer function
-from pipeline_explainer import create_explainer_sparsified_graph
+from ..explainers.pipeline_explainer import create_explainer_sparsified_graph
 
 # Set device
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')

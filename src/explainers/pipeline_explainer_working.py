@@ -2,7 +2,7 @@ import torch
 import numpy as np
 from scipy.stats import pearsonr
 from torch_geometric.data import Data
-from explainers.explainer_regression import GNNExplainerRegression
+from .explainer_regression_working import GNNExplainerRegression
 
 # Set device
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
@@ -68,7 +68,7 @@ def create_explainer_sparsified_graph(pipeline, model, target_idx=0, importance_
         print(f"  Non-zero max: {non_zero_importance.max():.6f}")
         print(f"  Non-zero mean: {non_zero_importance.mean():.6f}")
     
-    # Generate node importance report and choose pruning method
+    # Generate node importance report
     print(f"\nUsing {'NODE-BASED' if use_node_pruning else 'EDGE-BASED'} pruning approach")
     explainer.get_node_importance(combined_edge_importance, pipeline.dataset.node_feature_names)
     
