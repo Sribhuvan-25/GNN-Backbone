@@ -93,7 +93,7 @@ class Case1PipelineWithGraphs:
             data_path=self.data_path,
             k_neighbors=self.k_neighbors,
             mantel_threshold=0.05,
-            use_fast_correlation=True,
+            use_fast_correlation=False,  # Use Mantel test for proper filtering
             graph_mode='family',
             family_filter_mode='relaxed'
         )
