@@ -2,7 +2,7 @@ import torch
 import numpy as np
 from scipy.stats import pearsonr
 from torch_geometric.data import Data
-from explainers.explainer_regression import GNNExplainerRegression
+from .explainer_regression_working import GNNExplainerRegression
 
 # Set device
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
@@ -68,7 +68,7 @@ def create_explainer_sparsified_graph(pipeline, model, target_idx=0, importance_
         print(f"  Non-zero max: {non_zero_importance.max():.6f}")
         print(f"  Non-zero mean: {non_zero_importance.mean():.6f}")
     
-    # Generate node importance report and choose pruning method
+    # Generate node importance report
     print(f"\nUsing {'NODE-BASED' if use_node_pruning else 'EDGE-BASED'} pruning approach")
     explainer.get_node_importance(combined_edge_importance, pipeline.dataset.node_feature_names)
     
@@ -79,13 +79,13 @@ def create_explainer_sparsified_graph(pipeline, model, target_idx=0, importance_
         return create_edge_pruned_graph_pipeline(pipeline, explainer, combined_edge_importance, importance_threshold, non_zero_importance)
 
 def create_node_pruned_graph_pipeline(pipeline, explainer, combined_edge_importance, importance_threshold):
-    """Create node-pruned graph for the pipeline"""
+    """Create 2-step pruned graph: Step 1 = Node pruning, Step 2 = Edge sparsification"""
     
     # Use first sample as template for node pruning
     template_data = pipeline.dataset.data_list[0]
     
-    # Create node-pruned version of the template
-    pruned_data, kept_nodes, pruned_node_names = explainer.create_node_pruned_graph(
+    # STEP 1: Node-based pruning (keep all edges between important nodes)
+    node_pruned_data, kept_nodes, pruned_node_names = explainer.create_node_pruned_graph(
         template_data, 
         combined_edge_importance, 
         pipeline.dataset.node_feature_names,
@@ -93,7 +93,16 @@ def create_node_pruned_graph_pipeline(pipeline, explainer, combined_edge_importa
         min_nodes=10
     )
     
-    # Now create new data list with only the important nodes
+    # STEP 2: Edge-based sparsification on the node-pruned graph
+    final_sparsified_data, edge_weights, edge_types = explainer.create_edge_sparsified_graph(
+        node_pruned_data,
+        combined_edge_importance,
+        pruned_node_names,
+        edge_threshold=0.15,  # Adjust as needed
+        kept_nodes=kept_nodes
+    )
+    
+    # Now create new data list with the final sparsified graph
     new_data_list = []
     feature_matrix_samples = pipeline.dataset.feature_matrix.T
     
@@ -104,22 +113,22 @@ def create_node_pruned_graph_pipeline(pipeline, explainer, combined_edge_importa
         
         data = Data(
             x=x,
-            edge_index=pruned_data.edge_index.clone(),
+            edge_index=final_sparsified_data.edge_index.clone(),
             y=targets
         )
         
         new_data_list.append(data)
     
-    print(f"Node-pruned graph created with {len(kept_nodes)} nodes and {pruned_data.edge_index.shape[1]} edges")
+    print(f"Final graph: {len(kept_nodes)} nodes and {final_sparsified_data.edge_index.shape[1]} edges")
     
     # Store for visualization
     pipeline.dataset.explainer_sparsified_graph_data = {
-        'edge_index': pruned_data.edge_index.clone(),
-        'edge_weight': torch.ones(pruned_data.edge_index.shape[1]),
-        'edge_type': torch.ones(pruned_data.edge_index.shape[1], dtype=torch.long),
-        'pruning_type': 'node_based',
+        'edge_index': final_sparsified_data.edge_index.clone(),
+        'edge_weight': edge_weights,
+        'edge_type': edge_types,
+        'pruning_type': 'node_then_edge',
         'kept_nodes': kept_nodes,
-        'pruned_node_names': pruned_node_names
+        'pruned_node_names': pruned_node_names  # Critical for proper node count display
     }
     
     # Update pipeline dataset node names to reflect pruning

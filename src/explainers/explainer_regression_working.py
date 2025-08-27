@@ -229,7 +229,7 @@ class GNNExplainerRegression:
     def create_node_pruned_graph(self, data, edge_importance_matrix, node_names=None, 
                                 importance_threshold=0.2, min_nodes=10):
         """
-        Create a pruned graph based on node importance instead of edge pruning
+        STEP 1: Create a graph pruned based on NODE importance (nodes first, then ALL edges between kept nodes)
         
         Args:
             data: PyG Data object
@@ -239,23 +239,22 @@ class GNNExplainerRegression:
             min_nodes: Minimum number of nodes to keep
             
         Returns:
-            pruned_data: New PyG Data object with only important nodes and their edges
+            pruned_data: New PyG Data object with only important nodes and ALL edges between them
             kept_nodes: Indices of kept nodes
             pruned_node_names: Names of kept nodes
         """
         # Get node importance scores
         node_importance, sorted_indices = self.get_node_importance(edge_importance_matrix, node_names)
         
-        # Determine which nodes to keep based on importance
-        important_nodes = np.where(node_importance > importance_threshold)[0]
+        # For node pruning, use more selective approach - keep top 60% of nodes, but ensure actual pruning
+        target_nodes = max(min_nodes, int(0.6 * len(node_importance)))  # Keep ~60% of nodes
+        target_nodes = min(target_nodes, len(node_importance) - 2)  # Ensure we actually remove some nodes
         
-        # If too few nodes meet threshold, keep top N nodes
-        if len(important_nodes) < min_nodes:
-            print(f"\nOnly {len(important_nodes)} nodes exceed threshold {importance_threshold}")
-            print(f"Keeping top {min_nodes} most important nodes instead")
-            important_nodes = sorted_indices[:min_nodes]
+        # Always use top-k selection for node pruning to ensure actual pruning happens
+        print(f"\nNode-based pruning: keeping top {target_nodes} out of {len(node_importance)} nodes")
+        important_nodes = sorted_indices[:target_nodes]
         
-        print(f"\nNODE-BASED PRUNING:")
+        print(f"\nSTEP 1 - NODE-BASED PRUNING:")
         print(f"Original graph: {data.x.shape[0]} nodes")
         print(f"Pruned graph: {len(important_nodes)} nodes ({len(important_nodes)/data.x.shape[0]*100:.1f}% retained)")
         print(f"Importance threshold used: {importance_threshold}")
@@ -266,8 +265,7 @@ class GNNExplainerRegression:
         # Filter node features
         pruned_x = data.x[important_nodes]
         
-        # Filter edges - keep only edges between important nodes
-        edge_mask = torch.zeros(data.edge_index.shape[1], dtype=torch.bool)
+        # KEEP ALL EDGES between important nodes (no edge filtering yet)
         new_edges = []
         
         for i in range(data.edge_index.shape[1]):
@@ -276,7 +274,6 @@ class GNNExplainerRegression:
                 # Both nodes are important, keep this edge with new indices
                 new_u, new_v = old_to_new[u], old_to_new[v]
                 new_edges.append([new_u, new_v])
-                edge_mask[i] = True
         
         if len(new_edges) > 0:
             pruned_edge_index = torch.tensor(new_edges, dtype=torch.long).t().contiguous()
@@ -284,7 +281,7 @@ class GNNExplainerRegression:
             # If no edges remain, create empty edge index
             pruned_edge_index = torch.empty((2, 0), dtype=torch.long)
         
-        print(f"Edges: {data.edge_index.shape[1]} → {pruned_edge_index.shape[1]} ({pruned_edge_index.shape[1]/data.edge_index.shape[1]*100:.1f}% retained)")
+        print(f"Edges after node pruning: {data.edge_index.shape[1]} → {pruned_edge_index.shape[1]} (keeping all edges between important nodes)")
         
         # Create new data object
         pruned_data = data.clone()
@@ -297,6 +294,62 @@ class GNNExplainerRegression:
             pruned_node_names = [node_names[i] for i in important_nodes]
         
         return pruned_data, important_nodes, pruned_node_names
+    
+    def create_edge_sparsified_graph(self, data, edge_importance_matrix, node_names=None, 
+                                   edge_threshold=0.3, kept_nodes=None):
+        """
+        STEP 2: Apply edge sparsification to the node-pruned graph
+        
+        Args:
+            data: PyG Data object (already node-pruned)
+            edge_importance_matrix: Matrix of edge importance scores
+            node_names: Names of the nodes
+            edge_threshold: Threshold for keeping edges
+            kept_nodes: Original indices of nodes that were kept during node pruning
+            
+        Returns:
+            sparsified_data: New PyG Data object with edge sparsification applied
+        """
+        print(f"\nSTEP 2 - EDGE-BASED SPARSIFICATION:")
+        print(f"Input graph: {data.x.shape[0]} nodes, {data.edge_index.shape[1]} edges")
+        
+        # Apply edge importance threshold to remove weak edges
+        new_edges = []
+        edge_weights = []
+        edge_types = []
+        
+        for i in range(data.edge_index.shape[1]):
+            u, v = data.edge_index[0, i].item(), data.edge_index[1, i].item()
+            
+            if kept_nodes is not None:
+                # Map back to original indices for importance lookup
+                orig_u, orig_v = kept_nodes[u], kept_nodes[v]
+                edge_importance = edge_importance_matrix[orig_u, orig_v].item()
+            else:
+                edge_importance = edge_importance_matrix[u, v].item()
+            
+            # Keep edge if importance exceeds threshold
+            if abs(edge_importance) > edge_threshold:
+                new_edges.append([u, v])
+                edge_weights.append(abs(edge_importance))
+                edge_types.append(1 if edge_importance > 0 else 0)
+        
+        if len(new_edges) > 0:
+            sparsified_edge_index = torch.tensor(new_edges, dtype=torch.long).t().contiguous()
+            edge_weight_tensor = torch.tensor(edge_weights, dtype=torch.float32)
+            edge_type_tensor = torch.tensor(edge_types, dtype=torch.long)
+        else:
+            sparsified_edge_index = torch.empty((2, 0), dtype=torch.long)
+            edge_weight_tensor = torch.empty((0,), dtype=torch.float32)
+            edge_type_tensor = torch.empty((0,), dtype=torch.long)
+        
+        print(f"Edges after edge sparsification: {data.edge_index.shape[1]} → {sparsified_edge_index.shape[1]} ({sparsified_edge_index.shape[1]/data.edge_index.shape[1]*100:.1f}% retained)")
+        
+        # Create new data object
+        sparsified_data = data.clone()
+        sparsified_data.edge_index = sparsified_edge_index.to(data.edge_index.device)
+        
+        return sparsified_data, edge_weight_tensor, edge_type_tensor
     
     def create_tsne_embedding_plot(self, embeddings, targets, target_names=None, save_path=None):
         """

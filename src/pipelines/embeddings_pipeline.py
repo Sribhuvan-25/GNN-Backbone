@@ -1753,6 +1753,17 @@ class MixedEmbeddingPipeline:
             print(f"Extracted embeddings shape: {embeddings.shape}")
             print(f"Saved as: {embedding_filename}")
             
+            # Create t-SNE plot for embeddings
+            from explainers.explainer_regression import GNNExplainerRegression
+            explainer = GNNExplainerRegression(best_explainer_model, device)
+            tsne_plot_path = f"{self.save_dir}/plots/{target_name}_tsne_embeddings.png"
+            explainer.create_tsne_embedding_plot(
+                embeddings, 
+                targets, 
+                target_names=self.target_names,
+                save_path=tsne_plot_path
+            )
+            
             # Step 5: Train ML models on embeddings
             print(f"\nSTEP 5: Training ML models on embeddings")
             print("-" * 50)
