@@ -32,10 +32,10 @@ warnings.filterwarnings('ignore')
 # Add src to path
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-# Import our modules
-from datasets.dataset_regression import MicrobialGNNDataset
-from explainers.explainer_regression import GNNExplainerRegression
-from explainers.pipeline_explainer import create_explainer_sparsified_graph
+# Import our modules - using working versions with all fixes
+from datasets.dataset_regression_working import MicrobialGNNDataset
+from explainers.explainer_regression_working import GNNExplainerRegression  
+from explainers.pipeline_explainer_working import create_explainer_sparsified_graph
 from models.GNNmodelsRegression import (
     simple_GCN_res_plus_regression,
     simple_RGGC_plus_regression,
@@ -63,11 +63,15 @@ class Case1PipelineWithGraphs:
         os.makedirs(f"{save_dir}/embeddings", exist_ok=True)
         os.makedirs(f"{save_dir}/graphs", exist_ok=True)
         
+        # Initialize pipeline attributes needed for explainer
+        self.graph_mode = 'family'  # Pipeline graph mode
+        self.save_dir = save_dir    # Pipeline save directory
+        
         # Fast parameters for testing
-        self.k_neighbors = 5
-        self.hidden_dim = 32
-        self.num_epochs = 15  # Very fast for testing
-        self.num_folds = 2    # Fast
+        self.k_neighbors = 10  # Use same as working version
+        self.hidden_dim = 256
+        self.num_epochs = 50  # Very fast for testing
+        self.num_folds = 5    # Fast
         self.batch_size = 4
         self.learning_rate = 0.01
         
@@ -95,7 +99,7 @@ class Case1PipelineWithGraphs:
             mantel_threshold=0.05,
             use_fast_correlation=False,  # Use Mantel test for proper filtering
             graph_mode='family',
-            family_filter_mode='relaxed'
+            family_filter_mode='strict'  # Use strict filtering to get ~20-30 families like working version
         )
         
         print(f"Dataset created with {len(self.dataset.data_list)} samples")
@@ -250,32 +254,17 @@ class Case1PipelineWithGraphs:
             self.dataset.node_feature_names
         )
         
-        # Create EDGE-BASED sparsification (original method)
-        print(f"\n📊 Creating EDGE-BASED Sparsified Graph")
+        print(f"\n🆕 STEP 3.1: Creating NODE-BASED Pruned Graph (Remove Nodes)")
         print("-" * 50)
         
-        edge_based_data = create_explainer_sparsified_graph(
-            pipeline=self,
-            model=model,
-            target_idx=target_idx,
-            importance_threshold=0.2,
-            use_node_pruning=False  # Use original edge-based method
-        )
-        
-        # Store edge-based graph data for visualization
-        edge_based_graph_data = self.dataset.explainer_sparsified_graph_data.copy()
-        
-        print(f"\n🆕 Creating NODE-BASED Sparsified Graph")
-        print("-" * 50)
-        
-        # Create NODE-BASED sparsification (new method)
+        # STEP 1: Create NODE-BASED pruning (remove nodes from original graph)
         template_data = self.dataset.data_list[0]
         pruned_data, kept_nodes, pruned_node_names = explainer.create_node_pruned_graph(
             template_data,
             combined_importance,
             self.dataset.node_feature_names,
-            importance_threshold=0.2,  # Adjust to get reasonable pruning
-            min_nodes=50  # Ensure we keep at least 50 nodes
+            importance_threshold=0.2,
+            min_nodes=10  # Keep reasonable number of nodes
         )
         
         # Create node-based dataset
@@ -293,12 +282,59 @@ class Case1PipelineWithGraphs:
             )
             node_based_data.append(data)
         
-        # Store node-based graph data for visualization
+        # Extract actual edge weights for the pruned graph edges
+        node_based_edge_weights = []
+        for i in range(pruned_data.edge_index.shape[1]):
+            # Map back to original node indices to get importance from combined_importance matrix
+            u_new, v_new = pruned_data.edge_index[0, i].item(), pruned_data.edge_index[1, i].item()
+            u_orig, v_orig = kept_nodes[u_new], kept_nodes[v_new]
+            
+            # Get the edge importance value from the combined matrix (absolute value)
+            edge_weight = abs(combined_importance[u_orig, v_orig].item())
+            node_based_edge_weights.append(edge_weight)
+        
+        # Store node-based graph data for visualization with actual edge weights
         node_based_graph_data = {
             'edge_index': pruned_data.edge_index.clone(),
-            'edge_weight': torch.ones(pruned_data.edge_index.shape[1]),
+            'edge_weight': torch.tensor(node_based_edge_weights, dtype=torch.float32),
             'edge_type': torch.ones(pruned_data.edge_index.shape[1], dtype=torch.long),
             'pruning_type': 'node_based',
+            'kept_nodes': kept_nodes,
+            'pruned_node_names': pruned_node_names
+        }
+        
+        print(f"\n📊 STEP 3.2: Creating EDGE-BASED Sparsification (Remove Edges from Node-Pruned Graph)")
+        print("-" * 50)
+        
+        # STEP 2: Apply edge sparsification to the NODE-PRUNED graph
+        edge_sparsified_data, edge_weights, edge_types = explainer.create_edge_sparsified_graph(
+            pruned_data,  # Use the node-pruned graph as input
+            combined_importance,
+            pruned_node_names,  # Use pruned node names
+            edge_threshold=0.15,
+            kept_nodes=kept_nodes
+        )
+        
+        # Create final edge-sparsified dataset
+        edge_based_data = []
+        for s in range(feature_matrix_samples.shape[0]):
+            x = torch.tensor(feature_matrix_samples[s][kept_nodes], dtype=torch.float32).view(-1, 1)
+            targets = torch.tensor(self.dataset.target_df.iloc[s].values, dtype=torch.float32).view(1, -1)
+            
+            data = Data(
+                x=x,
+                edge_index=edge_sparsified_data.edge_index.clone(),
+                edge_weight=edge_weights,
+                y=targets
+            )
+            edge_based_data.append(data)
+        
+        # Store edge-based graph data for visualization
+        edge_based_graph_data = {
+            'edge_index': edge_sparsified_data.edge_index.clone(),
+            'edge_weight': edge_weights,
+            'edge_type': edge_types,
+            'pruning_type': 'node_then_edge',
             'kept_nodes': kept_nodes,
             'pruned_node_names': pruned_node_names
         }
@@ -323,22 +359,13 @@ class Case1PipelineWithGraphs:
             self.dataset.original_graph_data['edge_weight'],
             self.dataset.original_graph_data['edge_type'],
             axes[0],
-            title=f"Original k-NN Graph\n({num_original_nodes} nodes, {original_edges} edges)"
+            title=f"Original k-NN Graph\n({num_original_nodes} nodes, {original_edges} edges)",
+            node_names=self.dataset.node_feature_names
         )
         
-        # 2. Edge-based sparsified graph
-        edge_based_edges = edge_based_graph_data['edge_index'].shape[1] // 2
-        edge_retention = (edge_based_edges / original_edges * 100) if original_edges > 0 else 0
-        self._visualize_single_graph(
-            edge_based_graph_data['edge_index'],
-            edge_based_graph_data['edge_weight'],
-            edge_based_graph_data['edge_type'],
-            axes[1],
-            title=f"Edge-Based Sparsified\n({num_original_nodes} nodes, {edge_based_edges} edges)\n({edge_retention:.1f}% edges retained)"
-        )
-        
-        # 3. Node-based sparsified graph
-        node_based_nodes = len(node_based_graph_data['kept_nodes'])
+        # 2. Node-based pruned graph (STEP 1: Node pruning)
+        pruned_node_names = node_based_graph_data.get('pruned_node_names', self.dataset.node_feature_names)
+        node_based_nodes = len(pruned_node_names)
         node_based_edges = node_based_graph_data['edge_index'].shape[1] // 2
         node_retention = (node_based_nodes / num_original_nodes * 100)
         edge_retention_node = (node_based_edges / original_edges * 100) if original_edges > 0 else 0
@@ -346,8 +373,22 @@ class Case1PipelineWithGraphs:
             node_based_graph_data['edge_index'],
             node_based_graph_data['edge_weight'],
             node_based_graph_data['edge_type'],
+            axes[1],
+            title=f"Node-Based Pruned (Step 1)\n({node_based_nodes} nodes, {node_based_edges} edges)\n({node_retention:.1f}% nodes retained)",
+            node_names=pruned_node_names,
+            show_edge_weights=True
+        )
+        
+        # 3. Edge-based sparsified graph (STEP 2: Edge sparsification on node-pruned graph)
+        edge_based_edges = edge_based_graph_data['edge_index'].shape[1] // 2
+        edge_retention = (edge_based_edges / node_based_edges * 100) if node_based_edges > 0 else 0
+        self._visualize_single_graph(
+            edge_based_graph_data['edge_index'],
+            edge_based_graph_data['edge_weight'],
+            edge_based_graph_data['edge_type'],
             axes[2],
-            title=f"Node-Based Sparsified\n({node_based_nodes} nodes, {node_based_edges} edges)\n({node_retention:.1f}% nodes, {edge_retention_node:.1f}% edges retained)"
+            title=f"Edge-Based Sparsified (Step 2)\n({node_based_nodes} nodes, {edge_based_edges} edges)\n({edge_retention:.1f}% edges retained from Step 1)",
+            node_names=pruned_node_names
         )
         
         plt.tight_layout()
@@ -362,17 +403,24 @@ class Case1PipelineWithGraphs:
         
         return graph_comparison_path
     
-    def _visualize_single_graph(self, edge_index, edge_weight, edge_type, ax, title):
-        """Visualize a single graph with consistent node/edge sizing"""
+    def _visualize_single_graph(self, edge_index, edge_weight, edge_type, ax, title, node_names=None, show_edge_weights=False):
+        """Visualize a single graph with proper node names and consistent styling"""
         import networkx as nx
-        from matplotlib.colors import LinearSegmentedColormap
         
         # Convert to NetworkX
         G = nx.Graph()
         
-        # Add nodes
-        num_nodes = edge_index.max().item() + 1
-        G.add_nodes_from(range(num_nodes))
+        # Add nodes with proper names
+        num_nodes = edge_index.max().item() + 1 if edge_index.shape[1] > 0 else 0
+        
+        # Use actual node names if available
+        if node_names is not None and len(node_names) >= num_nodes:
+            for i in range(num_nodes):
+                G.add_node(i, name=node_names[i])
+        else:
+            # Fallback to generic node names
+            for i in range(num_nodes):
+                G.add_node(i, name=f"Node_{i}")
         
         # Add edges with weights
         edge_list = []
@@ -416,6 +464,24 @@ class Case1PipelineWithGraphs:
         # Draw edges with weight-based thickness
         nx.draw_networkx_edges(G, pos, edgelist=edge_list, width=normalized_weights,
                               alpha=0.6, edge_color='gray', ax=ax)
+        
+        # Draw node labels with actual family names
+        if node_names is not None and len(node_names) >= num_nodes:
+            labels = {i: node_names[i][:15] + '...' if len(node_names[i]) > 15 else node_names[i] for i in range(num_nodes)}
+        else:
+            labels = {i: f"Node_{i}" for i in range(num_nodes)}
+            
+        nx.draw_networkx_labels(G, pos, labels, font_size=8, font_weight='bold', ax=ax)
+        
+        # Draw edge weights if requested
+        if show_edge_weights and len(edge_list) > 0 and len(weights) > 0:
+            edge_labels = {}
+            for i, (u, v) in enumerate(edge_list):
+                if i < len(weights):
+                    # Show absolute edge weights with 3 decimal places
+                    edge_labels[(u, v)] = f"{abs(weights[i]):.3f}"
+            
+            nx.draw_networkx_edge_labels(G, pos, edge_labels, font_size=6, ax=ax)
         
         ax.set_title(title, fontsize=12, fontweight='bold')
         ax.axis('off')

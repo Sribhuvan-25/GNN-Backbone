@@ -192,7 +192,7 @@ class MicrobialGNNDataset:
         dm = squareform(pdist(vec, metric=metric))
         return np.nan_to_num(dm, nan=0.0, posinf=0.0, neginf=0.0)
     
-    def _mantel_test(self, d1, d2, permutations=100):  # Reduced permutations for efficiency
+    def _mantel_test(self, d1, d2, permutations=100):  # Use same as working Misc version
         """Mantel test to assess correlation between two distance matrices"""
         n = d1.shape[0]
         idx = np.triu_indices(n, k=1)
@@ -413,7 +413,7 @@ class MicrobialGNNDataset:
                 p, r = self._mantel_test(
                     dist_mats[self.node_feature_names[i]],
                     dist_mats[self.node_feature_names[j]],
-                    permutations=100  # Reduced for efficiency
+                    permutations=100  # Use same as working Misc version
                 )
                 
                 if p < self.mantel_threshold:  # Significant correlation
@@ -544,13 +544,16 @@ class MicrobialGNNDataset:
         
         # Check if explainer-sparsified graph exists
         if self.explainer_sparsified_graph_data is not None:
+            # Get actual number of nodes in sparsified graph
+            sparsified_num_nodes = len(self.explainer_sparsified_graph_data.get('pruned_node_names', self.node_feature_names))
+            
             # Visualize explainer-sparsified graph
             self._visualize_single_graph(
                 self.explainer_sparsified_graph_data['edge_index'],
                 self.explainer_sparsified_graph_data['edge_weight'],
                 self.explainer_sparsified_graph_data['edge_type'],
                 ax2,
-                title=f"GNNExplainer Graph ({num_nodes} nodes, {self.explainer_sparsified_graph_data['edge_index'].shape[1]//2} edges)"
+                title=f"GNNExplainer Graph ({sparsified_num_nodes} nodes, {self.explainer_sparsified_graph_data['edge_index'].shape[1]//2} edges)"
             )
         else:
             ax2.text(0.5, 0.5, "GNNExplainer graph not created yet.",
@@ -579,12 +582,15 @@ class MicrobialGNNDataset:
         
         if self.explainer_sparsified_graph_data is not None:
             plt.figure(figsize=(15, 15))
+            # Get actual number of nodes in sparsified graph
+            sparsified_num_nodes = len(self.explainer_sparsified_graph_data.get('pruned_node_names', self.node_feature_names))
+            
             self._visualize_single_graph(
                 self.explainer_sparsified_graph_data['edge_index'],
                 self.explainer_sparsified_graph_data['edge_weight'],
                 self.explainer_sparsified_graph_data['edge_type'],
                 plt.gca(),
-                title=f"GNNExplainer Graph ({num_nodes} nodes, {self.explainer_sparsified_graph_data['edge_index'].shape[1]//2} edges)"
+                title=f"GNNExplainer Graph ({sparsified_num_nodes} nodes, {self.explainer_sparsified_graph_data['edge_index'].shape[1]//2} edges)"
             )
             plt.tight_layout()
             plt.savefig(f"{save_dir}/explainer_graph.png", dpi=300, bbox_inches='tight')
@@ -636,14 +642,17 @@ class MicrobialGNNDataset:
         edge_width = []
         
         for u, v, data in G.edges(data=True):
-            # Edge type determines color: 0 = negative correlation, 1 = positive correlation
-            if data['type'] == 0:
-                edge_colors.append('red')  # negative correlation
-            else:
-                edge_colors.append('green')  # positive correlation
+            # Use absolute edge weights with different colors for strong/weak
+            weight = abs(data['weight'])  # Always use absolute weight
             
-            # Width based on weight
-            edge_width.append(abs(data['weight']) * 2 + 0.5)
+            # Color based on correlation strength: strong = red, weak = blue
+            if weight > 0.5:  # Strong correlation threshold
+                edge_colors.append('red')
+            else:  # Weak correlation
+                edge_colors.append('blue')
+            
+            # Width based on absolute weight (strength of correlation)
+            edge_width.append(weight * 3 + 0.5)  # Scale for better visibility
         
         # Try to find communities for node coloring
         try:
@@ -671,9 +680,9 @@ class MicrobialGNNDataset:
             ax=ax
         )
         
-        # Create a legend for edge types
-        ax.plot([], [], 'g-', linewidth=2, label='Positive correlation')
-        ax.plot([], [], 'r-', linewidth=2, label='Negative correlation')
+        # Create a legend for edge weights and colors
+        ax.plot([], [], 'r-', linewidth=3, label='Strong correlation (red, thick)')
+        ax.plot([], [], 'b-', linewidth=1, label='Weak correlation (blue, thin)')
         ax.legend(loc='upper right')
         
         ax.set_title(title, fontsize=16)

@@ -68,8 +68,8 @@ class Case1Pipeline:
         self.graph_mode = 'family'  # Pipeline graph mode
         self.save_dir = save_dir    # Pipeline save directory
         
-        # Fast parameters for testing
-        self.k_neighbors = 5
+        # Fast parameters for testing  
+        self.k_neighbors = 10  # Use same as working Misc version
         self.hidden_dim = 32
         self.num_epochs = 15  # Very fast for testing
         self.num_folds = 2    # Fast
@@ -100,7 +100,7 @@ class Case1Pipeline:
             mantel_threshold=0.05,
             use_fast_correlation=False,  # Use Mantel test for proper filtering
             graph_mode='family',
-            family_filter_mode='relaxed'
+            family_filter_mode='strict'  # Fewer families = faster Mantel test
         )
         
         print(f"Dataset created with {len(self.dataset.data_list)} samples")
