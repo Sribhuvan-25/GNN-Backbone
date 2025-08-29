@@ -298,6 +298,189 @@ class GNNExplainerRegression:
         
         return pruned_data, important_nodes, pruned_node_names
     
+    def create_attention_based_node_pruning(self, data, model, node_names=None, 
+                                          attention_threshold=0.2, min_nodes=10):
+        """
+        Create node-based pruning using GAT attention scores
+        
+        Args:
+            data: PyG Data object
+            model: Trained GAT model with attention mechanism
+            node_names: Names of the nodes
+            attention_threshold: Threshold for keeping nodes based on attention
+            min_nodes: Minimum number of nodes to keep
+            
+        Returns:
+            pruned_data: New PyG Data object with only important nodes
+            kept_nodes: Indices of kept nodes  
+            pruned_node_names: Names of kept nodes
+            attention_scores: Node attention importance scores
+        """
+        print(f"\nATTENTION-BASED NODE PRUNING:")
+        print(f"Using GAT attention scores for node importance")
+        
+        # Extract attention scores from GAT model
+        attention_scores = self._extract_gat_attention_scores(data, model)
+        
+        if attention_scores is None:
+            print("Warning: Could not extract attention scores, falling back to edge-based importance")
+            return self.create_node_pruned_graph(data, torch.eye(data.x.shape[0]), node_names, 
+                                               attention_threshold, min_nodes)
+        
+        # Determine important nodes based on attention scores
+        important_nodes = np.where(attention_scores > attention_threshold)[0]
+        
+        # Sort nodes by attention score for fallback selection
+        sorted_indices = np.argsort(attention_scores)[::-1]
+        
+        # If too few nodes meet threshold, keep top N nodes
+        if len(important_nodes) < min_nodes:
+            print(f"Only {len(important_nodes)} nodes exceed attention threshold {attention_threshold}")
+            print(f"Keeping top {min_nodes} most important nodes by attention score")
+            important_nodes = sorted_indices[:min_nodes]
+        
+        print(f"Original graph: {data.x.shape[0]} nodes")
+        print(f"Pruned graph: {len(important_nodes)} nodes ({len(important_nodes)/data.x.shape[0]*100:.1f}% retained)")
+        print(f"Attention threshold used: {attention_threshold}")
+        
+        # Report top attention nodes
+        print(f"Top 10 nodes by attention score:")
+        for i, idx in enumerate(sorted_indices[:10]):
+            name = node_names[idx] if node_names else f"Node {idx}"
+            score = attention_scores[idx]
+            kept = "✓" if idx in important_nodes else "✗"
+            print(f"  {i+1:2d}. {name[:40]:40s} | Score: {score:.4f} {kept}")
+        
+        # Create mapping from old node indices to new indices
+        old_to_new = {old_idx: new_idx for new_idx, old_idx in enumerate(important_nodes)}
+        
+        # Filter node features
+        pruned_x = data.x[important_nodes]
+        
+        # Filter edges - keep only edges between important nodes
+        new_edges = []
+        
+        for i in range(data.edge_index.shape[1]):
+            u, v = data.edge_index[0, i].item(), data.edge_index[1, i].item()
+            if u in old_to_new and v in old_to_new:
+                # Both nodes are important, keep this edge with new indices
+                new_u, new_v = old_to_new[u], old_to_new[v]
+                new_edges.append([new_u, new_v])
+        
+        if len(new_edges) > 0:
+            pruned_edge_index = torch.tensor(new_edges, dtype=torch.long).t().contiguous()
+        else:
+            # If no edges remain, create empty edge index
+            pruned_edge_index = torch.empty((2, 0), dtype=torch.long)
+        
+        print(f"Edges: {data.edge_index.shape[1]} → {pruned_edge_index.shape[1]} ({pruned_edge_index.shape[1]/data.edge_index.shape[1]*100:.1f}% retained)")
+        
+        # Create new data object
+        pruned_data = data.clone()
+        pruned_data.x = pruned_x
+        pruned_data.edge_index = pruned_edge_index.to(data.edge_index.device)
+        
+        # Get names of kept nodes
+        pruned_node_names = None
+        if node_names is not None:
+            pruned_node_names = [node_names[i] for i in important_nodes]
+        
+        return pruned_data, important_nodes, pruned_node_names, attention_scores
+    
+    def _extract_gat_attention_scores(self, data, model):
+        """
+        Extract attention scores from GAT model for node importance
+        
+        Args:
+            data: PyG Data object
+            model: Trained GAT model
+            
+        Returns:
+            node_attention_scores: Array of attention importance for each node
+        """
+        try:
+            # Set model to evaluation mode
+            model.eval()
+            
+            # Move data to same device as model
+            data = data.to(next(model.parameters()).device)
+            
+            # Forward pass through model to get attention weights
+            with torch.no_grad():
+                # Check if model has GAT layers with attention
+                attention_weights_list = []
+                
+                # Hook to capture attention weights from GAT layers
+                def attention_hook(module, input, output):
+                    if hasattr(module, '_alpha'):
+                        # GAT layer stores attention weights in _alpha
+                        attention_weights_list.append(module._alpha.detach())
+                
+                # Register hooks for all GAT layers
+                hooks = []
+                for name, module in model.named_modules():
+                    if 'conv' in name and hasattr(module, '_alpha'):
+                        hooks.append(module.register_forward_hook(attention_hook))
+                
+                # Forward pass
+                _ = model(data.x, data.edge_index, data.batch)
+                
+                # Remove hooks
+                for hook in hooks:
+                    hook.remove()
+                
+                if len(attention_weights_list) == 0:
+                    print("No GAT attention weights found in model")
+                    return None
+                
+                # Aggregate attention weights across layers
+                # Use the last layer's attention as it's most relevant for final prediction
+                final_attention = attention_weights_list[-1]
+                
+                # Convert edge attention weights to node attention scores
+                node_attention_scores = self._edge_attention_to_node_scores(
+                    data.edge_index, final_attention, data.x.shape[0]
+                )
+                
+                return node_attention_scores.cpu().numpy()
+                
+        except Exception as e:
+            print(f"Error extracting GAT attention scores: {e}")
+            return None
+    
+    def _edge_attention_to_node_scores(self, edge_index, edge_attention, num_nodes):
+        """
+        Convert edge attention weights to node-level attention scores
+        
+        Args:
+            edge_index: Edge connectivity
+            edge_attention: Attention weights for each edge
+            num_nodes: Total number of nodes
+            
+        Returns:
+            node_scores: Attention score for each node
+        """
+        # Initialize node scores
+        node_scores = torch.zeros(num_nodes, device=edge_attention.device)
+        node_degree = torch.zeros(num_nodes, device=edge_attention.device)
+        
+        # Sum attention weights for each node (both incoming and outgoing)
+        for i in range(edge_index.shape[1]):
+            src, dst = edge_index[0, i], edge_index[1, i]
+            attention = edge_attention[i] if edge_attention.dim() == 1 else edge_attention[i].sum()
+            
+            # Add attention to both source and destination nodes
+            node_scores[src] += attention
+            node_scores[dst] += attention
+            node_degree[src] += 1
+            node_degree[dst] += 1
+        
+        # Normalize by degree to get average attention per edge
+        node_degree = torch.clamp(node_degree, min=1)  # Avoid division by zero
+        node_scores = node_scores / node_degree
+        
+        return node_scores
+    
     def create_tsne_embedding_plot(self, embeddings, targets, target_names=None, save_path=None):
         """
         Create t-SNE plot of embeddings to visualize clustering/data distribution

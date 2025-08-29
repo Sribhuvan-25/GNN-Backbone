@@ -21,15 +21,17 @@ from pipelines.domain_expert_cases_pipeline_refactored import DomainExpertCasesP
 
 
 def run_all_cases(data_path="./Data/New_data.csv", save_dir="./domain_expert_results_updated"):
-    """Run all domain expert cases (1, 2, 3) for both targets."""
+    """Run all domain expert cases (1, 2, 3) for both targets with enhanced features."""
     print("="*80)
-    print("RUNNING UPDATED DOMAIN EXPERT CASES")
+    print("RUNNING ENHANCED DOMAIN EXPERT CASES")
     print("="*80)
-    print("Changes implemented:")
-    print("- Edge weights now include sign information (positive/negative correlations)")
-    print("- Visualizations use uniform node sizes for cleaner presentation")
-    print("- Cases 1, 2, 3 now run for both ACE-km and H2-km targets")
-    print("- Removed cases 4 and 5 as requested")
+    print("Enhanced features implemented:")
+    print("✓ Attention-based node pruning using GAT attention scores")
+    print("✓ Enhanced visualizations with edge weight representation")
+    print("✓ Cases 1, 2, 3 run for both ACE-km and H2-km targets")
+    print("✓ Prediction vs actual graphs for validation points in each CV fold")
+    print("✓ Node importance lists (feature importance scores) generated")
+    print("✓ Comprehensive result integration and reporting")
     print("="*80)
     
     cases = ['case1', 'case2', 'case3']
@@ -41,19 +43,25 @@ def run_all_cases(data_path="./Data/New_data.csv", save_dir="./domain_expert_res
         print(f"{'='*60}")
         
         try:
-            # Initialize pipeline with updated parameters
+            # Initialize pipeline with enhanced parameters
             pipeline = DomainExpertCasesPipeline(
                 data_path=data_path,
                 case_type=case,
-                k_neighbors=15,  # Good balance between connectivity and sparsity
-                hidden_dim=512,  # Larger hidden dimension for better representation
-                num_epochs=200,  # Sufficient training epochs
-                num_folds=5,     # 5-fold cross-validation
+                k_neighbors=12,           # Balanced connectivity for attention mechanisms
+                hidden_dim=256,           # Sufficient for GAT attention layers
+                num_epochs=200,           # Sufficient training epochs
+                num_folds=5,              # 5-fold cross-validation
                 save_dir=f"{save_dir}/{case}_results",
-                importance_threshold=0.2,
-                use_fast_correlation=False,  # Use full Mantel test for biological relevance
-                family_filter_mode='strict'  # Strict filtering for quality features
+                importance_threshold=0.2, # Node pruning threshold
+                use_fast_correlation=False,    # Use full Mantel test for biological relevance
+                family_filter_mode='strict',   # Strict filtering for quality features
+                use_nested_cv=True        # Enable hyperparameter tuning
             )
+            
+            # Ensure GAT is included for attention-based pruning
+            if hasattr(pipeline, 'gnn_models_to_train'):
+                if 'gat' not in pipeline.gnn_models_to_train:
+                    pipeline.gnn_models_to_train.append('gat')
             
             # Run the case-specific pipeline
             case_results = pipeline.run_case_specific_pipeline()

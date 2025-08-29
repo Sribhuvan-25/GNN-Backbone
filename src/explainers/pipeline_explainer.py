@@ -7,7 +7,8 @@ from explainers.explainer_regression import GNNExplainerRegression
 # Set device
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
-def create_explainer_sparsified_graph(pipeline, model, target_idx=0, importance_threshold=0.3, use_node_pruning=True):
+def create_explainer_sparsified_graph(pipeline, model, target_idx=0, importance_threshold=0.3, 
+                                     use_node_pruning=True, use_attention_pruning=True):
     """
     Create a sparsified graph based on GNNExplainer results with node-based pruning
     
@@ -17,6 +18,7 @@ def create_explainer_sparsified_graph(pipeline, model, target_idx=0, importance_
         target_idx: Index of the target variable to explain
         importance_threshold: Threshold for importance (nodes or edges)
         use_node_pruning: Whether to use node-based pruning instead of edge-based pruning
+        use_attention_pruning: Whether to use attention-based node pruning (requires GAT model)
         
     Returns:
         List of sparsified graph data objects
@@ -74,7 +76,10 @@ def create_explainer_sparsified_graph(pipeline, model, target_idx=0, importance_
     
     # Choose pruning method
     if use_node_pruning:
-        return create_node_pruned_graph_pipeline(pipeline, explainer, combined_edge_importance, importance_threshold)
+        if use_attention_pruning and is_gat_model(model):
+            return create_attention_pruned_graph_pipeline(pipeline, explainer, model, importance_threshold)
+        else:
+            return create_node_pruned_graph_pipeline(pipeline, explainer, combined_edge_importance, importance_threshold)
     else:
         return create_edge_pruned_graph_pipeline(pipeline, explainer, combined_edge_importance, importance_threshold, non_zero_importance)
 
@@ -253,3 +258,80 @@ def create_edge_pruned_graph_pipeline(pipeline, explainer, combined_edge_importa
     pipeline.dataset.visualize_graphs(save_dir=f"{pipeline.save_dir}/graphs")
     
     return new_data_list 
+
+def is_gat_model(model):
+    """Check if the model is a GAT (Graph Attention Network) model"""
+    for name, module in model.named_modules():
+        if 'conv' in name.lower() and 'gat' in type(module).__name__.lower():
+            return True
+    return False
+
+def create_attention_pruned_graph_pipeline(pipeline, explainer, model, importance_threshold):
+    """Create attention-based node-pruned graph for the pipeline"""
+    
+    print(f"\n{'='*60}")
+    print("ATTENTION-BASED NODE PRUNING")
+    print(f"{'='*60}")
+    
+    # Use first sample as template for attention-based node pruning
+    template_data = pipeline.dataset.data_list[0]
+    
+    # Create attention-based node-pruned version of the template
+    pruned_data, kept_nodes, pruned_node_names, attention_scores = explainer.create_attention_based_node_pruning(
+        template_data, 
+        model,
+        pipeline.dataset.node_feature_names,
+        attention_threshold=importance_threshold,
+        min_nodes=10
+    )
+    
+    # Save attention scores for analysis
+    attention_report_path = f"{pipeline.save_dir}/attention_scores.csv"
+    if pruned_node_names is not None:
+        import pandas as pd
+        attention_df = pd.DataFrame({
+            'node_name': pipeline.dataset.node_feature_names,
+            'attention_score': attention_scores,
+            'kept': [i in kept_nodes for i in range(len(pipeline.dataset.node_feature_names))]
+        })
+        attention_df = attention_df.sort_values('attention_score', ascending=False)
+        attention_df.to_csv(attention_report_path, index=False)
+        print(f"Attention scores saved to: {attention_report_path}")
+    
+    # Now create new data list with only the important nodes
+    new_data_list = []
+    feature_matrix_samples = pipeline.dataset.feature_matrix.T
+    
+    for s in range(feature_matrix_samples.shape[0]):
+        # Only keep features for important nodes
+        x = torch.tensor(feature_matrix_samples[s][kept_nodes], dtype=torch.float32).view(-1, 1)
+        targets = torch.tensor(pipeline.dataset.target_df.iloc[s].values, dtype=torch.float32).view(1, -1)
+        
+        data = Data(
+            x=x,
+            edge_index=pruned_data.edge_index.clone(),
+            y=targets
+        )
+        
+        new_data_list.append(data)
+    
+    print(f"Attention-pruned graph created with {len(kept_nodes)} nodes and {pruned_data.edge_index.shape[1]} edges")
+    
+    # Store for visualization with attention information
+    pipeline.dataset.explainer_sparsified_graph_data = {
+        'edge_index': pruned_data.edge_index.clone(),
+        'edge_weight': torch.ones(pruned_data.edge_index.shape[1]),
+        'edge_type': torch.ones(pruned_data.edge_index.shape[1], dtype=torch.long),
+        'pruning_type': 'attention_based',
+        'kept_nodes': kept_nodes,
+        'pruned_node_names': pruned_node_names,
+        'attention_scores': attention_scores
+    }
+    
+    # Update pipeline dataset node names to reflect pruning
+    pipeline.dataset.node_feature_names = pruned_node_names
+    
+    # Visualize graphs with attention information
+    pipeline.dataset.visualize_graphs(save_dir=f"{pipeline.save_dir}/graphs")
+    
+    return new_data_list

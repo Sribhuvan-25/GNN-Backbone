@@ -5,6 +5,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 import networkx as nx
 from matplotlib.patches import Patch
+from sklearn.metrics import r2_score, mean_squared_error, mean_absolute_error
 
 
 def adjust_color_brightness(hex_color, factor=0.8):
@@ -145,9 +146,9 @@ def create_legend_for_functional_groups(acetoclastic_features, hydrogenotrophic_
 
 
 def save_graph_visualization(G, node_colors, output_path, title="Graph Visualization", 
-                           legend_elements=None, figsize=(15, 12)):
+                           legend_elements=None, figsize=(15, 12), show_edge_weights=True):
     """
-    Save a graph visualization to file.
+    Save a graph visualization to file with enhanced edge weight representation.
     
     Args:
         G: NetworkX graph
@@ -156,36 +157,301 @@ def save_graph_visualization(G, node_colors, output_path, title="Graph Visualiza
         title: Plot title
         legend_elements: List of legend elements
         figsize: Figure size tuple
+        show_edge_weights: Whether to visually represent edge weights
     """
     plt.figure(figsize=figsize)
     
     # Calculate layout
     pos = nx.spring_layout(G, k=3, iterations=100, seed=42)
     
-    # Draw nodes
+    # Draw nodes with uniform size as requested
     node_color_list = [node_colors.get(node, '#95A5A6') for node in G.nodes()]
     nx.draw_networkx_nodes(G, pos, node_color=node_color_list, 
-                          node_size=800, alpha=0.9)
+                          node_size=500, alpha=0.9, edgecolors='black', linewidths=0.5)
     
-    # Draw edges
-    nx.draw_networkx_edges(G, pos, alpha=0.3, width=0.5, edge_color='gray')
+    if show_edge_weights and G.edges():
+        # Get edge weights for visualization
+        edge_weights = [G[u][v].get('weight', 1.0) for u, v in G.edges()]
+        
+        if len(edge_weights) > 0:
+            # Normalize edge weights for visualization
+            max_weight = max(edge_weights)
+            min_weight = min(edge_weights)
+            
+            if max_weight > min_weight:
+                # Create different edge categories based on weight ranges
+                normalized_weights = [(w - min_weight) / (max_weight - min_weight) for w in edge_weights]
+                
+                # Draw edges with variable thickness and color based on weights
+                for (u, v), weight, norm_weight in zip(G.edges(), edge_weights, normalized_weights):
+                    # Edge thickness: thicker for higher weights
+                    edge_width = 0.5 + norm_weight * 3.0  # Range: 0.5 to 3.5
+                    
+                    # Edge color: blue for positive, red for negative correlations
+                    # Use weight sign if available, otherwise assume positive
+                    edge_color = '#2E86AB' if weight >= 0 else '#F24236'  # Blue for positive, red for negative
+                    
+                    # Edge alpha: more transparent for weaker connections
+                    alpha = 0.3 + norm_weight * 0.5  # Range: 0.3 to 0.8
+                    
+                    nx.draw_networkx_edges(G, pos, edgelist=[(u, v)], 
+                                         width=edge_width, alpha=alpha, edge_color=edge_color)
+                
+                # Add edge weight legend
+                import matplotlib.patches as mpatches
+                legend_patches = [
+                    mpatches.Patch(color='#2E86AB', alpha=0.8, label=f'Strong Connection (>{max_weight*0.7:.2f})'),
+                    mpatches.Patch(color='#2E86AB', alpha=0.5, label=f'Medium Connection ({min_weight + (max_weight-min_weight)*0.3:.2f}-{max_weight*0.7:.2f})'),
+                    mpatches.Patch(color='#2E86AB', alpha=0.3, label=f'Weak Connection (<{min_weight + (max_weight-min_weight)*0.3:.2f})')
+                ]
+                if legend_elements:
+                    legend_elements.extend(legend_patches)
+                else:
+                    legend_elements = legend_patches
+            else:
+                # All edges have the same weight
+                nx.draw_networkx_edges(G, pos, alpha=0.4, width=1.0, edge_color='#2E86AB')
+        else:
+            # No edges
+            pass
+    else:
+        # Simple edge drawing without weight visualization
+        nx.draw_networkx_edges(G, pos, alpha=0.3, width=0.5, edge_color='gray')
     
-    # Add labels
-    node_labels = nx.get_node_attributes(G, 'name')
-    if not node_labels:
-        node_labels = {i: str(i) for i in G.nodes()}
+    # Add labels (only for smaller graphs to avoid clutter)
+    if len(G.nodes()) <= 50:
+        node_labels = nx.get_node_attributes(G, 'name')
+        if not node_labels:
+            node_labels = {i: str(i) for i in G.nodes()}
+        
+        # Truncate long labels
+        truncated_labels = {k: (v[:15] + '...' if len(v) > 18 else v) 
+                           for k, v in node_labels.items()}
+        
+        nx.draw_networkx_labels(G, pos, labels=truncated_labels, font_size=7, font_weight='bold')
     
-    nx.draw_networkx_labels(G, pos, labels=node_labels, font_size=8)
-    
-    plt.title(title, fontsize=16, fontweight='bold')
+    plt.title(title, fontsize=16, fontweight='bold', pad=20)
     
     if legend_elements:
-        plt.legend(handles=legend_elements, loc='upper left', bbox_to_anchor=(1, 1))
+        plt.legend(handles=legend_elements, loc='upper left', bbox_to_anchor=(1.02, 1), 
+                  fontsize=9, framealpha=0.9)
+    
+    # Add graph statistics as text
+    stats_text = f"Nodes: {len(G.nodes())}  |  Edges: {len(G.edges())}"
+    if G.edges():
+        avg_weight = np.mean([G[u][v].get('weight', 1.0) for u, v in G.edges()])
+        stats_text += f"  |  Avg. Weight: {avg_weight:.3f}"
+    
+    plt.figtext(0.02, 0.02, stats_text, fontsize=10, style='italic', 
+                bbox=dict(boxstyle="round,pad=0.3", facecolor="lightgray", alpha=0.8))
     
     plt.axis('off')
     plt.tight_layout()
-    plt.savefig(output_path, dpi=300, bbox_inches='tight')
+    plt.savefig(output_path, dpi=300, bbox_inches='tight', facecolor='white')
     plt.close()
+    
+    print(f"Graph visualization saved: {output_path}")
+
+def create_enhanced_graph_comparison(knn_graph_data, explainer_graph_data, node_features, 
+                                   output_dir, functional_groups=None):
+    """
+    Create side-by-side comparison of k-NN and explainer graphs with enhanced edge weight visualization.
+    
+    Args:
+        knn_graph_data: Dictionary with k-NN graph data (edge_index, edge_weight, etc.)
+        explainer_graph_data: Dictionary with explainer graph data
+        node_features: List of node feature names
+        output_dir: Directory to save visualizations
+        functional_groups: Dictionary with functional group features for coloring
+    """
+    import os
+    os.makedirs(output_dir, exist_ok=True)
+    
+    # Set up functional group colors if provided
+    if functional_groups:
+        node_colors = get_functional_group_colors(
+            node_features,
+            functional_groups.get('acetoclastic', []),
+            functional_groups.get('hydrogenotrophic', []), 
+            functional_groups.get('syntrophic', [])
+        )
+        legend_elements = create_legend_for_functional_groups(
+            functional_groups.get('acetoclastic', []),
+            functional_groups.get('hydrogenotrophic', []),
+            functional_groups.get('syntrophic', [])
+        )
+    else:
+        # Use default colors
+        node_colors = {i: '#4ECDC4' for i in range(len(node_features))}
+        legend_elements = None
+    
+    # Create k-NN graph visualization
+    if knn_graph_data and 'edge_index' in knn_graph_data:
+        knn_G = create_networkx_graph_from_edge_data(
+            knn_graph_data['edge_index'],
+            knn_graph_data.get('edge_weight', None),
+            node_features
+        )
+        
+        save_graph_visualization(
+            knn_G, node_colors, 
+            os.path.join(output_dir, 'knn_graph_enhanced.png'),
+            title="k-NN Graph (Original)", 
+            legend_elements=legend_elements,
+            show_edge_weights=True
+        )
+    
+    # Create explainer graph visualization  
+    if explainer_graph_data and 'edge_index' in explainer_graph_data:
+        explainer_G = create_networkx_graph_from_edge_data(
+            explainer_graph_data['edge_index'],
+            explainer_graph_data.get('edge_weight', None),
+            explainer_graph_data.get('pruned_node_names', node_features)
+        )
+        
+        # Adjust node colors for pruned graph
+        if 'kept_nodes' in explainer_graph_data:
+            kept_indices = explainer_graph_data['kept_nodes']
+            pruned_node_colors = {i: node_colors[kept_indices[i]] for i in range(len(kept_indices))}
+        else:
+            pruned_node_colors = node_colors
+        
+        pruning_type = explainer_graph_data.get('pruning_type', 'unknown')
+        title_suffix = "Attention-Pruned" if pruning_type == 'attention_based' else "Explainer-Pruned"
+        
+        save_graph_visualization(
+            explainer_G, pruned_node_colors,
+            os.path.join(output_dir, f'{pruning_type}_graph_enhanced.png'),
+            title=f"Graph ({title_suffix})",
+            legend_elements=legend_elements,
+            show_edge_weights=True
+        )
+    
+    # Create combined comparison plot
+    create_side_by_side_comparison(
+        knn_graph_data, explainer_graph_data, node_features, 
+        output_dir, functional_groups
+    )
+
+def create_side_by_side_comparison(knn_graph_data, explainer_graph_data, node_features, 
+                                 output_dir, functional_groups=None):
+    """Create a side-by-side comparison plot of both graphs."""
+    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(24, 12))
+    
+    # Set up colors
+    if functional_groups:
+        node_colors = get_functional_group_colors(
+            node_features,
+            functional_groups.get('acetoclastic', []),
+            functional_groups.get('hydrogenotrophic', []),
+            functional_groups.get('syntrophic', [])
+        )
+        legend_elements = create_legend_for_functional_groups(
+            functional_groups.get('acetoclastic', []),
+            functional_groups.get('hydrogenotrophic', []),
+            functional_groups.get('syntrophic', [])
+        )
+    else:
+        node_colors = {i: '#4ECDC4' for i in range(len(node_features))}
+        legend_elements = None
+    
+    # Plot k-NN graph
+    if knn_graph_data and 'edge_index' in knn_graph_data:
+        knn_G = create_networkx_graph_from_edge_data(
+            knn_graph_data['edge_index'],
+            knn_graph_data.get('edge_weight', None),
+            node_features
+        )
+        pos1 = nx.spring_layout(knn_G, k=2, iterations=50, seed=42)
+        
+        # Draw k-NN graph
+        node_color_list = [node_colors.get(node, '#95A5A6') for node in knn_G.nodes()]
+        nx.draw_networkx_nodes(knn_G, pos1, ax=ax1, node_color=node_color_list,
+                              node_size=300, alpha=0.9, edgecolors='black', linewidths=0.5)
+        
+        # Enhanced edge drawing for k-NN graph
+        if knn_G.edges():
+            edge_weights = [knn_G[u][v].get('weight', 1.0) for u, v in knn_G.edges()]
+            max_weight = max(edge_weights) if edge_weights else 1.0
+            min_weight = min(edge_weights) if edge_weights else 0.0
+            
+            if max_weight > min_weight:
+                for (u, v), weight in zip(knn_G.edges(), edge_weights):
+                    norm_weight = (weight - min_weight) / (max_weight - min_weight)
+                    edge_width = 0.2 + norm_weight * 1.5
+                    alpha = 0.2 + norm_weight * 0.4
+                    nx.draw_networkx_edges(knn_G, pos1, ax=ax1, edgelist=[(u, v)],
+                                         width=edge_width, alpha=alpha, edge_color='#2E86AB')
+            else:
+                nx.draw_networkx_edges(knn_G, pos1, ax=ax1, alpha=0.3, width=0.5, edge_color='#2E86AB')
+        
+        ax1.set_title('k-NN Graph (Original)', fontsize=14, fontweight='bold', pad=20)
+        ax1.text(0.02, 0.98, f"Nodes: {len(knn_G.nodes())}\nEdges: {len(knn_G.edges())}", 
+                transform=ax1.transAxes, fontsize=10, verticalalignment='top',
+                bbox=dict(boxstyle="round,pad=0.3", facecolor="lightblue", alpha=0.8))
+    
+    # Plot explainer graph
+    if explainer_graph_data and 'edge_index' in explainer_graph_data:
+        explainer_node_names = explainer_graph_data.get('pruned_node_names', node_features)
+        explainer_G = create_networkx_graph_from_edge_data(
+            explainer_graph_data['edge_index'],
+            explainer_graph_data.get('edge_weight', None),
+            explainer_node_names
+        )
+        pos2 = nx.spring_layout(explainer_G, k=2, iterations=50, seed=42)
+        
+        # Adjust colors for pruned nodes
+        if 'kept_nodes' in explainer_graph_data:
+            kept_indices = explainer_graph_data['kept_nodes']
+            pruned_node_colors = [node_colors.get(kept_indices[node], '#95A5A6') for node in explainer_G.nodes()]
+        else:
+            pruned_node_colors = [node_colors.get(node, '#95A5A6') for node in explainer_G.nodes()]
+        
+        nx.draw_networkx_nodes(explainer_G, pos2, ax=ax2, node_color=pruned_node_colors,
+                              node_size=300, alpha=0.9, edgecolors='black', linewidths=0.5)
+        
+        # Enhanced edge drawing for explainer graph
+        if explainer_G.edges():
+            edge_weights = [explainer_G[u][v].get('weight', 1.0) for u, v in explainer_G.edges()]
+            max_weight = max(edge_weights) if edge_weights else 1.0
+            min_weight = min(edge_weights) if edge_weights else 0.0
+            
+            if max_weight > min_weight:
+                for (u, v), weight in zip(explainer_G.edges(), edge_weights):
+                    norm_weight = (weight - min_weight) / (max_weight - min_weight)
+                    edge_width = 0.2 + norm_weight * 1.5
+                    alpha = 0.2 + norm_weight * 0.4
+                    nx.draw_networkx_edges(explainer_G, pos2, ax=ax2, edgelist=[(u, v)],
+                                         width=edge_width, alpha=alpha, edge_color='#F24236')
+            else:
+                nx.draw_networkx_edges(explainer_G, pos2, ax=ax2, alpha=0.3, width=0.5, edge_color='#F24236')
+        
+        pruning_type = explainer_graph_data.get('pruning_type', 'explainer')
+        title_text = "Attention-Pruned Graph" if pruning_type == 'attention_based' else "Explainer-Pruned Graph"
+        ax2.set_title(title_text, fontsize=14, fontweight='bold', pad=20)
+        ax2.text(0.02, 0.98, f"Nodes: {len(explainer_G.nodes())}\nEdges: {len(explainer_G.edges())}", 
+                transform=ax2.transAxes, fontsize=10, verticalalignment='top',
+                bbox=dict(boxstyle="round,pad=0.3", facecolor="lightcoral", alpha=0.8))
+    
+    # Remove axes
+    ax1.axis('off')
+    ax2.axis('off')
+    
+    # Add overall title
+    plt.suptitle('Graph Comparison: Original vs Pruned', fontsize=16, fontweight='bold', y=0.95)
+    
+    # Add legend
+    if legend_elements:
+        fig.legend(handles=legend_elements, loc='upper center', bbox_to_anchor=(0.5, 0.02), 
+                  ncol=len(legend_elements), fontsize=10, framealpha=0.9)
+    
+    plt.tight_layout()
+    plt.subplots_adjust(bottom=0.1)
+    plt.savefig(os.path.join(output_dir, 'comprehensive_graph_comparison.png'), 
+                dpi=300, bbox_inches='tight', facecolor='white')
+    plt.close()
+    
+    print(f"Comprehensive graph comparison saved: {os.path.join(output_dir, 'comprehensive_graph_comparison.png')}")
 
 
 def format_statistics_with_std(results_dict, decimals=3):
@@ -254,3 +520,218 @@ def create_performance_comparison_plot(results_data, output_path, title="Model P
     plt.tight_layout()
     plt.savefig(output_path, dpi=300, bbox_inches='tight')
     plt.close()
+
+def create_prediction_vs_actual_plots(predictions_dict, output_dir, target_names):
+    """
+    Create prediction vs actual plots for all models and targets.
+    
+    Args:
+        predictions_dict: Dictionary containing fold predictions for each model
+        output_dir: Directory to save plots
+        target_names: List of target variable names
+    """
+    import os
+    os.makedirs(output_dir, exist_ok=True)
+    
+    for target_name in target_names:
+        # Create plots for each model type
+        for model_name, model_results in predictions_dict.items():
+            if 'fold_predictions' in model_results:
+                create_single_model_prediction_plot(
+                    model_results['fold_predictions'],
+                    os.path.join(output_dir, f'{model_name}_{target_name}_pred_vs_actual.png'),
+                    title=f'{model_name.upper()} - {target_name} Predictions',
+                    target_name=target_name
+                )
+        
+        # Create combined comparison plot for all models
+        create_combined_prediction_comparison(
+            predictions_dict,
+            os.path.join(output_dir, f'all_models_{target_name}_comparison.png'),
+            target_name=target_name
+        )
+
+def create_single_model_prediction_plot(fold_predictions, output_path, title, target_name):
+    """Create prediction vs actual plot for a single model."""
+    fig, axes = plt.subplots(2, 3, figsize=(18, 12))  # 5 folds + 1 combined
+    axes = axes.flatten()
+    
+    # Collect all predictions for combined plot
+    all_actual = []
+    all_predicted = []
+    fold_colors = plt.cm.Set3(np.linspace(0, 1, len(fold_predictions)))
+    
+    # Plot individual folds
+    for fold_idx, fold_data in enumerate(fold_predictions):
+        if fold_idx < 5:  # Only plot first 5 folds
+            ax = axes[fold_idx]
+            actual = fold_data['actual']
+            predicted = fold_data['predicted']
+            
+            # Calculate metrics
+            r2 = r2_score(actual, predicted) if len(actual) > 1 else 0
+            rmse = np.sqrt(mean_squared_error(actual, predicted))
+            
+            # Scatter plot
+            ax.scatter(actual, predicted, alpha=0.7, s=50, c=[fold_colors[fold_idx]], 
+                      edgecolors='black', linewidth=0.5)
+            
+            # Perfect prediction line
+            min_val = min(min(actual), min(predicted))
+            max_val = max(max(actual), max(predicted))
+            ax.plot([min_val, max_val], [min_val, max_val], 'r--', alpha=0.8, linewidth=2)
+            
+            ax.set_xlabel(f'Actual {target_name}')
+            ax.set_ylabel(f'Predicted {target_name}')
+            ax.set_title(f'Fold {fold_idx + 1}\nR² = {r2:.3f}, RMSE = {rmse:.3f}')
+            ax.grid(True, alpha=0.3)
+            
+            # Add data to combined plot
+            all_actual.extend(actual)
+            all_predicted.extend(predicted)
+    
+    # Combined plot (all folds)
+    if len(fold_predictions) > 0:
+        ax = axes[5]  # Last subplot
+        
+        # Color by fold
+        fold_labels = []
+        for fold_idx, fold_data in enumerate(fold_predictions):
+            actual = fold_data['actual']
+            predicted = fold_data['predicted']
+            ax.scatter(actual, predicted, alpha=0.7, s=30, c=[fold_colors[fold_idx]], 
+                      label=f'Fold {fold_idx + 1}', edgecolors='black', linewidth=0.3)
+        
+        # Overall metrics
+        overall_r2 = r2_score(all_actual, all_predicted) if len(all_actual) > 1 else 0
+        overall_rmse = np.sqrt(mean_squared_error(all_actual, all_predicted))
+        overall_mae = mean_absolute_error(all_actual, all_predicted)
+        
+        # Perfect prediction line
+        min_val = min(min(all_actual), min(all_predicted))
+        max_val = max(max(all_actual), max(all_predicted))
+        ax.plot([min_val, max_val], [min_val, max_val], 'r--', alpha=0.8, linewidth=2, label='Perfect Prediction')
+        
+        ax.set_xlabel(f'Actual {target_name}')
+        ax.set_ylabel(f'Predicted {target_name}')
+        ax.set_title(f'Combined (All Folds)\nR² = {overall_r2:.3f}, RMSE = {overall_rmse:.3f}, MAE = {overall_mae:.3f}')
+        ax.grid(True, alpha=0.3)
+        ax.legend(fontsize=8, loc='upper left')
+    
+    plt.suptitle(title, fontsize=16, fontweight='bold')
+    plt.tight_layout()
+    plt.savefig(output_path, dpi=300, bbox_inches='tight', facecolor='white')
+    plt.close()
+    
+    print(f"Prediction plot saved: {output_path}")
+
+def create_combined_prediction_comparison(predictions_dict, output_path, target_name):
+    """Create a comparison plot showing all models' predictions."""
+    n_models = len(predictions_dict)
+    fig, axes = plt.subplots(1, n_models, figsize=(6 * n_models, 6))
+    
+    if n_models == 1:
+        axes = [axes]
+    
+    model_names = list(predictions_dict.keys())
+    
+    for idx, (model_name, model_results) in enumerate(predictions_dict.items()):
+        ax = axes[idx]
+        
+        if 'fold_predictions' in model_results:
+            fold_predictions = model_results['fold_predictions']
+            
+            # Collect all predictions
+            all_actual = []
+            all_predicted = []
+            
+            for fold_data in fold_predictions:
+                all_actual.extend(fold_data['actual'])
+                all_predicted.extend(fold_data['predicted'])
+            
+            if len(all_actual) > 0:
+                # Calculate metrics
+                overall_r2 = r2_score(all_actual, all_predicted) if len(all_actual) > 1 else 0
+                overall_rmse = np.sqrt(mean_squared_error(all_actual, all_predicted))
+                
+                # Scatter plot
+                ax.scatter(all_actual, all_predicted, alpha=0.6, s=40, 
+                          edgecolors='black', linewidth=0.3)
+                
+                # Perfect prediction line
+                min_val = min(min(all_actual), min(all_predicted))
+                max_val = max(max(all_actual), max(all_predicted))
+                ax.plot([min_val, max_val], [min_val, max_val], 'r--', alpha=0.8, linewidth=2)
+                
+                ax.set_xlabel(f'Actual {target_name}')
+                ax.set_ylabel(f'Predicted {target_name}')
+                ax.set_title(f'{model_name.upper()}\nR² = {overall_r2:.3f}, RMSE = {overall_rmse:.3f}')
+                ax.grid(True, alpha=0.3)
+    
+    plt.suptitle(f'Model Comparison - {target_name} Predictions', fontsize=16, fontweight='bold')
+    plt.tight_layout()
+    plt.savefig(output_path, dpi=300, bbox_inches='tight', facecolor='white')
+    plt.close()
+    
+    print(f"Model comparison plot saved: {output_path}")
+
+def generate_feature_importance_report(importance_scores, feature_names, output_path, top_n=20):
+    """
+    Generate and save a feature importance report.
+    
+    Args:
+        importance_scores: Array of importance scores for each feature
+        feature_names: List of feature names
+        output_path: Path to save the report
+        top_n: Number of top features to highlight
+    """
+    # Create DataFrame for easier handling
+    import pandas as pd
+    
+    importance_df = pd.DataFrame({
+        'feature_name': feature_names,
+        'importance_score': importance_scores
+    }).sort_values('importance_score', ascending=False)
+    
+    # Save full report
+    importance_df.to_csv(output_path.replace('.png', '.csv'), index=False)
+    
+    # Create visualization
+    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(20, 8))
+    
+    # Top features bar plot
+    top_features = importance_df.head(top_n)
+    y_pos = np.arange(len(top_features))
+    
+    bars = ax1.barh(y_pos, top_features['importance_score'], alpha=0.8)
+    ax1.set_yticks(y_pos)
+    ax1.set_yticklabels([name[:30] + '...' if len(name) > 33 else name 
+                        for name in top_features['feature_name']], fontsize=8)
+    ax1.set_xlabel('Importance Score')
+    ax1.set_title(f'Top {top_n} Most Important Features')
+    ax1.grid(True, alpha=0.3, axis='x')
+    
+    # Color bars by importance level
+    colors = plt.cm.viridis(np.linspace(0, 1, len(bars)))
+    for bar, color in zip(bars, colors):
+        bar.set_color(color)
+    
+    # Distribution histogram
+    ax2.hist(importance_scores, bins=30, alpha=0.7, edgecolor='black', linewidth=0.5)
+    ax2.set_xlabel('Importance Score')
+    ax2.set_ylabel('Frequency')
+    ax2.set_title('Feature Importance Distribution')
+    ax2.grid(True, alpha=0.3)
+    ax2.axvline(np.mean(importance_scores), color='red', linestyle='--', 
+                label=f'Mean: {np.mean(importance_scores):.3f}')
+    ax2.legend()
+    
+    plt.suptitle('Feature Importance Analysis', fontsize=16, fontweight='bold')
+    plt.tight_layout()
+    plt.savefig(output_path, dpi=300, bbox_inches='tight', facecolor='white')
+    plt.close()
+    
+    print(f"Feature importance report saved: {output_path}")
+    print(f"Feature importance CSV saved: {output_path.replace('.png', '.csv')}")
+    
+    return importance_df

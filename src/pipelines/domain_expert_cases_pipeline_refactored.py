@@ -296,7 +296,7 @@ class DomainExpertCasesPipeline(MixedEmbeddingPipeline):
         
         return results
     
-    def run_single_target_pipeline(self, target_idx, target_name):
+    def _run_single_target_pipeline(self, target_idx, target_name):
         """
         Run the complete pipeline for a single target variable.
         
