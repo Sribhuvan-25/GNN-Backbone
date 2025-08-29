@@ -195,9 +195,180 @@ class CaseImplementations:
         results['h2_km'] = pipeline._run_single_target_pipeline(h2_target_idx, "H2-km")
         
         # Save combined case 3 results
-        pipeline._save_case3_combined_results(results)
+        self._save_case_combined_results(pipeline, results, 'case3')
         
         # Create combined visualization for Case 3
-        pipeline._create_case3_combined_visualization(results, ace_target_idx, h2_target_idx)
+        self._create_case_combined_visualization(pipeline, results, 'case3')
         
         return results
+    
+    def get_case_info(self, case_type: str) -> Dict[str, str]:
+        """
+        Get information about a specific case.
+        
+        Args:
+            case_type: The case type ('case1', 'case2', 'case3')
+            
+        Returns:
+            Dictionary with case information
+        """
+        case_info = {
+            'case1': {
+                'description': 'Hydrogenotrophic features for both ACE-km and H2-km predictions',
+                'target': 'ACE-km and H2-km',
+                'features': 'Hydrogenotrophic organisms only'
+            },
+            'case2': {
+                'description': 'Acetoclastic features for both ACE-km and H2-km predictions',
+                'target': 'ACE-km and H2-km', 
+                'features': 'Acetoclastic organisms only'
+            },
+            'case3': {
+                'description': 'All feature groups for both ACE-km and H2-km predictions',
+                'target': 'ACE-km and H2-km',
+                'features': 'Acetoclastic + Hydrogenotrophic + Syntrophic organisms'
+            }
+        }
+        
+        return case_info.get(case_type, {'description': 'Unknown case', 'target': 'Unknown', 'features': 'Unknown'})
+    
+    def _save_case_combined_results(self, pipeline, results: Dict[str, Any], case_type: str):
+        """Save combined results for a case with both targets."""
+        combined_results_path = os.path.join(pipeline.save_dir, f'{case_type}_combined_results.pkl')
+        
+        with open(combined_results_path, 'wb') as f:
+            pickle.dump(results, f)
+        
+        # Create combined summary CSV
+        summary_data = []
+        
+        for target_key, target_results in results.items():
+            target_name = 'ACE-km' if 'ace' in target_key else 'H2-km'
+            
+            # Add results from each phase
+            for phase in ['knn_training', 'explainer_training']:
+                if phase in target_results:
+                    phase_results = target_results[phase]
+                    if 'fold_results' in phase_results:
+                        # Calculate average metrics across folds
+                        avg_metrics = self._calculate_average_metrics(phase_results['fold_results'])
+                        
+                        summary_data.append({
+                            'case': case_type,
+                            'target': target_name,
+                            'phase': phase.replace('_training', ''),
+                            'model_category': 'GNN',
+                            'r2': avg_metrics.get('r2', 0),
+                            'rmse': avg_metrics.get('rmse', 0),
+                            'mae': avg_metrics.get('mae', 0),
+                            'mse': avg_metrics.get('mse', 0),
+                            'num_features': len(pipeline.dataset.node_feature_names)
+                        })
+            
+            # Add ML results if available
+            if 'ml_training' in target_results:
+                ml_results = target_results['ml_training']
+                if 'fold_results' in ml_results:
+                    avg_metrics = self._calculate_average_metrics(ml_results['fold_results'])
+                    
+                    summary_data.append({
+                        'case': case_type,
+                        'target': target_name,
+                        'phase': 'ml_embeddings',
+                        'model_category': 'ML',
+                        'r2': avg_metrics.get('r2', 0),
+                        'rmse': avg_metrics.get('rmse', 0), 
+                        'mae': avg_metrics.get('mae', 0),
+                        'mse': avg_metrics.get('mse', 0),
+                        'num_features': len(pipeline.dataset.node_feature_names)
+                    })
+        
+        # Save summary
+        if summary_data:
+            summary_df = pd.DataFrame(summary_data)
+            summary_path = os.path.join(pipeline.save_dir, f'{case_type}_combined_summary.csv')
+            summary_df.to_csv(summary_path, index=False)
+            print(f"Combined results saved: {combined_results_path}")
+            print(f"Combined summary saved: {summary_path}")
+    
+    def _create_case_combined_visualization(self, pipeline, results: Dict[str, Any], case_type: str):
+        """Create combined visualization for a case with both targets."""
+        from utils.visualization_utils import create_prediction_vs_actual_plots, generate_feature_importance_report
+        
+        # Create prediction vs actual plots for each target
+        for target_key, target_results in results.items():
+            target_name = 'ACE-km' if 'ace' in target_key else 'H2-km'
+            
+            # Collect predictions from different phases
+            predictions_dict = {}
+            
+            for phase in ['knn_training', 'explainer_training']:
+                if phase in target_results and 'fold_results' in target_results[phase]:
+                    fold_results = target_results[phase]['fold_results']
+                    
+                    # Extract predictions from each fold
+                    fold_predictions = []
+                    for fold_result in fold_results:
+                        if 'predictions' in fold_result:
+                            fold_predictions.append({
+                                'actual': fold_result['predictions']['actual'],
+                                'predicted': fold_result['predictions']['predicted']
+                            })
+                    
+                    if fold_predictions:
+                        predictions_dict[phase.replace('_training', '')] = {
+                            'fold_predictions': fold_predictions
+                        }
+            
+            # ML predictions
+            if 'ml_training' in target_results and 'fold_results' in target_results['ml_training']:
+                ml_fold_results = target_results['ml_training']['fold_results']
+                ml_fold_predictions = []
+                for fold_result in ml_fold_results:
+                    if 'predictions' in fold_result:
+                        ml_fold_predictions.append({
+                            'actual': fold_result['predictions']['actual'],
+                            'predicted': fold_result['predictions']['predicted']
+                        })
+                
+                if ml_fold_predictions:
+                    predictions_dict['ml'] = {
+                        'fold_predictions': ml_fold_predictions
+                    }
+            
+            # Create plots
+            if predictions_dict:
+                plots_dir = os.path.join(pipeline.save_dir, f'{case_type}_{target_name}_plots')
+                create_prediction_vs_actual_plots(predictions_dict, plots_dir, [target_name])
+        
+        # Generate feature importance reports if available
+        if hasattr(pipeline.dataset, 'explainer_sparsified_graph_data'):
+            explainer_data = pipeline.dataset.explainer_sparsified_graph_data
+            if 'attention_scores' in explainer_data:
+                importance_path = os.path.join(pipeline.save_dir, f'{case_type}_feature_importance.png')
+                generate_feature_importance_report(
+                    explainer_data['attention_scores'],
+                    pipeline.dataset.node_feature_names,
+                    importance_path,
+                    top_n=20
+                )
+    
+    def _calculate_average_metrics(self, fold_results: List[Dict]) -> Dict[str, float]:
+        """Calculate average metrics across folds."""
+        metrics = ['r2', 'rmse', 'mae', 'mse']
+        avg_metrics = {}
+        
+        for metric in metrics:
+            values = []
+            for fold_result in fold_results:
+                if 'metrics' in fold_result and metric in fold_result['metrics']:
+                    values.append(fold_result['metrics'][metric])
+                elif metric in fold_result:
+                    values.append(fold_result[metric])
+            
+            if values:
+                avg_metrics[metric] = np.mean(values)
+            else:
+                avg_metrics[metric] = 0.0
+        
+        return avg_metrics
