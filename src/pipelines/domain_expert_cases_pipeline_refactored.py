@@ -280,13 +280,11 @@ class DomainExpertCasesPipeline(MixedEmbeddingPipeline):
         case_methods = {
             'case1': self.case_impl.run_case1,
             'case2': self.case_impl.run_case2,
-            'case3': self.case_impl.run_case3,
-            'case4': self.case_impl.run_case4,
-            'case5': self.case_impl.run_case5
+            'case3': self.case_impl.run_case3
         }
         
         if self.case_type not in case_methods:
-            raise ValueError(f"Unknown case type: {self.case_type}")
+            raise ValueError(f"Unknown case type: {self.case_type}. Valid options are: case1, case2, case3")
         
         # Execute the specific case
         results = case_methods[self.case_type](self)
@@ -410,20 +408,37 @@ class DomainExpertCasesPipeline(MixedEmbeddingPipeline):
         
         if self.use_nested_cv:
             # Use nested CV with hyperparameter tuning
-            results = self.nested_cv_training_with_hyperparameter_search(
-                target_idx=target_idx,
-                target_name=target_name,
-                graph_type=graph_type,
-                explainer_graphs=explainer_graphs
-            )
+            results = {}
+            
+            for model_type in self.gnn_models_to_train:
+                print(f"Training {model_type.upper()} model with nested CV...")
+                
+                # Use the appropriate graph data
+                if graph_type == 'explainer' and explainer_graphs:
+                    data_list = explainer_graphs
+                else:
+                    data_list = self.dataset.data_list
+                
+                # Train with nested CV
+                model_results = self.train_gnn_model_nested(model_type, target_idx, data_list)
+                results[f'{model_type}_{graph_type}'] = model_results
         else:
             # Use fixed hyperparameters without nested CV
-            results = self.train_all_models_single_target(
-                target_idx=target_idx,
-                target_name=target_name,
-                graph_type=graph_type,
-                explainer_graphs=explainer_graphs
-            )
+            # Train each model type individually
+            results = {}
+            
+            for model_type in self.gnn_models_to_train:
+                print(f"Training {model_type.upper()} model...")
+                
+                # Use the appropriate graph data
+                if graph_type == 'explainer' and explainer_graphs:
+                    data_list = explainer_graphs
+                else:
+                    data_list = self.dataset.data_list
+                
+                # Train the GNN model
+                model_results = self.train_gnn_model(model_type, target_idx, data_list)
+                results[f'{model_type}_{graph_type}'] = model_results
         
         # Save training results
         self._save_training_results(results, target_name, phase)
