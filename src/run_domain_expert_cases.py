@@ -142,9 +142,9 @@ def main():
             pipeline = DomainExpertCasesPipeline(
                 data_path=args.data_path,
                 case_type=args.case,
-                k_neighbors=15,
-                hidden_dim=512,
-                num_epochs=200,
+                k_neighbors=10,
+                hidden_dim=256,
+                num_epochs=100,
                 num_folds=5,
                 save_dir=f"{args.save_dir}/{args.case}_results",
                 importance_threshold=0.2,
