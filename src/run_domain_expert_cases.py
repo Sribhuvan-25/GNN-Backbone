@@ -123,7 +123,6 @@ def main():
     
     args = parser.parse_args()
     
-    # Ensure data file exists
     if not os.path.exists(args.data_path):
         print(f"Error: Data file not found at {args.data_path}")
         print("Please provide the correct path to the data file.")
