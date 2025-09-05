@@ -324,8 +324,11 @@ class GNNExplainerRegression:
         
         if attention_scores is None:
             print("Warning: Could not extract attention scores, falling back to edge-based importance")
-            return self.create_node_pruned_graph(data, torch.eye(data.x.shape[0]), node_names, 
-                                               attention_threshold, min_nodes)
+            pruned_data, kept_nodes, pruned_node_names = self.create_node_pruned_graph(
+                data, torch.eye(data.x.shape[0]), node_names, attention_threshold, min_nodes)
+            # Return with dummy attention scores to match expected return signature
+            dummy_attention = np.ones(data.x.shape[0]) * 0.5  # All nodes get equal importance
+            return pruned_data, kept_nodes, pruned_node_names, dummy_attention
         
         # Determine important nodes based on attention scores
         important_nodes = np.where(attention_scores > attention_threshold)[0]

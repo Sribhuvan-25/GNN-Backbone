@@ -627,6 +627,11 @@ class MixedEmbeddingPipeline:
             rmse = np.sqrt(mse)
             mae = mean_absolute_error(all_targets, all_preds)
             
+            # Save model for embedding extraction
+            os.makedirs(f"{self.save_dir}/gnn_models", exist_ok=True)
+            model_path = f"{self.save_dir}/gnn_models/{model_type}_{target_name}_fold{fold_num}_{phase}.pt"
+            torch.save(model.state_dict(), model_path)
+            
             outer_results.append({
                 'fold': fold_num,
                 'r2': r2,
@@ -637,7 +642,8 @@ class MixedEmbeddingPipeline:
                 'train_size': len(train_data),
                 'test_size': len(test_data),
                 'predictions': all_preds,
-                'targets': all_targets
+                'targets': all_targets,
+                'model_path': model_path
             })
             
             if r2 > best_outer_r2:

@@ -366,6 +366,9 @@ class DomainExpertCasesPipeline(MixedEmbeddingPipeline):
         embeddings = self._extract_embeddings_from_best_models(
             explainer_results, target_idx, target_name
         )
+        print(f"DEBUG: Extracted embeddings keys: {list(embeddings.keys()) if embeddings else 'Empty dict'}")
+        for k, v in embeddings.items():
+            print(f"DEBUG: {k} -> {'Empty list' if not v else f'{len(v)} folds'}")
         results['embeddings'] = embeddings
         
         # Stage 5: Train classical ML models on embeddings
@@ -415,7 +418,13 @@ class DomainExpertCasesPipeline(MixedEmbeddingPipeline):
                 
                 # Use the appropriate graph data
                 if graph_type == 'explainer' and explainer_graphs:
-                    data_list = explainer_graphs
+                    # Extract the actual data list from explainer graphs dictionary
+                    if 'fold_0' in explainer_graphs:
+                        data_list = explainer_graphs['fold_0']
+                        print(f"DEBUG: Using explainer graphs with {len(data_list)} samples")
+                    else:
+                        print(f"WARNING: No fold_0 data in explainer graphs, using original data")
+                        data_list = self.dataset.data_list
                 else:
                     data_list = self.dataset.data_list
                 
@@ -432,7 +441,13 @@ class DomainExpertCasesPipeline(MixedEmbeddingPipeline):
                 
                 # Use the appropriate graph data
                 if graph_type == 'explainer' and explainer_graphs:
-                    data_list = explainer_graphs
+                    # Extract the actual data list from explainer graphs dictionary
+                    if 'fold_0' in explainer_graphs:
+                        data_list = explainer_graphs['fold_0']
+                        print(f"DEBUG: Using explainer graphs with {len(data_list)} samples")
+                    else:
+                        print(f"WARNING: No fold_0 data in explainer graphs, using original data")
+                        data_list = self.dataset.data_list
                 else:
                     data_list = self.dataset.data_list
                 
@@ -457,9 +472,11 @@ class DomainExpertCasesPipeline(MixedEmbeddingPipeline):
         Returns:
             dict: Generated explainer graphs for each fold
         """
+        print("DEBUG: _generate_explainer_graphs method called!")
         explainer_graphs = {}
         
         print(f"Generating explainer graphs for {target_name}...")
+        print(f"DEBUG: Received knn_results with keys: {list(knn_results.keys()) if knn_results else 'None'}")
         
         # Create graphs directory
         graphs_dir = os.path.join(self.save_dir, f'{target_name}_graphs')
@@ -467,54 +484,41 @@ class DomainExpertCasesPipeline(MixedEmbeddingPipeline):
         
         try:
             from explainers.pipeline_explainer import create_explainer_sparsified_graph
+            print("DEBUG: Successfully imported create_explainer_sparsified_graph")
             
             # Find the best performing model for explainer generation
             best_model_info = None
             best_score = float('inf')
             
+            print(f"DEBUG: Looking for best model from {len(knn_results)} trained models")
             for model_key, model_data in knn_results.items():
+                print(f"DEBUG: Checking model {model_key}, has fold_results: {'fold_results' in model_data}")
                 if 'fold_results' in model_data and model_data['fold_results']:
                     # Use the first fold's best model (could be improved to use overall best)
                     fold_result = model_data['fold_results'][0]
+                    print(f"DEBUG: Fold result keys: {fold_result.keys()}")
+                    print(f"DEBUG: Has model_path: {'model_path' in fold_result}")
+                    if 'model_path' in fold_result:
+                        print(f"DEBUG: Model path value: {fold_result['model_path']}")
                     if 'mse' in fold_result and fold_result['mse'] < best_score:
                         best_score = fold_result['mse']
                         best_model_info = {
-                            'model_path': fold_result['model_path'],
+                            'model_path': fold_result.get('model_path'),
                             'model_type': model_key.split('_')[0],
                             'model_data': model_data
                         }
+                        print(f"DEBUG: New best model {model_key} with MSE {best_score}, model_path: {fold_result.get('model_path')}")
+            
+            print(f"DEBUG: Best model selected: {best_model_info}")
             
             if best_model_info:
-                print(f"Using {best_model_info['model_type']} model for explainer generation (MSE: {best_score:.4f})")
-                
-                # Load the best model
-                model_state = torch.load(best_model_info['model_path'], map_location=device)
-                
-                # Create the model instance (using parent class method)
-                num_features = len(self.dataset.node_feature_names)
-                if best_model_info['model_type'] == 'gcn':
-                    from models.GNNmodelsRegression import simple_GCN_res_plus_regression
-                    model = simple_GCN_res_plus_regression(
-                        num_features, self.hidden_dim, 1, self.num_layers, 
-                        dropout=self.dropout, device=device
-                    )
-                elif best_model_info['model_type'] == 'gat':
-                    from models.GNNmodelsRegression import simple_GAT_regression  
-                    model = simple_GAT_regression(
-                        num_features, self.hidden_dim, 1, heads=self.gat_heads, 
-                        dropout=self.dropout, device=device
-                    )
-                elif best_model_info['model_type'] == 'rggc':
-                    from models.GNNmodelsRegression import simple_RGGC_plus_regression
-                    model = simple_RGGC_plus_regression(
-                        num_features, self.hidden_dim, 1, self.num_layers, 
-                        dropout=self.dropout, device=device
-                    )
-                else:
-                    raise ValueError(f"Unknown model type: {best_model_info['model_type']}")
-                
-                model.load_state_dict(model_state)
-                model.to(device)
+                # Use the trained model directly from model_data instead of loading from disk
+                if 'model' in best_model_info['model_data'] and best_model_info['model_data']['model'] is not None:
+                    print(f"Using {best_model_info['model_type']} model for explainer generation (MSE: {best_score:.4f})")
+                    
+                    # Use the trained model directly
+                    model = best_model_info['model_data']['model']
+                    model.to(device)
                 
                 # Generate explainer-sparsified graphs
                 explainer_data = create_explainer_sparsified_graph(
@@ -529,8 +533,35 @@ class DomainExpertCasesPipeline(MixedEmbeddingPipeline):
                 explainer_graphs['fold_0'] = explainer_data
                 print(f"Successfully generated explainer graphs for {target_name}")
                 
+                # Explicitly call graph visualization
+                try:
+                    graphs_dir = os.path.join(self.save_dir, 'graphs')
+                    os.makedirs(graphs_dir, exist_ok=True)
+                    
+                    # Ensure the dataset has the original graph data for comparison
+                    if not hasattr(self.dataset, 'original_graph_data') or self.dataset.original_graph_data is None:
+                        # Set original graph data from the first data sample
+                        first_data = self.dataset.data_list[0]
+                        self.dataset.original_graph_data = {
+                            'edge_index': first_data.edge_index,
+                            'edge_weight': getattr(first_data, 'edge_weight', torch.ones(first_data.edge_index.shape[1])),
+                            'edge_type': getattr(first_data, 'edge_type', torch.ones(first_data.edge_index.shape[1], dtype=torch.long))
+                        }
+                        print("Set original graph data for visualization")
+                    
+                    self.dataset.visualize_graphs(save_dir=graphs_dir)
+                    print(f"Graph visualizations saved to: {graphs_dir}")
+                except Exception as viz_e:
+                    print(f"Warning: Graph visualization failed: {viz_e}")
+                    import traceback
+                    traceback.print_exc()
+                
             else:
                 print(f"Warning: No valid model found for explainer generation for {target_name}")
+                if best_model_info:
+                    print(f"DEBUG: Best model found but no model_path: {best_model_info}")
+                else:
+                    print(f"DEBUG: No best model found at all")
                 explainer_graphs = {}
                 
         except Exception as e:
@@ -557,38 +588,96 @@ class DomainExpertCasesPipeline(MixedEmbeddingPipeline):
         print(f"Extracting embeddings for {target_name}...")
         
         try:
-            # Extract embeddings from all trained models
+            print(f"DEBUG: Extracting embeddings from {len(training_results)} training results")
+            # Extract embeddings from all trained models using the trained model objects directly
             for model_key, model_data in training_results.items():
-                if 'fold_results' in model_data:
+                print(f"DEBUG: Processing {model_key}, has fold_results: {'fold_results' in model_data}")
+                print(f"DEBUG: Has trained model object: {'model' in model_data}")
+                
+                # Use trained model directly instead of loading from disk
+                if 'model' in model_data and model_data['model'] is not None:
+                    model_type = model_key.split('_')[0]  # Extract model type (gcn, gat, rggc)
+                    fold_embeddings = []
+                    
+                    print(f"DEBUG: Using trained model object directly for {model_type}")
+                    model = model_data['model']
+                    model.to(device)
+                    model.eval()
+                    
+                    # Extract embeddings from this model for all data samples
+                    try:
+                        with torch.no_grad():
+                            fold_embs = []
+                            print(f"DEBUG: Processing {len(self.dataset.data_list)} data samples with {model_type}")
+                            for data_idx, data in enumerate(self.dataset.data_list):
+                                data = data.to(device)
+                                
+                                # Create batch tensor for single sample
+                                batch = torch.zeros(data.x.size(0), dtype=torch.long, device=device)
+                                
+                                # All models return (prediction, embedding)
+                                output = model(data.x, data.edge_index, batch)
+                                if isinstance(output, tuple) and len(output) == 2:
+                                    _, emb = output
+                                    fold_embs.append(emb.cpu().numpy())
+                                    if data_idx == 0:  # Log first sample
+                                        print(f"DEBUG: Successfully extracted embedding shape: {emb.shape}")
+                                else:
+                                    print(f"DEBUG: Unexpected model output format: {type(output)}")
+                                    break
+                            
+                            if fold_embs:
+                                # Store all embeddings as a single "fold"
+                                fold_embeddings.append(np.array(fold_embs))
+                                print(f"DEBUG: Successfully extracted embeddings shape: {np.array(fold_embs).shape}")
+                            else:
+                                print(f"DEBUG: No embeddings extracted for {model_type}")
+                    
+                    except Exception as e:
+                        print(f"DEBUG: Direct model embedding extraction failed for {model_type}: {e}")
+                        import traceback
+                        traceback.print_exc()
+                        
+                elif 'fold_results' in model_data:
                     model_type = model_key.split('_')[0]  # Extract model type (gcn, gat, rggc)
                     fold_embeddings = []
                     
                     for fold_idx, fold_result in enumerate(model_data['fold_results']):
+                        print(f"DEBUG: Processing fold {fold_idx}, has model_path: {'model_path' in fold_result}")
                         if 'model_path' in fold_result:
+                            print(f"DEBUG: Model path: {fold_result['model_path']}")
                             try:
                                 # Load model and extract embeddings
                                 model_path = fold_result['model_path']
                                 model_state = torch.load(model_path, map_location=device)
+                                print(f"DEBUG: Loaded model state from {model_path}")
                                 
                                 # Create model instance
-                                num_features = len(self.dataset.node_feature_names)
+                                print(f"DEBUG: Creating {model_type} model with hidden_dim={self.hidden_dim}")
                                 if model_type == 'gcn':
                                     from models.GNNmodelsRegression import simple_GCN_res_plus_regression
                                     model = simple_GCN_res_plus_regression(
-                                        num_features, self.hidden_dim, 1, self.num_layers, 
-                                        dropout=self.dropout, device=device
+                                        hidden_channels=self.hidden_dim,
+                                        output_dim=1,
+                                        dropout_prob=self.dropout_rate,
+                                        input_channel=1
                                     )
                                 elif model_type == 'gat':
                                     from models.GNNmodelsRegression import simple_GAT_regression
                                     model = simple_GAT_regression(
-                                        num_features, self.hidden_dim, 1, heads=self.gat_heads,
-                                        dropout=self.dropout, device=device
+                                        hidden_channels=self.hidden_dim,
+                                        output_dim=1,
+                                        dropout_prob=self.dropout_rate,
+                                        input_channel=1,
+                                        num_heads=1
                                     )
                                 elif model_type == 'rggc':
                                     from models.GNNmodelsRegression import simple_RGGC_plus_regression
                                     model = simple_RGGC_plus_regression(
-                                        num_features, self.hidden_dim, 1, self.num_layers,
-                                        dropout=self.dropout, device=device
+                                        hidden_channels=self.hidden_dim,
+                                        output_dim=1,
+                                        dropout_prob=self.dropout_rate,
+                                        input_channel=1
                                     )
                                 else:
                                     continue
@@ -596,30 +685,42 @@ class DomainExpertCasesPipeline(MixedEmbeddingPipeline):
                                 model.load_state_dict(model_state)
                                 model.to(device)
                                 model.eval()
+                                print(f"DEBUG: Model loaded and ready for {model_type}")
                                 
                                 # Extract embeddings for this fold
                                 with torch.no_grad():
                                     fold_embs = []
-                                    for data in self.dataset.data_list:
+                                    print(f"DEBUG: Processing {len(self.dataset.data_list)} data samples")
+                                    for data_idx, data in enumerate(self.dataset.data_list):
                                         data = data.to(device)
-                                        # Get node embeddings (before final regression layer)
-                                        x = data.x
-                                        edge_index = data.edge_index
+                                        
+                                        # Create batch tensor for single sample
+                                        batch = torch.zeros(data.x.size(0), dtype=torch.long, device=device)
                                         
                                         # Forward pass to get embeddings
-                                        if hasattr(model, 'get_embeddings'):
-                                            emb = model.get_embeddings(x, edge_index)
-                                        else:
-                                            # For models without explicit embedding method
-                                            emb = model.gnn_layers(x, edge_index)
-                                            if hasattr(model, 'global_pool'):
-                                                emb = model.global_pool(emb)
+                                        try:
+                                            # All models return (prediction, embedding)
+                                            output = model(data.x, data.edge_index, batch)
+                                            if isinstance(output, tuple) and len(output) == 2:
+                                                _, emb = output
                                             else:
-                                                emb = torch.mean(emb, dim=0)
-                                        
-                                        fold_embs.append(emb.cpu().numpy())
+                                                print(f"DEBUG: Unexpected model output format: {type(output)}")
+                                                continue
+                                            
+                                            fold_embs.append(emb.cpu().numpy())
+                                            if data_idx == 0:  # Log first sample
+                                                print(f"DEBUG: Successfully extracted embedding shape: {emb.shape}")
+                                        except Exception as forward_e:
+                                            print(f"DEBUG: Forward pass failed for sample {data_idx}: {forward_e}")
+                                            import traceback
+                                            traceback.print_exc()
+                                            continue
                                     
-                                    fold_embeddings.append(np.array(fold_embs))
+                                    if fold_embs:
+                                        fold_embeddings.append(np.array(fold_embs))
+                                        print(f"DEBUG: Fold {fold_idx} embeddings shape: {np.array(fold_embs).shape}")
+                                    else:
+                                        print(f"DEBUG: No embeddings extracted for fold {fold_idx}")
                                     
                             except Exception as e:
                                 print(f"Warning: Could not extract embeddings for {model_type} fold {fold_idx}: {e}")
@@ -628,6 +729,21 @@ class DomainExpertCasesPipeline(MixedEmbeddingPipeline):
                     if fold_embeddings:
                         embeddings[model_key] = fold_embeddings
                         print(f"Extracted embeddings for {model_key}: {len(fold_embeddings)} folds")
+                        print(f"DEBUG: First fold embedding shape: {fold_embeddings[0].shape}")
+                        
+                        # Save embeddings to disk
+                        embeddings_dir = os.path.join(self.save_dir, 'embeddings')
+                        os.makedirs(embeddings_dir, exist_ok=True)
+                        for fold_idx, fold_emb in enumerate(fold_embeddings):
+                            save_embeddings(
+                                embeddings=fold_emb,
+                                fold_idx=fold_idx,
+                                model_name=model_key,
+                                embeddings_dir=embeddings_dir,
+                                target_name=target_name
+                            )
+                    else:
+                        print(f"DEBUG: No fold embeddings collected for {model_key}")
                         
         except Exception as e:
             print(f"Warning: Embedding extraction failed for {target_name}: {e}")
@@ -653,6 +769,13 @@ class DomainExpertCasesPipeline(MixedEmbeddingPipeline):
             print("Warning: No embeddings available for ML training")
             return {}
         
+        print(f"DEBUG: ML training received embeddings with keys: {list(embeddings.keys())}")
+        for k, v in embeddings.items():
+            if v:
+                print(f"DEBUG: {k} has {len(v)} folds, first fold shape: {v[0].shape}")
+            else:
+                print(f"DEBUG: {k} is empty")
+        
         try:
             # Prepare data for ML training
             from sklearn.model_selection import KFold
@@ -672,6 +795,12 @@ class DomainExpertCasesPipeline(MixedEmbeddingPipeline):
                     
                     # Use the first fold's embeddings for simplicity (could be improved)
                     emb_data = model_embeddings[0]
+                    print(f"DEBUG: Original embedding shape for {model_key}: {emb_data.shape}")
+                    
+                    # Reshape embeddings to 2D if needed (samples, features)
+                    if len(emb_data.shape) == 3 and emb_data.shape[1] == 1:
+                        emb_data = emb_data.squeeze(1)  # Remove middle dimension: (54, 1, 512) -> (54, 512)
+                        print(f"DEBUG: Reshaped embedding shape for {model_key}: {emb_data.shape}")
                     
                     if emb_data.shape[0] == len(target_values):
                         # Setup cross-validation
@@ -747,12 +876,73 @@ class DomainExpertCasesPipeline(MixedEmbeddingPipeline):
                         print(f"Completed ML training for {model_key}")
                     else:
                         print(f"Warning: Embedding shape mismatch for {model_key}")
+                        print(f"Expected {len(target_values)} samples, got {emb_data.shape[0]}")
+                else:
+                    print(f"Warning: No embeddings available for {model_key}")
+                    print(f"DEBUG: model_embeddings is empty or None: {model_embeddings}")
+            
+            # Generate ML model prediction vs actual plots immediately after training
+            if ml_results:
+                print(f"Generating ML model plots for {target_name}...")
+                try:
+                    plots_dir = os.path.join(self.save_dir, f'{target_name}_ml_plots')
+                    os.makedirs(plots_dir, exist_ok=True)
+                    
+                    # Create plots for ML models
+                    self._create_ml_prediction_plots(ml_results, target_name, plots_dir)
+                    print(f"ML model plots saved to: {plots_dir}")
+                except Exception as plot_e:
+                    print(f"Warning: Could not create ML model plots: {plot_e}")
             
             return ml_results
             
         except Exception as e:
             print(f"Warning: ML training failed for {target_name}: {e}")
             return {}
+    
+    def _create_ml_prediction_plots(self, ml_results, target_name, plots_dir):
+        """Create prediction vs actual plots specifically for ML models."""
+        import matplotlib.pyplot as plt
+        import numpy as np
+        
+        for model_key, model_data in ml_results.items():
+            if 'fold_results' in model_data:
+                fold_results = model_data['fold_results']
+                
+                # Collect all predictions and targets across folds
+                all_predictions = []
+                all_targets = []
+                
+                for fold_result in fold_results:
+                    if 'predictions' in fold_result and 'targets' in fold_result:
+                        all_predictions.extend(fold_result['predictions'])
+                        all_targets.extend(fold_result['targets'])
+                
+                if all_predictions and all_targets:
+                    # Create prediction vs actual plot
+                    plt.figure(figsize=(10, 8))
+                    plt.scatter(all_targets, all_predictions, alpha=0.6)
+                    
+                    # Add perfect prediction line
+                    min_val = min(min(all_targets), min(all_predictions))
+                    max_val = max(max(all_targets), max(all_predictions))
+                    plt.plot([min_val, max_val], [min_val, max_val], 'r--', alpha=0.8)
+                    
+                    # Calculate R2
+                    from sklearn.metrics import r2_score
+                    r2 = r2_score(all_targets, all_predictions)
+                    
+                    plt.xlabel('Actual Values')
+                    plt.ylabel('Predicted Values')
+                    plt.title(f'{model_key} - {target_name}\nR² = {r2:.3f}')
+                    plt.grid(True, alpha=0.3)
+                    
+                    # Save plot
+                    plot_path = os.path.join(plots_dir, f'{model_key}_{target_name}_pred_vs_actual.png')
+                    plt.savefig(plot_path, dpi=300, bbox_inches='tight')
+                    plt.close()
+                    
+                    print(f"Saved ML plot: {plot_path}")
     
     def _generate_comprehensive_results(self, results, target_name):
         """
@@ -789,7 +979,7 @@ class DomainExpertCasesPipeline(MixedEmbeddingPipeline):
             # Performance comparison across different stages
             create_performance_comparison_plot(
                 results, 
-                save_path=os.path.join(results_dir, f'{target_name}_performance_comparison.png')
+                os.path.join(results_dir, f'{target_name}_performance_comparison.png')
             )
             
             # Model-specific performance plots
@@ -803,10 +993,21 @@ class DomainExpertCasesPipeline(MixedEmbeddingPipeline):
         try:
             if self.use_nested_cv and 'knn_training' in results:
                 # Hyperparameter selection analysis
-                save_hyperparameter_tracking(
-                    results['knn_training'], 
-                    os.path.join(results_dir, f'{target_name}_hyperparameter_analysis.json')
-                )
+                # Convert results to proper format for hyperparameter tracking
+                param_counts = {}
+                for model_key, model_data in results['knn_training'].items():
+                    if 'fold_results' in model_data:
+                        for fold_result in model_data['fold_results']:
+                            if 'best_params' in fold_result:
+                                param_str = str(fold_result['best_params'])
+                                param_counts[param_str] = param_counts.get(param_str, 0) + 1
+                
+                if param_counts:
+                    save_hyperparameter_tracking(
+                        param_counts, 
+                        results_dir,
+                        f'{target_name}_hyperparameter_analysis.json'
+                    )
                 
                 # Create hyperparameter heatmap
                 self._create_hyperparameter_heatmap(
@@ -859,10 +1060,30 @@ class DomainExpertCasesPipeline(MixedEmbeddingPipeline):
                                 'fold_predictions': fold_predictions
                             }
             
+            # Process ML training results (LinearSVR and ExtraTrees on embeddings)
+            if 'ml_training' in results:
+                for model_key, model_data in results['ml_training'].items():
+                    if 'fold_results' in model_data:
+                        fold_predictions = []
+                        for fold_result in model_data['fold_results']:
+                            if 'predictions' in fold_result and 'targets' in fold_result:
+                                fold_predictions.append({
+                                    'actual': fold_result['targets'],
+                                    'predicted': fold_result['predictions']
+                                })
+                        
+                        if fold_predictions:
+                            model_predictions[f"{model_key}_ml"] = {
+                                'fold_predictions': fold_predictions
+                            }
+            
             # Create plots if we have predictions
             if model_predictions:
                 plots_dir = os.path.join(results_dir, 'model_plots')
                 create_prediction_vs_actual_plots(model_predictions, plots_dir, [target_name])
+                print(f"Created prediction vs actual plots for {len(model_predictions)} models")
+            else:
+                print("No model predictions available for plotting")
                 
         except Exception as e:
             print(f"Warning: Could not create model performance plots: {e}")
@@ -973,7 +1194,7 @@ class DomainExpertCasesPipeline(MixedEmbeddingPipeline):
         os.makedirs(summary_dir, exist_ok=True)
         
         # Save complete results
-        save_combined_results_summary(results, summary_dir)
+        save_combined_results_summary(results, summary_dir, self.case_type, self.target_names)
         
         # Create case-specific summary
         case_info = self.case_impl.get_case_info(self.case_type)

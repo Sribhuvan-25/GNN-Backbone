@@ -69,18 +69,37 @@ def convert_for_json_serialization(obj: Any) -> Any:
     Returns:
         JSON-serializable object
     """
+    import torch
+    
     if isinstance(obj, np.ndarray):
         return obj.tolist()
     elif isinstance(obj, np.integer):
         return int(obj)
     elif isinstance(obj, np.floating):
         return float(obj)
+    elif isinstance(obj, torch.Tensor):
+        return obj.detach().cpu().numpy().tolist()
+    elif isinstance(obj, torch.nn.Module):
+        # Skip PyTorch models - they can't be JSON serialized
+        return f"<PyTorch Model: {obj.__class__.__name__}>"
+    elif hasattr(obj, '__dict__') and hasattr(obj, '__class__'):
+        # Handle custom objects by converting to string representation
+        return f"<{obj.__class__.__name__} object>"
     elif isinstance(obj, dict):
         return {key: convert_for_json_serialization(value) for key, value in obj.items()}
     elif isinstance(obj, list):
         return [convert_for_json_serialization(item) for item in obj]
+    elif isinstance(obj, tuple):
+        return [convert_for_json_serialization(item) for item in obj]
     else:
-        return obj
+        # For any other non-serializable objects, convert to string
+        try:
+            # Test if it's JSON serializable
+            import json
+            json.dumps(obj)
+            return obj
+        except (TypeError, ValueError):
+            return str(obj)
 
 
 def save_embeddings(embeddings: np.ndarray, fold_idx: int, model_name: str, 
