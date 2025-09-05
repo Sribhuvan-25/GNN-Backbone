@@ -182,13 +182,14 @@ class GNNExplainerRegression:
         
         return edge_importance_matrix, explanation
     
-    def get_node_importance(self, edge_importance_matrix, node_names=None):
+    def get_node_importance(self, edge_importance_matrix, node_names=None, save_path=None):
         """
         Calculate node importance from edge importance matrix
         
         Args:
             edge_importance_matrix: Matrix of edge importance scores
             node_names: Names of the nodes (features)
+            save_path: Optional path to save the importance report
             
         Returns:
             node_importance: Array of node importance scores
@@ -224,6 +225,63 @@ class GNNExplainerRegression:
         print(f"Node importance calculated as: sum(edge_weights) / degree")
         print(f"Total nodes analyzed: {edge_importance_matrix.shape[0]}")
         
+        # Save to file if path is provided
+        if save_path is not None:
+            import pandas as pd
+            import os
+            
+            # Create the directory if it doesn't exist
+            os.makedirs(os.path.dirname(save_path), exist_ok=True)
+            
+            # Prepare data for CSV
+            importance_data = []
+            for i, idx in enumerate(sorted_indices):
+                idx = idx.item()
+                importance = normalized_importance[idx].item()
+                raw_importance = node_importance[idx].item()
+                degree = node_degrees[idx].item()
+                
+                node_name = node_names[idx] if node_names is not None else f"Node_{idx}"
+                
+                importance_data.append({
+                    'rank': i + 1,
+                    'node_name': node_name,
+                    'normalized_importance': importance,
+                    'raw_importance': raw_importance,
+                    'degree': degree
+                })
+            
+            # Save as CSV
+            df = pd.DataFrame(importance_data)
+            csv_path = save_path.replace('.txt', '.csv') if save_path.endswith('.txt') else f"{save_path}.csv"
+            df.to_csv(csv_path, index=False)
+            
+            # Also save as human-readable text
+            txt_path = save_path.replace('.csv', '.txt') if save_path.endswith('.csv') else f"{save_path}.txt"
+            with open(txt_path, 'w') as f:
+                f.write("=== NODE IMPORTANCE REPORT ===\n")
+                f.write("Top 20 most important nodes (microbial families):\n")
+                f.write("-" * 60 + "\n")
+                
+                for i, idx in enumerate(sorted_indices[:20]):
+                    idx = idx.item()
+                    importance = normalized_importance[idx].item()
+                    raw_importance = node_importance[idx].item()
+                    degree = node_degrees[idx].item()
+                    
+                    if node_names is not None:
+                        node_name = node_names[idx]
+                        f.write(f"{i+1:2d}. {node_name[:45]:45s} | Score: {importance:.4f} | Raw: {raw_importance:.4f} | Degree: {degree:.0f}\n")
+                    else:
+                        f.write(f"{i+1:2d}. Node {idx:3d}                                     | Score: {importance:.4f} | Raw: {raw_importance:.4f} | Degree: {degree:.0f}\n")
+                
+                f.write("-" * 60 + "\n")
+                f.write(f"Node importance calculated as: sum(edge_weights) / degree\n")
+                f.write(f"Total nodes analyzed: {edge_importance_matrix.shape[0]}\n")
+            
+            print(f"Node importance report saved to: {txt_path}")
+            print(f"Node importance CSV saved to: {csv_path}")
+        
         return normalized_importance.cpu().numpy(), sorted_indices.cpu().numpy()
     
     def create_node_pruned_graph(self, data, edge_importance_matrix, node_names=None, 
@@ -249,11 +307,19 @@ class GNNExplainerRegression:
         # Determine which nodes to keep based on importance
         important_nodes = np.where(node_importance > importance_threshold)[0]
         
-        # If too few nodes meet threshold, keep top N nodes
-        if len(important_nodes) < min_nodes:
-            print(f"\nOnly {len(important_nodes)} nodes exceed threshold {importance_threshold}")
-            print(f"Keeping top {min_nodes} most important nodes instead")
-            important_nodes = sorted_indices[:min_nodes]
+        # For explainer-based pruning, we want to be more aggressive
+        # Use percentile-based selection instead of absolute threshold
+        total_nodes = len(node_importance)
+        
+        # Keep top 50-70% of nodes based on importance (more aggressive pruning)
+        nodes_to_keep = max(min_nodes, int(total_nodes * 0.6))  # Keep 60% of nodes
+        
+        print(f"\nAGGRESSIVE NODE-BASED PRUNING:")
+        print(f"Nodes exceeding threshold {importance_threshold}: {len(important_nodes)}")
+        print(f"Using percentile-based selection: keeping top {nodes_to_keep} out of {total_nodes} nodes")
+        
+        # Always use top-k selection for consistent pruning
+        important_nodes = sorted_indices[:nodes_to_keep]
         
         print(f"\nNODE-BASED PRUNING:")
         print(f"Original graph: {data.x.shape[0]} nodes")
@@ -323,12 +389,11 @@ class GNNExplainerRegression:
         attention_scores = self._extract_gat_attention_scores(data, model)
         
         if attention_scores is None:
-            print("Warning: Could not extract attention scores, falling back to edge-based importance")
-            pruned_data, kept_nodes, pruned_node_names = self.create_node_pruned_graph(
-                data, torch.eye(data.x.shape[0]), node_names, attention_threshold, min_nodes)
-            # Return with dummy attention scores to match expected return signature
-            dummy_attention = np.ones(data.x.shape[0]) * 0.5  # All nodes get equal importance
-            return pruned_data, kept_nodes, pruned_node_names, dummy_attention
+            print("Warning: Could not extract GAT attention scores")
+            print("ERROR: This method should only be called for GAT models with attention scores")
+            print("Falling back to regular node pruning would not provide attention information")
+            # Return None to indicate failure - calling code should handle this
+            return None, None, None, None
         
         # Determine important nodes based on attention scores
         important_nodes = np.where(attention_scores > attention_threshold)[0]
@@ -566,8 +631,8 @@ class GNNExplainerRegression:
         
         for i, (u, v, imp) in enumerate(top_edges[:10]):  # Show top 10 edges
             if node_names is not None:
-                u_name = node_names[u]
-                v_name = node_names[v]
+                u_name = node_names[u] if u < len(node_names) else f"Node_{u}"
+                v_name = node_names[v] if v < len(node_names) else f"Node_{v}"
                 explanation += f"{i+1}. {u_name} ↔ {v_name}: {imp:.3f}\n"
             else:
                 explanation += f"{i+1}. Feature {u} ↔ Feature {v}: {imp:.3f}\n"

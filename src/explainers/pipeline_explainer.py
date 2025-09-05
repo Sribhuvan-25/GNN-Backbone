@@ -8,7 +8,7 @@ from explainers.explainer_regression import GNNExplainerRegression
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
 def create_explainer_sparsified_graph(pipeline, model, target_idx=0, importance_threshold=0.3, 
-                                     use_node_pruning=True, use_attention_pruning=True):
+                                     use_node_pruning=True, use_attention_pruning=True, target_name=None):
     """
     Create a sparsified graph based on GNNExplainer results with node-based pruning
     
@@ -19,23 +19,29 @@ def create_explainer_sparsified_graph(pipeline, model, target_idx=0, importance_
         importance_threshold: Threshold for importance (nodes or edges)
         use_node_pruning: Whether to use node-based pruning instead of edge-based pruning
         use_attention_pruning: Whether to use attention-based node pruning (requires GAT model)
+        target_name: Name of the target variable for filename generation
         
     Returns:
         List of sparsified graph data objects
     """
     print(f"\nCreating explainer-based sparsified graph...")
     print(f"Graph mode: {pipeline.graph_mode}")
-    print(f"Number of nodes: {len(pipeline.dataset.node_feature_names)}")
+    print(f"Current number of nodes: {len(pipeline.dataset.node_feature_names)}")
     print(f"Original importance threshold: {importance_threshold}")
+    
+    # Get original node count (before any pruning)
+    original_node_count = pipeline.dataset.original_node_count if hasattr(pipeline.dataset, 'original_node_count') and pipeline.dataset.original_node_count is not None else len(pipeline.dataset.node_feature_names)
+    print(f"Using original node count for explainer: {original_node_count}")
     
     # Initialize explainer
     explainer = GNNExplainerRegression(model, device)
     
-    # Create a combined edge importance matrix from multiple samples
+    # Create a combined edge importance matrix from multiple samples using original size
     num_explain = min(10, len(pipeline.dataset.data_list))  # Use up to 10 samples
-    combined_edge_importance = torch.zeros((len(pipeline.dataset.node_feature_names), len(pipeline.dataset.node_feature_names)), device=device)
+    combined_edge_importance = torch.zeros((original_node_count, original_node_count), device=device)
     
     importance_matrices = []
+    num_processed = 0
     
     for i in range(num_explain):
         # Get sample data
@@ -49,11 +55,33 @@ def create_explainer_sparsified_graph(pipeline, model, target_idx=0, importance_
         )
         
         importance_matrices.append(edge_importance_matrix)
+        
+        # Handle size mismatch - resize if necessary
+        if edge_importance_matrix.size() != combined_edge_importance.size():
+            print(f"WARNING: Size mismatch detected - edge_importance_matrix: {edge_importance_matrix.size()}, combined: {combined_edge_importance.size()}")
+            
+            # If the edge importance matrix is smaller, we might be working with pruned data
+            # In this case, skip this sample or pad it
+            if edge_importance_matrix.size(0) < combined_edge_importance.size(0):
+                print("Edge importance matrix is smaller - likely working with pruned data. Skipping this sample.")
+                continue
+            elif edge_importance_matrix.size(0) > combined_edge_importance.size(0):
+                print("Combined matrix is smaller - resizing combined matrix to match")
+                # Resize the combined matrix to match  
+                combined_edge_importance = torch.zeros_like(edge_importance_matrix, device=device)
+                num_processed = 0  # Reset counter since we're starting over
+        
         # Add to combined matrix
         combined_edge_importance += edge_importance_matrix
+        num_processed += 1
     
     # Average the importance (could also use median for robustness)
-    combined_edge_importance /= num_explain
+    if num_processed > 0:
+        combined_edge_importance /= num_processed
+        print(f"Successfully processed {num_processed} out of {num_explain} samples for explainer")
+    else:
+        print("ERROR: No samples could be processed for explainer")
+        return None
     
     # Add diagnostics
     print(f"Edge importance statistics:")
@@ -72,18 +100,33 @@ def create_explainer_sparsified_graph(pipeline, model, target_idx=0, importance_
     
     # Generate node importance report and choose pruning method
     print(f"\nUsing {'NODE-BASED' if use_node_pruning else 'EDGE-BASED'} pruning approach")
-    explainer.get_node_importance(combined_edge_importance, pipeline.dataset.node_feature_names)
+    
+    # Create save path for feature importance report
+    import os
+    if target_name:
+        filename = f"feature_importance_report_{target_name.replace('-', '_')}"
+    else:
+        filename = "feature_importance_report"
+    save_path = os.path.join(pipeline.save_dir, filename)
+    
+    explainer.get_node_importance(combined_edge_importance, pipeline.dataset.node_feature_names, save_path)
     
     # Choose pruning method
+    print(f"DEBUG: Choosing pruning method - use_node_pruning={use_node_pruning}, use_attention_pruning={use_attention_pruning}")
+    print(f"DEBUG: Model type: {type(model).__name__}, is_gat_model={is_gat_model(model) if use_attention_pruning else 'N/A'}")
+    
     if use_node_pruning:
         if use_attention_pruning and is_gat_model(model):
-            return create_attention_pruned_graph_pipeline(pipeline, explainer, model, importance_threshold)
+            print("DEBUG: Using ATTENTION-based node pruning")
+            return create_attention_pruned_graph_pipeline(pipeline, explainer, model, importance_threshold, combined_edge_importance, target_name)
         else:
-            return create_node_pruned_graph_pipeline(pipeline, explainer, combined_edge_importance, importance_threshold)
+            print("DEBUG: Using REGULAR node-based pruning with edge importance")
+            return create_node_pruned_graph_pipeline(pipeline, explainer, combined_edge_importance, importance_threshold, target_name)
     else:
+        print("DEBUG: Using EDGE-based pruning")
         return create_edge_pruned_graph_pipeline(pipeline, explainer, combined_edge_importance, importance_threshold, non_zero_importance)
 
-def create_node_pruned_graph_pipeline(pipeline, explainer, combined_edge_importance, importance_threshold):
+def create_node_pruned_graph_pipeline(pipeline, explainer, combined_edge_importance, importance_threshold, target_name=None):
     """Create node-pruned graph for the pipeline"""
     
     # Use first sample as template for node pruning
@@ -266,7 +309,7 @@ def is_gat_model(model):
             return True
     return False
 
-def create_attention_pruned_graph_pipeline(pipeline, explainer, model, importance_threshold):
+def create_attention_pruned_graph_pipeline(pipeline, explainer, model, importance_threshold, combined_edge_importance, target_name=None):
     """Create attention-based node-pruned graph for the pipeline"""
     
     print(f"\n{'='*60}")
@@ -277,7 +320,7 @@ def create_attention_pruned_graph_pipeline(pipeline, explainer, model, importanc
     template_data = pipeline.dataset.data_list[0]
     
     # Create attention-based node-pruned version of the template
-    pruned_data, kept_nodes, pruned_node_names, attention_scores = explainer.create_attention_based_node_pruning(
+    result = explainer.create_attention_based_node_pruning(
         template_data, 
         model,
         pipeline.dataset.node_feature_names,
@@ -285,8 +328,20 @@ def create_attention_pruned_graph_pipeline(pipeline, explainer, model, importanc
         min_nodes=10
     )
     
+    # Check if attention-based pruning failed
+    if result[0] is None:
+        print("Attention-based pruning failed, falling back to edge-importance based node pruning")
+        # Fall back to regular node pruning using the combined edge importance from explainer
+        return create_node_pruned_graph_pipeline(pipeline, explainer, combined_edge_importance, importance_threshold, target_name)
+    
+    pruned_data, kept_nodes, pruned_node_names, attention_scores = result
+    
     # Save attention scores for analysis
-    attention_report_path = f"{pipeline.save_dir}/attention_scores.csv"
+    if target_name:
+        attention_filename = f"attention_scores_{target_name.replace('-', '_')}.csv"
+    else:
+        attention_filename = "attention_scores.csv"
+    attention_report_path = f"{pipeline.save_dir}/{attention_filename}"
     if pruned_node_names is not None:
         import pandas as pd
         attention_df = pd.DataFrame({
