@@ -123,6 +123,12 @@ class CaseImplementations:
         print(f"{'='*60}")
         results['ace_km'] = pipeline._run_single_target_pipeline(ace_target_idx, "ACE-km")
         
+        # Reset dataset to original state between targets for independent processing
+        print(f"\n{'='*60}")
+        print("RESETTING DATASET BETWEEN TARGETS")
+        print(f"{'='*60}")
+        pipeline.dataset.reset_to_original_state()
+        
         print(f"\n{'='*60}")
         print("CASE 1b: H2-km with hydrogenotrophic features")
         print(f"{'='*60}")
@@ -156,6 +162,12 @@ class CaseImplementations:
         print(f"{'='*60}")
         results['ace_km'] = pipeline._run_single_target_pipeline(ace_target_idx, "ACE-km")
         
+        # Reset dataset to original state between targets for independent processing
+        print(f"\n{'='*60}")
+        print("RESETTING DATASET BETWEEN TARGETS")
+        print(f"{'='*60}")
+        pipeline.dataset.reset_to_original_state()
+        
         print(f"\n{'='*60}")
         print("CASE 2b: H2-km with acetoclastic features")
         print(f"{'='*60}")
@@ -188,6 +200,12 @@ class CaseImplementations:
         print("CASE 3a: ACE-km with all feature groups")
         print(f"{'='*60}")
         results['ace_km'] = pipeline._run_single_target_pipeline(ace_target_idx, "ACE-km")
+        
+        # Reset dataset to original state between targets for independent processing
+        print(f"\n{'='*60}")
+        print("RESETTING DATASET BETWEEN TARGETS")
+        print(f"{'='*60}")
+        pipeline.dataset.reset_to_original_state()
         
         print(f"\n{'='*60}")
         print("CASE 3b: H2-km with all feature groups")

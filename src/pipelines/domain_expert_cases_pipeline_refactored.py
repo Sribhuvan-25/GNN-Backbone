@@ -521,17 +521,37 @@ class DomainExpertCasesPipeline(MixedEmbeddingPipeline):
                     model.to(device)
                 
                 # Generate explainer-sparsified graphs
-                explainer_data = create_explainer_sparsified_graph(
-                    pipeline=self,
-                    model=model,
-                    target_idx=target_idx,
-                    importance_threshold=self.importance_threshold,
-                    use_node_pruning=True,
-                    use_attention_pruning=True
-                )
+                print(f"DEBUG: About to call create_explainer_sparsified_graph with model {best_model_info['model_type']}")
+                print(f"DEBUG: Model is GAT: {best_model_info['model_type'] == 'gat'}")
+                print(f"DEBUG: use_attention_pruning=True, use_node_pruning=True")
                 
-                explainer_graphs['fold_0'] = explainer_data
-                print(f"Successfully generated explainer graphs for {target_name}")
+                try:
+                    explainer_data = create_explainer_sparsified_graph(
+                        pipeline=self,
+                        model=model,
+                        target_idx=target_idx,
+                        importance_threshold=self.importance_threshold,
+                        use_node_pruning=True,
+                        use_attention_pruning=True,
+                        target_name=target_name
+                    )
+                except Exception as explainer_error:
+                    print(f"ERROR: Explainer generation failed with: {explainer_error}")
+                    import traceback
+                    traceback.print_exc()
+                    explainer_data = None
+                
+                print(f"DEBUG: create_explainer_sparsified_graph returned: {type(explainer_data)}")
+                
+                if explainer_data is not None:
+                    if isinstance(explainer_data, list):
+                        print(f"DEBUG: Explainer data has {len(explainer_data)} samples")
+                    
+                    explainer_graphs['fold_0'] = explainer_data
+                    print(f"Successfully generated explainer graphs for {target_name}")
+                else:
+                    print(f"WARNING: Explainer generation returned None, skipping explainer graphs for {target_name}")
+                    explainer_graphs = {}
                 
                 # Explicitly call graph visualization
                 try:
@@ -637,6 +657,26 @@ class DomainExpertCasesPipeline(MixedEmbeddingPipeline):
                         print(f"DEBUG: Direct model embedding extraction failed for {model_type}: {e}")
                         import traceback
                         traceback.print_exc()
+                    
+                    print(f"DEBUG: Direct extraction - fold_embeddings length: {len(fold_embeddings)}")
+                    if fold_embeddings:
+                        embeddings[model_key] = fold_embeddings
+                        print(f"Extracted embeddings for {model_key}: {len(fold_embeddings)} folds")
+                        print(f"DEBUG: First fold embedding shape: {fold_embeddings[0].shape}")
+                        
+                        # Save embeddings to disk
+                        embeddings_dir = os.path.join(self.save_dir, 'embeddings')
+                        os.makedirs(embeddings_dir, exist_ok=True)
+                        for fold_idx, fold_emb in enumerate(fold_embeddings):
+                            save_embeddings(
+                                embeddings=fold_emb,
+                                fold_idx=fold_idx,
+                                model_name=model_type,
+                                embeddings_dir=embeddings_dir,
+                                target_name=target_name
+                            )
+                    else:
+                        print(f"DEBUG: No fold embeddings collected for {model_key}")
                         
                 elif 'fold_results' in model_data:
                     model_type = model_key.split('_')[0]  # Extract model type (gcn, gat, rggc)
@@ -726,6 +766,9 @@ class DomainExpertCasesPipeline(MixedEmbeddingPipeline):
                                 print(f"Warning: Could not extract embeddings for {model_type} fold {fold_idx}: {e}")
                                 continue
                     
+                    print(f"DEBUG: After extraction, fold_embeddings length: {len(fold_embeddings)}")
+                    print(f"DEBUG: fold_embeddings content: {fold_embeddings}")
+                    
                     if fold_embeddings:
                         embeddings[model_key] = fold_embeddings
                         print(f"Extracted embeddings for {model_key}: {len(fold_embeddings)} folds")
@@ -786,21 +829,40 @@ class DomainExpertCasesPipeline(MixedEmbeddingPipeline):
             from sklearn.metrics import mean_squared_error, r2_score, mean_absolute_error
             
             ml_results = {}
-            target_values = np.array([data.y[target_idx].item() for data in self.dataset.data_list])
+            # Debug target extraction to understand the tensor structure
+            print(f"DEBUG: Analyzing target structure for target_idx={target_idx}")
+            sample_data = self.dataset.data_list[0]
+            print(f"DEBUG: sample_data.y shape: {sample_data.y.shape}")
+            print(f"DEBUG: sample_data.y content: {sample_data.y}")
+            print(f"DEBUG: sample_data.y[0, {target_idx}]: {sample_data.y[0, target_idx]}")
+            print(f"DEBUG: sample_data.y[0, {target_idx}] shape: {sample_data.y[0, target_idx].shape}")
+            print(f"DEBUG: sample_data.y[0, {target_idx}] dim: {sample_data.y[0, target_idx].dim()}")
+            
+            target_values = np.array([data.y[0, target_idx].item() for data in self.dataset.data_list])
             
             # Train ML models on each embedding type
             for model_key, model_embeddings in embeddings.items():
                 if model_embeddings:
                     print(f"Training ML models on {model_key} embeddings...")
                     
-                    # Use the first fold's embeddings for simplicity (could be improved)
-                    emb_data = model_embeddings[0]
-                    print(f"DEBUG: Original embedding shape for {model_key}: {emb_data.shape}")
-                    
-                    # Reshape embeddings to 2D if needed (samples, features)
-                    if len(emb_data.shape) == 3 and emb_data.shape[1] == 1:
-                        emb_data = emb_data.squeeze(1)  # Remove middle dimension: (54, 1, 512) -> (54, 512)
-                        print(f"DEBUG: Reshaped embedding shape for {model_key}: {emb_data.shape}")
+                    # Extract embeddings array - embeddings is a list with 1 element
+                    if len(model_embeddings) == 1:
+                        emb_data = model_embeddings[0]  # Get the single embedding array
+                        print(f"DEBUG: Original embedding shape for {model_key}: {emb_data.shape}")
+                        
+                        # Reshape embeddings to 2D if needed (samples, features)
+                        if len(emb_data.shape) == 3 and emb_data.shape[1] == 1:
+                            emb_data = emb_data.squeeze(1)  # Remove middle dimension: (54, 1, 512) -> (54, 512)
+                            print(f"DEBUG: Reshaped embedding shape for {model_key}: {emb_data.shape}")
+                        
+                        if emb_data.shape[0] == len(target_values):
+                            print(f"DEBUG: Embeddings shape matches target values: {emb_data.shape[0]} == {len(target_values)}")
+                        else:
+                            print(f"ERROR: Shape mismatch - embeddings: {emb_data.shape[0]}, targets: {len(target_values)}")
+                            continue
+                    else:
+                        print(f"ERROR: Expected 1 embedding fold, got {len(model_embeddings)}")
+                        continue
                     
                     if emb_data.shape[0] == len(target_values):
                         # Setup cross-validation

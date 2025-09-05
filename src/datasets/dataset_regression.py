@@ -41,6 +41,7 @@ class MicrobialGNNDataset:
         self.edge_index = None
         self.edge_weight = None
         self.edge_type = None
+        self.original_node_count = None  # Track original node count before pruning
         self.original_graph_data = None
         self.explainer_sparsified_graph_data = None
         
@@ -59,6 +60,9 @@ class MicrobialGNNDataset:
         # Create PyG data objects
         self.data_list = self._create_data_objects()
         
+        # Store original data list for reset capability (after data_list is created)
+        self.original_data_list = [data.clone() for data in self.data_list]
+        
         # Store original graph data for visualization
         self.original_graph_data = {
             'edge_index': self.edge_index.clone(),
@@ -71,6 +75,40 @@ class MicrobialGNNDataset:
         
         # Create directory for visualizations
         os.makedirs('graph_visualizations', exist_ok=True)
+        
+        # Save original state for reset capability
+        self._save_original_state()
+    
+    def _save_original_state(self):
+        """Save the original dataset state for resetting between targets"""
+        self.original_node_feature_names = self.node_feature_names.copy() if self.node_feature_names else None
+        self.original_data_list = None  # Will be set after data_list is created
+        
+    def reset_to_original_state(self):
+        """Reset dataset to original state before any pruning"""
+        print("Resetting dataset to original state...")
+        
+        # Reset node feature names
+        if self.original_node_feature_names:
+            self.node_feature_names = self.original_node_feature_names.copy()
+        
+        # Reset data list to original
+        if self.original_data_list:
+            self.data_list = [data.clone() for data in self.original_data_list]
+        else:
+            # Recreate data list from scratch
+            self.data_list = self._create_data_objects()
+        
+        # Reset explainer data
+        self.explainer_sparsified_graph_data = None
+        
+        # Reset graph data to original k-NN graph
+        if hasattr(self, 'original_graph_data') and self.original_graph_data:
+            self.edge_index = self.original_graph_data['edge_index'].clone()
+            self.edge_weight = self.original_graph_data['edge_weight'].clone()  
+            self.edge_type = self.original_graph_data['edge_type'].clone()
+            
+        print(f"Dataset reset complete - back to {len(self.node_feature_names)} nodes")
     
     def _load_data(self):
         """Load and process the data"""
@@ -182,6 +220,9 @@ class MicrobialGNNDataset:
         
         # Store the feature names for later use
         self.node_feature_names = list(df_features.columns)
+        # Track original node count before any pruning
+        if self.original_node_count is None:
+            self.original_node_count = len(self.node_feature_names)
         
         return df_features, feature_matrix
     
@@ -538,8 +579,9 @@ class MicrobialGNNDataset:
         # Create a figure with two subplots side by side
         fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(20, 10))
         
-        # Get number of nodes
-        num_nodes = len(self.node_feature_names)
+        # Get original and current number of nodes
+        original_nodes = self.original_node_count if self.original_node_count is not None else len(self.node_feature_names)
+        current_nodes = len(self.node_feature_names)
         
         # Visualize original graph
         self._visualize_single_graph(
@@ -547,7 +589,8 @@ class MicrobialGNNDataset:
             self.original_graph_data['edge_weight'],
             self.original_graph_data['edge_type'],
             ax1,
-            title=f"KNN Graph ({num_nodes} nodes, {self.original_graph_data['edge_index'].shape[1]//2} edges)"
+            title=f"KNN Graph ({original_nodes} nodes, {self.original_graph_data['edge_index'].shape[1]//2} edges)",
+            graph_type='original'
         )
         
         # Check if explainer-sparsified graph exists
@@ -558,7 +601,8 @@ class MicrobialGNNDataset:
                 self.explainer_sparsified_graph_data['edge_weight'],
                 self.explainer_sparsified_graph_data['edge_type'],
                 ax2,
-                title=f"GNNExplainer Graph ({num_nodes} nodes, {self.explainer_sparsified_graph_data['edge_index'].shape[1]//2} edges)"
+                title=f"GNNExplainer Graph ({current_nodes} nodes, {self.explainer_sparsified_graph_data['edge_index'].shape[1]//2} edges)",
+                graph_type='explainer'
             )
         else:
             ax2.text(0.5, 0.5, "GNNExplainer graph not created yet.",
@@ -579,7 +623,8 @@ class MicrobialGNNDataset:
             self.original_graph_data['edge_weight'],
             self.original_graph_data['edge_type'],
             plt.gca(),
-            title=f"KNN Graph ({num_nodes} nodes, {self.original_graph_data['edge_index'].shape[1]//2} edges)"
+            title=f"KNN Graph ({original_nodes} nodes, {self.original_graph_data['edge_index'].shape[1]//2} edges)",
+            graph_type='original'
         )
         plt.tight_layout()
         plt.savefig(f"{save_dir}/knn_graph.png", dpi=300, bbox_inches='tight')
@@ -592,13 +637,33 @@ class MicrobialGNNDataset:
                 self.explainer_sparsified_graph_data['edge_weight'],
                 self.explainer_sparsified_graph_data['edge_type'],
                 plt.gca(),
-                title=f"GNNExplainer Graph ({num_nodes} nodes, {self.explainer_sparsified_graph_data['edge_index'].shape[1]//2} edges)"
+                title=f"GNNExplainer Graph ({current_nodes} nodes, {self.explainer_sparsified_graph_data['edge_index'].shape[1]//2} edges)",
+                graph_type='explainer'
             )
             plt.tight_layout()
             plt.savefig(f"{save_dir}/explainer_graph.png", dpi=300, bbox_inches='tight')
             plt.close()
     
-    def _visualize_single_graph(self, edge_index, edge_weight, edge_type, ax, title):
+    def _get_node_labels(self, G, graph_type):
+        """Get appropriate node labels for visualization based on graph type."""
+        if graph_type == 'explainer' and hasattr(self, 'explainer_sparsified_graph_data'):
+            explainer_data = self.explainer_sparsified_graph_data
+            if 'pruned_node_names' in explainer_data and explainer_data['pruned_node_names']:
+                # Use pruned node names if available
+                pruned_names = explainer_data['pruned_node_names']
+                return {node: pruned_names[node] if node < len(pruned_names) else f"Node_{node}" 
+                       for node in G.nodes()}
+            elif 'kept_nodes' in explainer_data:
+                # Use original node names for kept nodes
+                kept_nodes = explainer_data['kept_nodes']
+                return {node: self.node_feature_names[kept_nodes[node]] if node < len(kept_nodes) else f"Node_{node}"
+                       for node in G.nodes()}
+        
+        # Default: use original node feature names (with bounds checking)
+        return {node: self.node_feature_names[node] if node < len(self.node_feature_names) else f"Node_{node}"
+               for node in G.nodes()}
+
+    def _visualize_single_graph(self, edge_index, edge_weight, edge_type, ax, title, graph_type='original'):
         """Helper method to visualize a single graph"""
         # Create a NetworkX graph
         G = nx.Graph()
@@ -696,7 +761,7 @@ class MicrobialGNNDataset:
             G, 
             pos=pos,
             with_labels=True,
-            labels={node: self.node_feature_names[node] for node in G.nodes()},
+            labels=self._get_node_labels(G, graph_type),
             node_size=node_size,
             node_color=node_colors,
             width=edge_width,
