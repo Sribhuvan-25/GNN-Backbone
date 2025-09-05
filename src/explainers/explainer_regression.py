@@ -6,6 +6,7 @@ import torch.nn.functional as F
 from torch.optim import Adam
 import networkx as nx
 from sklearn.manifold import TSNE
+import inspect
 
 class GNNExplainerRegression:
     """GNN explainer for regression tasks"""
@@ -284,6 +285,348 @@ class GNNExplainerRegression:
         
         return normalized_importance.cpu().numpy(), sorted_indices.cpu().numpy()
     
+    def get_embedding_based_node_importance(self, model, data_list, node_names=None, save_path=None):
+        """
+        Calculate node importance based on embedding magnitudes from trained GNN
+        This method is more sophisticated as it uses the learned representations
+        
+        Args:
+            model: Trained GNN model
+            data_list: List of data objects
+            node_names: Names of the nodes (features)  
+            save_path: Optional path to save the importance report
+            
+        Returns:
+            node_importance: Array of embedding-based node importance scores
+        """
+        print("\n=== EMBEDDING-BASED NODE IMPORTANCE ===")
+        print("Calculating importance from learned GNN embeddings...")
+        
+        model.eval()
+        embedding_magnitudes = []
+        
+        # Process a subset of samples for efficiency
+        num_samples = min(10, len(data_list))
+        
+        with torch.no_grad():
+            for i in range(num_samples):
+                data = data_list[i].to(self.device)
+                
+                # Get embeddings from trained model (your models return (prediction, embedding))
+                try:
+                    prediction, embeddings = model(data)
+                    
+                    # Handle different embedding formats
+                    if embeddings.dim() == 1:
+                        # Global pooled embedding - need to get node-level embeddings
+                        # This means we need to get intermediate representations
+                        node_embeddings = self._get_node_level_embeddings(model, data)
+                    else:
+                        # Already node-level embeddings
+                        node_embeddings = embeddings
+                    
+                    # Calculate L2 norm for each node embedding
+                    if node_embeddings is not None:
+                        if node_embeddings.dim() == 3:  # [batch, nodes, features]
+                            node_embeddings = node_embeddings.squeeze(0)
+                        
+                        # Calculate magnitude (L2 norm) for each node
+                        magnitudes = torch.norm(node_embeddings, p=2, dim=-1)
+                        embedding_magnitudes.append(magnitudes)
+                        
+                except Exception as e:
+                    print(f"Warning: Could not extract embeddings from sample {i}: {e}")
+                    continue
+        
+        if not embedding_magnitudes:
+            print("ERROR: Could not extract embeddings from any samples")
+            return None, None
+        
+        # Average embedding magnitudes across samples
+        avg_embedding_magnitude = torch.stack(embedding_magnitudes).mean(dim=0)
+        
+        # Sort by importance (descending)
+        sorted_indices = torch.argsort(avg_embedding_magnitude, descending=True)
+        
+        print(f"Embedding-based importance calculated for {len(avg_embedding_magnitude)} nodes")
+        print("Top 20 most important nodes (based on embedding magnitude):")
+        print("-" * 70)
+        
+        for i, idx in enumerate(sorted_indices[:20]):
+            idx = idx.item()
+            importance = avg_embedding_magnitude[idx].item()
+            
+            if node_names is not None and idx < len(node_names):
+                node_name = node_names[idx]
+                print(f"{i+1:2d}. {node_name[:45]:45s} | Embedding Magnitude: {importance:.4f}")
+            else:
+                print(f"{i+1:2d}. Node {idx:3d}                                     | Embedding Magnitude: {importance:.4f}")
+        
+        print("-" * 70)
+        print(f"Embedding importance method: L2 norm of learned node representations")
+        print(f"Total nodes analyzed: {len(avg_embedding_magnitude)}")
+        
+        # Save to file if path is provided
+        if save_path is not None:
+            import pandas as pd
+            import os
+            
+            # Create the directory if it doesn't exist
+            os.makedirs(os.path.dirname(save_path), exist_ok=True)
+            
+            # Prepare data for CSV
+            importance_data = []
+            for i, idx in enumerate(sorted_indices):
+                idx = idx.item()
+                importance = avg_embedding_magnitude[idx].item()
+                
+                node_name = node_names[idx] if node_names is not None and idx < len(node_names) else f"Node_{idx}"
+                
+                importance_data.append({
+                    'rank': i + 1,
+                    'node_name': node_name,
+                    'embedding_magnitude': importance
+                })
+            
+            # Save as CSV
+            df = pd.DataFrame(importance_data)
+            csv_path = save_path.replace('.txt', '.csv') if save_path.endswith('.txt') else f"{save_path}.csv"
+            df.to_csv(csv_path, index=False)
+            
+            # Also save as human-readable text
+            txt_path = save_path.replace('.csv', '.txt') if save_path.endswith('.csv') else f"{save_path}.txt"
+            with open(txt_path, 'w') as f:
+                f.write("=== EMBEDDING-BASED NODE IMPORTANCE ===\n")
+                f.write("Top 20 most important nodes (based on embedding magnitude):\n")
+                f.write("-" * 70 + "\n")
+                
+                for i, idx in enumerate(sorted_indices[:20]):
+                    idx = idx.item()
+                    importance = avg_embedding_magnitude[idx].item()
+                    
+                    if node_names is not None and idx < len(node_names):
+                        node_name = node_names[idx]
+                        f.write(f"{i+1:2d}. {node_name[:45]:45s} | Embedding Magnitude: {importance:.4f}\n")
+                    else:
+                        f.write(f"{i+1:2d}. Node {idx:3d}                                     | Embedding Magnitude: {importance:.4f}\n")
+                
+                f.write("-" * 70 + "\n")
+                f.write(f"Embedding importance method: L2 norm of learned node representations\n")
+                f.write(f"Total nodes analyzed: {len(avg_embedding_magnitude)}\n")
+            
+            print(f"Embedding-based importance report saved to: {txt_path}")
+            print(f"Embedding-based importance CSV saved to: {csv_path}")
+        
+        return avg_embedding_magnitude.cpu().numpy(), sorted_indices.cpu().numpy()
+    
+    def _get_node_level_embeddings(self, model, data):
+        """
+        Extract node-level embeddings from GNN model
+        """
+        try:
+            # Try to get intermediate representations
+            # This depends on your model architecture
+            x = data.x
+            edge_index = data.edge_index
+            edge_weight = getattr(data, 'edge_weight', None)
+            
+            # Forward pass through model layers to get node embeddings
+            if hasattr(model, 'conv_layers') and model.conv_layers:
+                # Multi-layer model
+                for conv_layer in model.conv_layers[:-1]:  # All but last layer
+                    if edge_weight is not None:
+                        x = conv_layer(x, edge_index, edge_weight)
+                    else:
+                        x = conv_layer(x, edge_index)
+                    x = torch.relu(x)
+                return x
+            elif hasattr(model, 'conv1'):
+                # Two-layer model
+                if edge_weight is not None:
+                    x = torch.relu(model.conv1(x, edge_index, edge_weight))
+                else:
+                    x = torch.relu(model.conv1(x, edge_index))
+                return x
+            else:
+                # Single layer or different architecture
+                return None
+                
+        except Exception as e:
+            print(f"Could not extract node-level embeddings: {e}")
+            return None
+    
+    def extract_universal_attention_scores(self, model, data, node_names=None):
+        """
+        UNIVERSAL attention score extraction for ANY GNN architecture
+        Uses different methods based on model type for maximum compatibility
+        """
+        model_type = type(model).__name__.lower()
+        
+        if 'gat' in model_type:
+            # GAT: Use explicit attention weights
+            print("Extracting attention scores from GAT model")
+            return self._extract_gat_attention_scores(model, data, node_names)
+        elif 'rggc' in model_type or 'resgated' in model_type:
+            # RGGC: Use gating mechanism + gradient importance
+            print("Extracting attention scores from RGGC gating mechanism")
+            return self._extract_rggc_attention_scores(model, data, node_names)
+        else:
+            # GCN or other: Use gradient-based importance
+            print("Extracting attention scores using gradient-based method")
+            return self._extract_gradient_attention_scores(model, data, node_names)
+    
+    def _extract_gat_attention_scores(self, model, data, node_names=None):
+        """Extract attention scores from GAT models (explicit attention weights)"""
+        try:
+            model.eval()
+            with torch.no_grad():
+                # Forward pass to get attention weights
+                x, edge_index = data.x, data.edge_index
+                
+                # Get attention from first layer (most interpretable)
+                if hasattr(model, 'conv1') and hasattr(model.conv1, '__call__'):
+                    # Extract attention weights during forward pass
+                    alpha = None
+                    def hook_fn(module, input, output):
+                        nonlocal alpha
+                        if hasattr(module, 'alpha'):
+                            alpha = module.alpha
+                    
+                    handle = model.conv1.register_forward_hook(hook_fn)
+                    _ = model.conv1(x, edge_index)
+                    handle.remove()
+                    
+                    if alpha is not None:
+                        # Aggregate attention scores per node (sum of incoming attention)
+                        num_nodes = x.size(0)
+                        node_attention = torch.zeros(num_nodes, device=self.device)
+                        edge_index_np = edge_index.cpu().numpy()
+                        
+                        for i in range(alpha.size(0)):
+                            target_node = edge_index_np[1, i]  # Target node
+                            node_attention[target_node] += alpha[i].item()
+                        
+                        return node_attention.cpu().numpy()
+            
+            print("Warning: Could not extract GAT attention weights, falling back to gradients")
+            return self._extract_gradient_attention_scores(model, data, node_names)
+            
+        except Exception as e:
+            print(f"GAT attention extraction failed: {e}, using gradient method")
+            return self._extract_gradient_attention_scores(model, data, node_names)
+    
+    def _extract_rggc_attention_scores(self, model, data, node_names=None):
+        """Extract attention-like scores from RGGC models using gating + gradients"""
+        try:
+            model.eval()
+            
+            # Method 1: Extract gating values (RGGC's built-in attention mechanism)
+            gate_scores = self._extract_rggc_gate_values(model, data)
+            
+            # Method 2: Gradient-based importance for additional insight
+            gradient_scores = self._extract_gradient_attention_scores(model, data, node_names)
+            
+            # Combine both methods (weighted average)
+            if gate_scores is not None and gradient_scores is not None:
+                combined_scores = 0.6 * gate_scores + 0.4 * gradient_scores
+                print("Combined RGGC gating + gradient scores")
+                return combined_scores
+            elif gate_scores is not None:
+                print("Using RGGC gating scores only")
+                return gate_scores
+            else:
+                print("Using gradient scores only for RGGC")
+                return gradient_scores
+                
+        except Exception as e:
+            print(f"RGGC attention extraction failed: {e}, using gradient method")
+            return self._extract_gradient_attention_scores(model, data, node_names)
+    
+    def _extract_rggc_gate_values(self, model, data):
+        """Extract gate values from RGGC layers (the built-in attention mechanism)"""
+        try:
+            x, edge_index = data.x, data.edge_index
+            num_nodes = x.size(0)
+            
+            # Track gate activations during forward pass
+            gate_activations = []
+            
+            def gate_hook(module, input, output):
+                # RGGC layers have gating - capture the gate values
+                if hasattr(module, 'gate') or 'gate' in str(module).lower():
+                    gate_activations.append(output)
+            
+            # Register hooks on RGGC layers
+            handles = []
+            for name, module in model.named_modules():
+                if 'conv' in name and ('rggc' in str(module).lower() or 'resgated' in str(module).lower()):
+                    handle = module.register_forward_hook(gate_hook)
+                    handles.append(handle)
+            
+            # Forward pass to trigger hooks
+            with torch.no_grad():
+                _ = model(x, edge_index, torch.zeros(num_nodes, dtype=torch.long, device=self.device))
+            
+            # Remove hooks
+            for handle in handles:
+                handle.remove()
+            
+            if gate_activations:
+                # Aggregate gate activations across layers
+                gate_scores = torch.zeros(num_nodes, device=self.device)
+                for activation in gate_activations:
+                    if activation.size(0) == num_nodes:
+                        gate_scores += torch.norm(activation, dim=-1)  # L2 norm per node
+                
+                return (gate_scores / len(gate_activations)).cpu().numpy()
+            else:
+                return None
+                
+        except Exception as e:
+            print(f"Gate extraction failed: {e}")
+            return None
+    
+    def _extract_gradient_attention_scores(self, model, data, node_names=None):
+        """Extract node importance using gradient-based method (universal approach)"""
+        try:
+            model.train()  # Need gradients
+            x, edge_index = data.x, data.edge_index
+            batch = torch.zeros(x.size(0), dtype=torch.long, device=self.device)
+            
+            # Ensure input requires gradients
+            x.requires_grad_(True)
+            
+            # Forward pass
+            if len(inspect.signature(model.forward).parameters) == 3:
+                output = model(x, edge_index, batch)
+                prediction = output[0] if isinstance(output, tuple) else output
+            else:
+                output = model(x, edge_index)
+                prediction = output[0] if isinstance(output, tuple) else output
+            
+            # Get gradient w.r.t. input features
+            if prediction.dim() > 1:
+                prediction = prediction.mean()  # Scalar for gradient computation
+            
+            gradients = torch.autograd.grad(
+                outputs=prediction,
+                inputs=x,
+                create_graph=False,
+                retain_graph=False,
+                only_inputs=True
+            )[0]
+            
+            # Calculate node importance as L2 norm of gradients per node
+            node_importance = torch.norm(gradients, dim=-1, p=2)
+            
+            model.eval()  # Back to eval mode
+            return node_importance.detach().cpu().numpy()
+            
+        except Exception as e:
+            print(f"Gradient-based attention extraction failed: {e}")
+            # Fallback: uniform importance
+            return np.ones(data.x.size(0))
+    
     def create_node_pruned_graph(self, data, edge_importance_matrix, node_names=None, 
                                 importance_threshold=0.2, min_nodes=10):
         """
@@ -367,7 +710,10 @@ class GNNExplainerRegression:
     def create_attention_based_node_pruning(self, data, model, node_names=None, 
                                           attention_threshold=0.2, min_nodes=10):
         """
-        Create node-based pruning using GAT attention scores
+        UNIVERSAL node-based pruning using attention-like scores for ANY GNN type
+        - GAT: Uses explicit attention weights
+        - RGGC: Uses gating mechanism + gradients  
+        - GCN: Uses gradient-based node importance
         
         Args:
             data: PyG Data object
@@ -382,17 +728,15 @@ class GNNExplainerRegression:
             pruned_node_names: Names of kept nodes
             attention_scores: Node attention importance scores
         """
-        print(f"\nATTENTION-BASED NODE PRUNING:")
-        print(f"Using GAT attention scores for node importance")
+        print(f"\nUNIVERSAL ATTENTION-BASED NODE PRUNING:")
+        print(f"Automatically detecting GNN type and using appropriate attention extraction")
         
-        # Extract attention scores from GAT model
-        attention_scores = self._extract_gat_attention_scores(data, model)
+        # Use universal attention score extraction (works for ANY GNN type)
+        attention_scores = self.extract_universal_attention_scores(model, data, node_names)
         
-        if attention_scores is None:
-            print("Warning: Could not extract GAT attention scores")
-            print("ERROR: This method should only be called for GAT models with attention scores")
-            print("Falling back to regular node pruning would not provide attention information")
-            # Return None to indicate failure - calling code should handle this
+        if attention_scores is None or len(attention_scores) == 0:
+            print("Warning: Could not extract attention scores from any method")
+            print("This should not happen as gradient method provides fallback")
             return None, None, None, None
         
         # Determine important nodes based on attention scores

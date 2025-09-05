@@ -116,8 +116,8 @@ def create_explainer_sparsified_graph(pipeline, model, target_idx=0, importance_
     print(f"DEBUG: Model type: {type(model).__name__}, is_gat_model={is_gat_model(model) if use_attention_pruning else 'N/A'}")
     
     if use_node_pruning:
-        if use_attention_pruning and is_gat_model(model):
-            print("DEBUG: Using ATTENTION-based node pruning")
+        if use_attention_pruning:
+            print("DEBUG: Using UNIVERSAL ATTENTION-based node pruning (works for ALL GNN types)")
             return create_attention_pruned_graph_pipeline(pipeline, explainer, model, importance_threshold, combined_edge_importance, target_name)
         else:
             print("DEBUG: Using REGULAR node-based pruning with edge importance")

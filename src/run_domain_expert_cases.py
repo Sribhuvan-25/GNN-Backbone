@@ -144,7 +144,7 @@ def main():
                 k_neighbors=5,
                 hidden_dim=32,
                 num_epochs=2,
-                num_folds=3,
+                num_folds=2,
                 save_dir=f"{args.save_dir}/{args.case}_results",
                 importance_threshold=0.2,
                 use_fast_correlation=False,
