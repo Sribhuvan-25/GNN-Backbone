@@ -161,8 +161,8 @@ def save_graph_visualization(G, node_colors, output_path, title="Graph Visualiza
     """
     plt.figure(figsize=figsize)
     
-    # Calculate layout
-    pos = nx.spring_layout(G, k=3, iterations=100, seed=42)
+    # Calculate layout with improved spacing for less cluttered graphs
+    pos = nx.spring_layout(G, k=8, iterations=150, seed=42)
     
     # Draw nodes with uniform size as requested
     node_color_list = [node_colors.get(node, '#95A5A6') for node in G.nodes()]
@@ -182,35 +182,22 @@ def save_graph_visualization(G, node_colors, output_path, title="Graph Visualiza
                 # Create different edge categories based on weight ranges
                 normalized_weights = [(w - min_weight) / (max_weight - min_weight) for w in edge_weights]
                 
-                # Draw edges with variable thickness and color based on weights
-                for (u, v), weight, norm_weight in zip(G.edges(), edge_weights, normalized_weights):
-                    # Edge thickness: thicker for higher weights
-                    edge_width = 0.5 + norm_weight * 3.0  # Range: 0.5 to 3.5
-                    
-                    # Edge color: blue for positive, red for negative correlations
-                    # Use weight sign if available, otherwise assume positive
-                    edge_color = '#2E86AB' if weight >= 0 else '#F24236'  # Blue for positive, red for negative
-                    
-                    # Edge alpha: more transparent for weaker connections
-                    alpha = 0.3 + norm_weight * 0.5  # Range: 0.3 to 0.8
-                    
-                    nx.draw_networkx_edges(G, pos, edgelist=[(u, v)], 
-                                         width=edge_width, alpha=alpha, edge_color=edge_color)
+                # Draw all edges with uniform thickness and color
+                nx.draw_networkx_edges(G, pos, alpha=0.4, width=0.8, edge_color='gray')
                 
-                # Add edge weight legend
-                import matplotlib.patches as mpatches
-                legend_patches = [
-                    mpatches.Patch(color='#2E86AB', alpha=0.8, label=f'Strong Connection (>{max_weight*0.7:.2f})'),
-                    mpatches.Patch(color='#2E86AB', alpha=0.5, label=f'Medium Connection ({min_weight + (max_weight-min_weight)*0.3:.2f}-{max_weight*0.7:.2f})'),
-                    mpatches.Patch(color='#2E86AB', alpha=0.3, label=f'Weak Connection (<{min_weight + (max_weight-min_weight)*0.3:.2f})')
-                ]
-                if legend_elements:
-                    legend_elements.extend(legend_patches)
-                else:
-                    legend_elements = legend_patches
+                # Add edge weight labels (absolute values)
+                edge_labels = {}
+                for (u, v), weight in zip(G.edges(), edge_weights):
+                    edge_labels[(u, v)] = f'{abs(weight):.2f}'
+                
+                # Draw edge labels with smaller font to reduce clutter
+                nx.draw_networkx_edge_labels(G, pos, edge_labels, font_size=6)
             else:
-                # All edges have the same weight
-                nx.draw_networkx_edges(G, pos, alpha=0.4, width=1.0, edge_color='#2E86AB')
+                # All edges have the same weight - draw with uniform style
+                nx.draw_networkx_edges(G, pos, alpha=0.4, width=0.8, edge_color='gray')
+                # Still show the weight values even if they're all the same
+                edge_labels = {(u, v): f'{abs(edge_weights[0]):.2f}' for u, v in G.edges()}
+                nx.draw_networkx_edge_labels(G, pos, edge_labels, font_size=6)
         else:
             # No edges
             pass
@@ -362,28 +349,26 @@ def create_side_by_side_comparison(knn_graph_data, explainer_graph_data, node_fe
             knn_graph_data.get('edge_weight', None),
             node_features
         )
-        pos1 = nx.spring_layout(knn_G, k=2, iterations=50, seed=42)
+        pos1 = nx.spring_layout(knn_G, k=6, iterations=100, seed=42)
         
         # Draw k-NN graph
         node_color_list = [node_colors.get(node, '#95A5A6') for node in knn_G.nodes()]
         nx.draw_networkx_nodes(knn_G, pos1, ax=ax1, node_color=node_color_list,
                               node_size=300, alpha=0.9, edgecolors='black', linewidths=0.5)
         
-        # Enhanced edge drawing for k-NN graph
+        # Draw k-NN graph edges with uniform style and weight labels
         if knn_G.edges():
-            edge_weights = [knn_G[u][v].get('weight', 1.0) for u, v in knn_G.edges()]
-            max_weight = max(edge_weights) if edge_weights else 1.0
-            min_weight = min(edge_weights) if edge_weights else 0.0
+            # Draw all edges with uniform thickness and color
+            nx.draw_networkx_edges(knn_G, pos1, ax=ax1, alpha=0.4, width=0.8, edge_color='gray')
             
-            if max_weight > min_weight:
-                for (u, v), weight in zip(knn_G.edges(), edge_weights):
-                    norm_weight = (weight - min_weight) / (max_weight - min_weight)
-                    edge_width = 0.2 + norm_weight * 1.5
-                    alpha = 0.2 + norm_weight * 0.4
-                    nx.draw_networkx_edges(knn_G, pos1, ax=ax1, edgelist=[(u, v)],
-                                         width=edge_width, alpha=alpha, edge_color='#2E86AB')
-            else:
-                nx.draw_networkx_edges(knn_G, pos1, ax=ax1, alpha=0.3, width=0.5, edge_color='#2E86AB')
+            # Add edge weight labels (absolute values)
+            edge_weights = [knn_G[u][v].get('weight', 1.0) for u, v in knn_G.edges()]
+            edge_labels = {}
+            for (u, v), weight in zip(knn_G.edges(), edge_weights):
+                edge_labels[(u, v)] = f'{abs(weight):.2f}'
+            
+            # Draw edge labels with smaller font to reduce clutter
+            nx.draw_networkx_edge_labels(knn_G, pos1, edge_labels, ax=ax1, font_size=6)
         
         ax1.set_title('k-NN Graph (Original)', fontsize=14, fontweight='bold', pad=20)
         ax1.text(0.02, 0.98, f"Nodes: {len(knn_G.nodes())}\nEdges: {len(knn_G.edges())}", 
@@ -398,7 +383,7 @@ def create_side_by_side_comparison(knn_graph_data, explainer_graph_data, node_fe
             explainer_graph_data.get('edge_weight', None),
             explainer_node_names
         )
-        pos2 = nx.spring_layout(explainer_G, k=2, iterations=50, seed=42)
+        pos2 = nx.spring_layout(explainer_G, k=6, iterations=100, seed=42)
         
         # Adjust colors for pruned nodes
         if 'kept_nodes' in explainer_graph_data:
@@ -410,21 +395,19 @@ def create_side_by_side_comparison(knn_graph_data, explainer_graph_data, node_fe
         nx.draw_networkx_nodes(explainer_G, pos2, ax=ax2, node_color=pruned_node_colors,
                               node_size=300, alpha=0.9, edgecolors='black', linewidths=0.5)
         
-        # Enhanced edge drawing for explainer graph
+        # Draw explainer graph edges with uniform style and weight labels
         if explainer_G.edges():
-            edge_weights = [explainer_G[u][v].get('weight', 1.0) for u, v in explainer_G.edges()]
-            max_weight = max(edge_weights) if edge_weights else 1.0
-            min_weight = min(edge_weights) if edge_weights else 0.0
+            # Draw all edges with uniform thickness and color
+            nx.draw_networkx_edges(explainer_G, pos2, ax=ax2, alpha=0.4, width=0.8, edge_color='gray')
             
-            if max_weight > min_weight:
-                for (u, v), weight in zip(explainer_G.edges(), edge_weights):
-                    norm_weight = (weight - min_weight) / (max_weight - min_weight)
-                    edge_width = 0.2 + norm_weight * 1.5
-                    alpha = 0.2 + norm_weight * 0.4
-                    nx.draw_networkx_edges(explainer_G, pos2, ax=ax2, edgelist=[(u, v)],
-                                         width=edge_width, alpha=alpha, edge_color='#F24236')
-            else:
-                nx.draw_networkx_edges(explainer_G, pos2, ax=ax2, alpha=0.3, width=0.5, edge_color='#F24236')
+            # Add edge weight labels (absolute values)
+            edge_weights = [explainer_G[u][v].get('weight', 1.0) for u, v in explainer_G.edges()]
+            edge_labels = {}
+            for (u, v), weight in zip(explainer_G.edges(), edge_weights):
+                edge_labels[(u, v)] = f'{abs(weight):.2f}'
+            
+            # Draw edge labels with smaller font to reduce clutter
+            nx.draw_networkx_edge_labels(explainer_G, pos2, edge_labels, ax=ax2, font_size=6)
         
         pruning_type = explainer_graph_data.get('pruning_type', 'explainer')
         title_text = "Attention-Pruned Graph" if pruning_type == 'attention_based' else "Explainer-Pruned Graph"
@@ -488,7 +471,7 @@ def create_performance_comparison_plot(results_data, output_path, title="Model P
         title: Plot title
     """
     fig, axes = plt.subplots(1, 3, figsize=(18, 6))
-    metrics = ['R²', 'RMSE', 'MAE']
+    metrics = ['R²', 'MSE', 'MAE']
     
     for i, metric in enumerate(metrics):
         model_names = []
@@ -576,14 +559,33 @@ def create_single_model_prediction_plot(fold_predictions, output_path, title, ta
             ax.scatter(actual, predicted, alpha=0.7, s=50, c=[fold_colors[fold_idx]], 
                       edgecolors='black', linewidth=0.5)
             
-            # Perfect prediction line
-            min_val = min(min(actual), min(predicted))
-            max_val = max(max(actual), max(predicted))
+            # Perfect prediction line with outlier-robust axis limits
+            actual_array = np.array(actual)
+            predicted_array = np.array(predicted)
+            
+            # Handle extreme outliers (especially for RGGC models)
+            # Use percentile-based bounds to avoid extreme axis ranges
+            all_values = np.concatenate([actual_array, predicted_array])
+            q1, q99 = np.percentile(all_values, [1, 99])  # Use 1st and 99th percentiles
+            
+            # If range is still reasonable, use actual min/max, otherwise use percentiles
+            if (q99 - q1) < 1e6 and (q99 - q1) > 0:
+                min_val = min(actual_array.min(), predicted_array.min())
+                max_val = max(actual_array.max(), predicted_array.max())
+            else:
+                min_val = q1
+                max_val = q99
+                
             ax.plot([min_val, max_val], [min_val, max_val], 'r--', alpha=0.8, linewidth=2)
+            
+            # Set reasonable axis limits
+            margin = (max_val - min_val) * 0.05  # 5% margin
+            ax.set_xlim(min_val - margin, max_val + margin)
+            ax.set_ylim(min_val - margin, max_val + margin)
             
             ax.set_xlabel(f'Actual {target_name}')
             ax.set_ylabel(f'Predicted {target_name}')
-            ax.set_title(f'Fold {fold_idx + 1}\nR² = {r2:.3f}, RMSE = {rmse:.3f}')
+            ax.set_title(f'Fold {fold_idx + 1}\nR² = {r2:.3f}, MSE = {rmse**2:.3f}')
             ax.grid(True, alpha=0.3)
             
             # Add data to combined plot
@@ -607,14 +609,30 @@ def create_single_model_prediction_plot(fold_predictions, output_path, title, ta
         overall_rmse = np.sqrt(mean_squared_error(all_actual, all_predicted))
         overall_mae = mean_absolute_error(all_actual, all_predicted)
         
-        # Perfect prediction line
-        min_val = min(min(all_actual), min(all_predicted))
-        max_val = max(max(all_actual), max(all_predicted))
+        # Perfect prediction line with outlier-robust limits
+        all_actual_array = np.array(all_actual)
+        all_predicted_array = np.array(all_predicted)
+        all_values = np.concatenate([all_actual_array, all_predicted_array])
+        
+        # Use percentile-based bounds for extreme outliers
+        q1, q99 = np.percentile(all_values, [1, 99])
+        if (q99 - q1) < 1e6 and (q99 - q1) > 0:
+            min_val = min(all_actual_array.min(), all_predicted_array.min())
+            max_val = max(all_actual_array.max(), all_predicted_array.max())
+        else:
+            min_val = q1
+            max_val = q99
+            
         ax.plot([min_val, max_val], [min_val, max_val], 'r--', alpha=0.8, linewidth=2, label='Perfect Prediction')
+        
+        # Set reasonable axis limits
+        margin = (max_val - min_val) * 0.05
+        ax.set_xlim(min_val - margin, max_val + margin)
+        ax.set_ylim(min_val - margin, max_val + margin)
         
         ax.set_xlabel(f'Actual {target_name}')
         ax.set_ylabel(f'Predicted {target_name}')
-        ax.set_title(f'Combined (All Folds)\nR² = {overall_r2:.3f}, RMSE = {overall_rmse:.3f}, MAE = {overall_mae:.3f}')
+        ax.set_title(f'Combined (All Folds)\nR² = {overall_r2:.3f}, MSE = {overall_rmse**2:.3f}, MAE = {overall_mae:.3f}')
         ax.grid(True, alpha=0.3)
         ax.legend(fontsize=8, loc='upper left')
     
@@ -658,14 +676,30 @@ def create_combined_prediction_comparison(predictions_dict, output_path, target_
                 ax.scatter(all_actual, all_predicted, alpha=0.6, s=40, 
                           edgecolors='black', linewidth=0.3)
                 
-                # Perfect prediction line
-                min_val = min(min(all_actual), min(all_predicted))
-                max_val = max(max(all_actual), max(all_predicted))
+                # Perfect prediction line with outlier-robust axis limits
+                all_actual_array = np.array(all_actual)
+                all_predicted_array = np.array(all_predicted)
+                all_values = np.concatenate([all_actual_array, all_predicted_array])
+                
+                # Use percentile-based bounds for extreme outliers (RGGC models)
+                q1, q99 = np.percentile(all_values, [1, 99])
+                if (q99 - q1) < 1e6 and (q99 - q1) > 0:
+                    min_val = min(all_actual_array.min(), all_predicted_array.min())
+                    max_val = max(all_actual_array.max(), all_predicted_array.max())
+                else:
+                    min_val = q1
+                    max_val = q99
+                    
                 ax.plot([min_val, max_val], [min_val, max_val], 'r--', alpha=0.8, linewidth=2)
+                
+                # Set reasonable axis limits
+                margin = (max_val - min_val) * 0.05  # 5% margin
+                ax.set_xlim(min_val - margin, max_val + margin)
+                ax.set_ylim(min_val - margin, max_val + margin)
                 
                 ax.set_xlabel(f'Actual {target_name}')
                 ax.set_ylabel(f'Predicted {target_name}')
-                ax.set_title(f'{model_name.upper()}\nR² = {overall_r2:.3f}, RMSE = {overall_rmse:.3f}')
+                ax.set_title(f'{model_name.upper()}\nR² = {overall_r2:.3f}, MSE = {overall_rmse**2:.3f}')
                 ax.grid(True, alpha=0.3)
     
     plt.suptitle(f'Model Comparison - {target_name} Predictions', fontsize=16, fontweight='bold')
