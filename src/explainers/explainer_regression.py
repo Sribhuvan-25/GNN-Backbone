@@ -708,7 +708,7 @@ class GNNExplainerRegression:
         return pruned_data, important_nodes, pruned_node_names
     
     def create_attention_based_node_pruning(self, data, model, node_names=None, 
-                                          attention_threshold=0.2, min_nodes=10):
+                                          attention_threshold=0.2, min_nodes=10, protected_nodes=None):
         """
         UNIVERSAL node-based pruning using attention-like scores for ANY GNN type
         - GAT: Uses explicit attention weights
@@ -721,6 +721,7 @@ class GNNExplainerRegression:
             node_names: Names of the nodes
             attention_threshold: Threshold for keeping nodes based on attention
             min_nodes: Minimum number of nodes to keep
+            protected_nodes: List/set of node indices or names that must be preserved during pruning
             
         Returns:
             pruned_data: New PyG Data object with only important nodes
@@ -745,11 +746,41 @@ class GNNExplainerRegression:
         # Sort nodes by attention score for fallback selection
         sorted_indices = np.argsort(attention_scores)[::-1]
         
-        # If too few nodes meet threshold, keep top N nodes
-        if len(important_nodes) < min_nodes:
-            print(f"Only {len(important_nodes)} nodes exceed attention threshold {attention_threshold}")
+        # Handle protected nodes - ensure they are always included
+        protected_indices = set()
+        if protected_nodes is not None:
+            for protected in protected_nodes:
+                if isinstance(protected, str) and node_names is not None:
+                    # Protected node specified by name - find its index
+                    try:
+                        idx = node_names.index(protected)
+                        protected_indices.add(idx)
+                        print(f"Protected node '{protected}' found at index {idx}")
+                    except ValueError:
+                        print(f"Warning: Protected node '{protected}' not found in node names")
+                elif isinstance(protected, (int, np.integer)):
+                    # Protected node specified by index
+                    if 0 <= protected < data.x.shape[0]:
+                        protected_indices.add(int(protected))
+                        name = node_names[protected] if node_names else f"Node_{protected}"
+                        print(f"Protected node {protected} ('{name}') will be preserved")
+                    else:
+                        print(f"Warning: Protected node index {protected} out of range")
+        
+        # Combine attention-based selection with protected nodes
+        important_nodes_set = set(important_nodes) | protected_indices
+        
+        # If too few nodes meet threshold, keep top N nodes (but always include protected)
+        if len(important_nodes_set) < min_nodes:
+            print(f"Only {len(important_nodes_set)} nodes (including {len(protected_indices)} protected) exceed attention threshold {attention_threshold}")
             print(f"Keeping top {min_nodes} most important nodes by attention score")
-            important_nodes = sorted_indices[:min_nodes].copy()  # Fix negative stride issue
+            # Add top nodes until we reach min_nodes, excluding already selected ones
+            for idx in sorted_indices:
+                if len(important_nodes_set) >= min_nodes:
+                    break
+                important_nodes_set.add(idx)
+        
+        important_nodes = np.array(sorted(important_nodes_set), dtype=np.int64)
         
         print(f"Original graph: {data.x.shape[0]} nodes")
         print(f"Pruned graph: {len(important_nodes)} nodes ({len(important_nodes)/data.x.shape[0]*100:.1f}% retained)")
