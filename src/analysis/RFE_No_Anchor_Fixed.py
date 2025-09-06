@@ -2,7 +2,7 @@ import pandas as pd
 import numpy as np
 from sklearn.preprocessing import StandardScaler
 from sklearn.svm import LinearSVR
-from sklearn.ensemble import ExtraTreesRegressor
+from sklearn.ensemble import ExtraTreesRegressor, RandomForestRegressor, GradientBoostingRegressor
 from sklearn.feature_selection import RFE
 from sklearn.model_selection import KFold
 from sklearn.metrics import r2_score, mean_squared_error
@@ -12,18 +12,69 @@ import os
 import time
 from collections import Counter
 
-def create_directories():
-    """Create directories for organizing outputs"""
-    directories = [
-        'results_rfe_nested_cv_fixed/plots',
-        'results_rfe_nested_cv_fixed/metrics',
-        'results_rfe_nested_cv_fixed/selected_features'
-    ]
-    for directory in directories:
-        os.makedirs(directory, exist_ok=True)
-        print(f"Created directory: {directory}")
+# Import XGBoost and LightGBM with availability checking
+try:
+    import xgboost as xgb
+    XGBOOST_AVAILABLE = True
+except ImportError:
+    XGBOOST_AVAILABLE = False
+    print("Warning: XGBoost not available. Install with: pip install xgboost")
 
-def create_performance_plot(all_actual, all_predictions, target, n_features, final_r2, final_mse, model_type):
+try:
+    import lightgbm as lgb
+    LIGHTGBM_AVAILABLE = True
+except ImportError:
+    LIGHTGBM_AVAILABLE = False
+    print("Warning: LightGBM not available. Install with: pip install lightgbm")
+
+# Domain Expert Case Feature Definitions
+CASE_FEATURES = {
+    'case1': [  # Hydrogenotrophic features only
+        "d__Archaea;p__Halobacterota;c__Methanomicrobia;o__Methanomicrobiales;f__Methanoregulaceae;g__Methanolinea",
+        "d__Archaea;p__Euryarchaeota;c__Methanobacteria;o__Methanobacteriales;f__Methanobacteriaceae;g__Methanobacterium", 
+        "d__Archaea;p__Halobacterota;c__Methanomicrobia;o__Methanomicrobiales;f__Methanospirillaceae;g__Methanospirillum"
+    ],
+    'case2': [  # Acetoclastic features only
+        "d__Archaea;p__Halobacterota;c__Methanosarcinia;o__Methanosarciniales;f__Methanosaetaceae;g__Methanosaeta"
+    ],
+    'case3': [  # All feature groups (acetoclastic + hydrogenotrophic + syntrophic)
+        "d__Archaea;p__Halobacterota;c__Methanosarcinia;o__Methanosarciniales;f__Methanosaetaceae;g__Methanosaeta",
+        "d__Archaea;p__Halobacterota;c__Methanomicrobia;o__Methanomicrobiales;f__Methanoregulaceae;g__Methanolinea",
+        "d__Archaea;p__Euryarchaeota;c__Methanobacteria;o__Methanobacteriales;f__Methanobacteriaceae;g__Methanobacterium",
+        "d__Archaea;p__Halobacterota;c__Methanomicrobia;o__Methanomicrobiales;f__Methanospirillaceae;g__Methanospirillum",
+        "d__Bacteria;p__Desulfobacterota;c__Syntrophia;o__Syntrophales;f__Smithellaceae;g__Smithella",
+        "d__Bacteria;p__Desulfobacterota;c__Syntrophorhabdia;o__Syntrophorhabdales;f__Syntrophorhabdaceae;g__Syntrophorhabdus",
+        "d__Bacteria;p__Desulfobacterota;c__Syntrophobacteria;o__Syntrophobacterales;f__Syntrophobacteraceae;g__Syntrophobacter",
+        "d__Bacteria;p__Synergistota;c__Synergistia;o__Synergistales;f__Synergistaceae;g__Syner-01",
+        "d__Bacteria;p__Desulfobacterota;c__Syntrophia;o__Syntrophales;f__uncultured;g__uncultured",
+        "d__Bacteria;p__Synergistota;c__Synergistia;o__Synergistales;f__Synergistaceae;g__uncultured",
+        "d__Bacteria;p__Bacteroidota;c__Bacteroidia;o__Bacteroidales;f__Rikenellaceae;g__DMER64",
+        "d__Bacteria;p__Synergistota;c__Synergistia;o__Synergistales;f__Synergistaceae;g__Thermovirga",
+        "d__Bacteria;p__Firmicutes;c__Syntrophomonadia;o__Syntrophomonadales;f__Syntrophomonadaceae;g__Syntrophomonas",
+        "d__Bacteria;p__Desulfobacterota;c__Syntrophia;o__Syntrophales;f__Syntrophaceae;g__Syntrophus",
+        "d__Bacteria;p__Synergistota;c__Synergistia;o__Synergistales;f__Synergistaceae;g__JGI-0000079-D21",
+        "d__Bacteria;p__Desulfobacterota;c__Desulfuromonadia;o__Geobacterales;f__Geobacteraceae;__",
+        "d__Bacteria;p__Firmicutes;c__Desulfotomaculia;o__Desulfotomaculales;f__Desulfotomaculales;g__Pelotomaculum"
+    ]
+}
+
+def create_directories():
+    """Create directories for organizing outputs for all cases"""
+    cases = ['case1', 'case2', 'case3']
+    base_directories = ['plots', 'metrics', 'selected_features']
+    
+    # Create main directory
+    main_dir = 'results_rfe_nested_cv_fixed'
+    os.makedirs(main_dir, exist_ok=True)
+    
+    # Create case-specific directories
+    for case in cases:
+        for sub_dir in base_directories:
+            directory = f'{main_dir}/{case}/{sub_dir}'
+            os.makedirs(directory, exist_ok=True)
+            print(f"Created directory: {directory}")
+
+def create_performance_plot(all_actual, all_predictions, target, n_features, final_r2, final_mse, model_type, case_type='case3'):
     """Create and save performance plot with detailed information"""
     print(f"Creating performance plot for {target} with {model_type}...")
     plt.figure(figsize=(10, 8))
@@ -52,23 +103,36 @@ def create_performance_plot(all_actual, all_predictions, target, n_features, fin
     
     # Save plot
     feature_suffix = "all" if n_features is None else str(n_features)
-    filename = f'results_rfe_nested_cv_fixed/plots/results_{target}_{feature_suffix}_features_{model_type}.png'
+    filename = f'results_rfe_nested_cv_fixed/{case_type}/plots/results_{target}_{feature_suffix}_features_{model_type}.png'
     plt.savefig(filename, dpi=300, bbox_inches='tight')
     plt.close()
     print(f"Saved plot: {filename}")
 
 def select_features_with_rfe(X, y, n_features=None, model_type='extratrees'):
-    """Perform RFE feature selection with detailed debugging"""
+    """Perform RFE feature selection with detailed debugging for all model types"""
     if n_features is None:
         return X.columns.tolist()
     
     print(f"        RFE Debug: Starting with {len(X.columns)} features, selecting {n_features}")
     start_time = time.time()
         
+    # Create estimator based on model type
     if model_type == 'linearsvr':
         estimator = LinearSVR(random_state=42, max_iter=100000, tol=1e-4, dual=True)
-    else:
+    elif model_type == 'extratrees':
         estimator = ExtraTreesRegressor(n_estimators=200, random_state=42, n_jobs=-1)
+    elif model_type == 'randomforest':
+        estimator = RandomForestRegressor(n_estimators=200, random_state=42, n_jobs=-1, max_depth=10)
+    elif model_type == 'gradientboosting':
+        estimator = GradientBoostingRegressor(n_estimators=200, random_state=42, max_depth=6)
+    elif model_type == 'xgboost' and XGBOOST_AVAILABLE:
+        estimator = xgb.XGBRegressor(n_estimators=200, max_depth=6, learning_rate=0.1, random_state=42, n_jobs=-1, verbosity=0)
+    elif model_type == 'lightgbm' and LIGHTGBM_AVAILABLE:
+        estimator = lgb.LGBMRegressor(n_estimators=200, max_depth=6, learning_rate=0.1, random_state=42, n_jobs=-1, verbosity=-1)
+    else:
+        # Default fallback to ExtraTreesRegressor
+        estimator = ExtraTreesRegressor(n_estimators=200, random_state=42, n_jobs=-1)
+        print(f"        RFE Debug: Unknown model_type '{model_type}', using ExtraTreesRegressor as fallback")
     
     # Create RFE object
     rfe = RFE(estimator=estimator, n_features_to_select=n_features)
@@ -115,16 +179,44 @@ def _train_and_evaluate_once(X, y, train_idx, val_idx, n_features, model_type):
     X_train_selected = X_train[selected_features]
     X_val_selected = X_val[selected_features]
     
-    # Standard scaling
+    # Apply scaling and create model based on model type
     if model_type == 'linearsvr':
+        # LinearSVR needs scaling
         scaler = StandardScaler()
         X_train_scaled = scaler.fit_transform(X_train_selected)
         X_val_scaled = scaler.transform(X_val_selected)
         model = LinearSVR(random_state=42, max_iter=100000, tol=1e-4, dual=True)
-    else:
-        # ExtraTrees is insensitive to scaling
+    elif model_type == 'extratrees':
+        # Tree-based models don't need scaling
         X_train_scaled, X_val_scaled = X_train_selected, X_val_selected
         model = ExtraTreesRegressor(n_estimators=200, random_state=42, n_jobs=-1)
+    elif model_type == 'randomforest':
+        # Tree-based models don't need scaling
+        X_train_scaled, X_val_scaled = X_train_selected, X_val_selected
+        model = RandomForestRegressor(n_estimators=200, random_state=42, n_jobs=-1, max_depth=10)
+    elif model_type == 'gradientboosting':
+        # Gradient boosting benefits from scaling
+        scaler = StandardScaler()
+        X_train_scaled = scaler.fit_transform(X_train_selected)
+        X_val_scaled = scaler.transform(X_val_selected)
+        model = GradientBoostingRegressor(n_estimators=200, random_state=42, max_depth=6)
+    elif model_type == 'xgboost' and XGBOOST_AVAILABLE:
+        # XGBoost benefits from scaling
+        scaler = StandardScaler()
+        X_train_scaled = scaler.fit_transform(X_train_selected)
+        X_val_scaled = scaler.transform(X_val_selected)
+        model = xgb.XGBRegressor(n_estimators=200, max_depth=6, learning_rate=0.1, random_state=42, n_jobs=-1, verbosity=0)
+    elif model_type == 'lightgbm' and LIGHTGBM_AVAILABLE:
+        # LightGBM benefits from scaling
+        scaler = StandardScaler()
+        X_train_scaled = scaler.fit_transform(X_train_selected)
+        X_val_scaled = scaler.transform(X_val_selected)
+        model = lgb.LGBMRegressor(n_estimators=200, max_depth=6, learning_rate=0.1, random_state=42, n_jobs=-1, verbosity=-1)
+    else:
+        # Default fallback to ExtraTreesRegressor (no scaling needed)
+        X_train_scaled, X_val_scaled = X_train_selected, X_val_selected
+        model = ExtraTreesRegressor(n_estimators=200, random_state=42, n_jobs=-1)
+        print(f"      WARNING: Unknown model_type '{model_type}', using ExtraTreesRegressor as fallback")
     
     # Train model
     model.fit(X_train_scaled, y_train)
@@ -197,9 +289,9 @@ def _inner_loop_select(X, y, model_type):
     
     return best_n_features
 
-def run_model_nested_cv(data_path, target="ACE-km", model_type='extratrees'):
+def run_model_nested_cv(data_path, target="ACE-km", model_type='extratrees', case_type='case3'):
     """
-    FIXED: Run model with proper nested CV hyperparameter tuning for feature selection
+    FIXED: Run model with proper nested CV hyperparameter tuning for feature selection with domain expert cases
     
     Parameters:
     ----------
@@ -209,6 +301,8 @@ def run_model_nested_cv(data_path, target="ACE-km", model_type='extratrees'):
         Target variable to predict (must exist in the data)
     model_type : str
         Type of model to use ('extratrees' or 'linearsvr')
+    case_type : str
+        Domain expert case type ('case1', 'case2', 'case3')
     """
     print(f"Loading data from {data_path}...")
     # Load data
@@ -237,14 +331,40 @@ def run_model_nested_cv(data_path, target="ACE-km", model_type='extratrees'):
     
     # Get features (all columns except target columns)
     all_features = [col for col in df.columns if col not in target_columns]
-    X = df[all_features]
+    
+    # Apply case-specific feature filtering
+    if case_type in CASE_FEATURES:
+        case_features = CASE_FEATURES[case_type]
+        # Find intersection between case features and available features
+        available_case_features = [f for f in case_features if f in df.columns]
+        
+        if not available_case_features:
+            print(f"ERROR: No case features found in dataset for {case_type}")
+            print(f"Required features: {case_features[:3]}...")  # Show first 3
+            print(f"Available features: {list(df.columns)[:10]}...")  # Show first 10
+            return None
+        
+        print(f"\n{case_type.upper()} FEATURE FILTERING:")
+        print(f"Case features required: {len(case_features)}")
+        print(f"Case features available: {len(available_case_features)}")
+        print(f"Available case features: {available_case_features}")
+        
+        # Use only the case-specific features
+        X = df[available_case_features]
+        filtered_features = available_case_features
+    else:
+        # Use all features if case_type is not recognized
+        X = df[all_features]
+        filtered_features = all_features
+    
     y = df[target]
     
     print(f"Final dataset shape: {df.shape}")
-    print(f"Total features available: {len(all_features)}")
+    print(f"Total features after case filtering: {len(filtered_features)}")
     print(f"Target: {target}")
     print(f"Target range: {y.min():.4f} to {y.max():.4f}")
     print(f"Model type: {model_type}")
+    print(f"Case type: {case_type}")
     
     # FIXED: Use proper 5-fold outer CV for reliable performance estimation
     outer_kf = KFold(n_splits=5, shuffle=True, random_state=42)
@@ -286,16 +406,44 @@ def run_model_nested_cv(data_path, target="ACE-km", model_type='extratrees'):
         X_train_selected = X_train[selected_features]
         X_test_selected = X_test[selected_features]
         
-        # Standard scaling
+        # Apply scaling and create model based on model type
         if model_type == 'linearsvr':
+            # LinearSVR needs scaling
             scaler = StandardScaler()
             X_train_scaled = scaler.fit_transform(X_train_selected)
             X_test_scaled = scaler.transform(X_test_selected)
             model = LinearSVR(random_state=42, max_iter=100000, tol=1e-4, dual=True)
-        else:
-            # ExtraTrees is insensitive to scaling
+        elif model_type == 'extratrees':
+            # Tree-based models don't need scaling
             X_train_scaled, X_test_scaled = X_train_selected, X_test_selected
             model = ExtraTreesRegressor(n_estimators=200, random_state=42, n_jobs=-1)
+        elif model_type == 'randomforest':
+            # Tree-based models don't need scaling
+            X_train_scaled, X_test_scaled = X_train_selected, X_test_selected
+            model = RandomForestRegressor(n_estimators=200, random_state=42, n_jobs=-1, max_depth=10)
+        elif model_type == 'gradientboosting':
+            # Gradient boosting benefits from scaling
+            scaler = StandardScaler()
+            X_train_scaled = scaler.fit_transform(X_train_selected)
+            X_test_scaled = scaler.transform(X_test_selected)
+            model = GradientBoostingRegressor(n_estimators=200, random_state=42, max_depth=6)
+        elif model_type == 'xgboost' and XGBOOST_AVAILABLE:
+            # XGBoost benefits from scaling
+            scaler = StandardScaler()
+            X_train_scaled = scaler.fit_transform(X_train_selected)
+            X_test_scaled = scaler.transform(X_test_selected)
+            model = xgb.XGBRegressor(n_estimators=200, max_depth=6, learning_rate=0.1, random_state=42, n_jobs=-1, verbosity=0)
+        elif model_type == 'lightgbm' and LIGHTGBM_AVAILABLE:
+            # LightGBM benefits from scaling
+            scaler = StandardScaler()
+            X_train_scaled = scaler.fit_transform(X_train_selected)
+            X_test_scaled = scaler.transform(X_test_selected)
+            model = lgb.LGBMRegressor(n_estimators=200, max_depth=6, learning_rate=0.1, random_state=42, n_jobs=-1, verbosity=-1)
+        else:
+            # Default fallback to ExtraTreesRegressor (no scaling needed)
+            X_train_scaled, X_test_scaled = X_train_selected, X_test_selected
+            model = ExtraTreesRegressor(n_estimators=200, random_state=42, n_jobs=-1)
+            print(f"  WARNING: Unknown model_type '{model_type}', using ExtraTreesRegressor as fallback")
         
         # Train model
         model.fit(X_train_scaled, y_train)
@@ -381,7 +529,7 @@ def run_model_nested_cv(data_path, target="ACE-km", model_type='extratrees'):
     # Create final plot
     # Use the most frequently selected n_features for plot title
     most_common_n_features = n_features_counts.most_common(1)[0][0] if n_features_counts else None
-    create_performance_plot(all_actual, all_predictions, target, most_common_n_features, avg_r2, avg_mse, model_type)
+    create_performance_plot(all_actual, all_predictions, target, most_common_n_features, avg_r2, avg_mse, model_type, case_type)
     
     # Save results
     print(f"Saving results...")
@@ -389,7 +537,7 @@ def run_model_nested_cv(data_path, target="ACE-km", model_type='extratrees'):
         'Actual': all_actual,
         'Predicted': all_predictions
     })
-    results_path = f'results_rfe_nested_cv_fixed/metrics/results_{target}_{model_type}_nested_cv.csv'
+    results_path = f'results_rfe_nested_cv_fixed/{case_type}/metrics/results_{target}_{model_type}_nested_cv.csv'
     results_df.to_csv(results_path, index=False)
     print(f"Saved results: {results_path}")
     
@@ -405,12 +553,12 @@ def run_model_nested_cv(data_path, target="ACE-km", model_type='extratrees'):
         for feature, count in feature_counts.items()
     ]).sort_values('Frequency', ascending=False)
     
-    features_path = f'results_rfe_nested_cv_fixed/selected_features/{target}_{model_type}_feature_frequency.csv'
+    features_path = f'results_rfe_nested_cv_fixed/{case_type}/selected_features/{target}_{model_type}_feature_frequency.csv'
     feature_df.to_csv(features_path, index=False)
     print(f"Saved feature frequency: {features_path}")
     
     # Save hyperparameter selection summary
-    save_hyperparameter_summary(outer_results, target, model_type)
+    save_hyperparameter_summary(outer_results, target, model_type, case_type)
     
     return {
         'avg_r2': avg_r2,
@@ -422,7 +570,7 @@ def run_model_nested_cv(data_path, target="ACE-km", model_type='extratrees'):
         'feature_frequency': feature_df
     }
 
-def save_hyperparameter_summary(outer_results, target, model_type):
+def save_hyperparameter_summary(outer_results, target, model_type, case_type='case3'):
     """Save hyperparameter selection summary for RFE nested CV"""
     print(f"Saving hyperparameter summary...")
     # Collect hyperparameter selections
@@ -443,7 +591,7 @@ def save_hyperparameter_summary(outer_results, target, model_type):
         })
     
     summary_df = pd.DataFrame(summary_data)
-    csv_path = f'results_rfe_nested_cv_fixed/metrics/{target}_{model_type}_hyperparameter_summary.csv'
+    csv_path = f'results_rfe_nested_cv_fixed/{case_type}/metrics/{target}_{model_type}_hyperparameter_summary.csv'
     summary_df.to_csv(csv_path, index=False)
     
     print(f"Hyperparameter selection summary saved: {csv_path}")
@@ -454,8 +602,21 @@ if __name__ == "__main__":
     # Create directories first
     create_directories()
     
-    data_path = "../Data/New_data.csv"
-    model_types = ['extratrees', 'linearsvr']
+    data_path = "../Data/New_Data.csv"
+    
+    # Define all available model types
+    model_types = ['extratrees', 'linearsvr', 'randomforest', 'gradientboosting']
+    
+    # Add XGBoost and LightGBM if available
+    if XGBOOST_AVAILABLE:
+        model_types.append('xgboost')
+    if LIGHTGBM_AVAILABLE:
+        model_types.append('lightgbm')
+    
+    cases = ['case1', 'case2', 'case3']
+    
+    print(f"Available model types ({len(model_types)}): {model_types}")
+    print(f"Total experiments to run: {len(cases)} cases × {len(main_targets)} targets × {len(model_types)} models = {len(cases) * len(main_targets) * len(model_types)}")
     
     # Dictionary to store results
     all_results = {}
@@ -463,39 +624,42 @@ if __name__ == "__main__":
     # Focus on the two main targets: ACE-km and H2-km
     main_targets = ['ACE-km', 'H2-km']
     
-    # Run nested CV for the main targets and model types
-    for target in main_targets:
-        for model_type in model_types:
-            print(f"\n{'='*80}")
-            print(f"Running FIXED NESTED CV for {target} with {model_type.upper()}")
-            print(f"{'='*80}")
-            
-            try:
-                results = run_model_nested_cv(
-                    data_path, 
-                    target=target, 
-                    model_type=model_type
-                )
+    # Run nested CV for all combinations of cases, targets, and model types
+    for case_type in cases:
+        for target in main_targets:
+            for model_type in model_types:
+                print(f"\n{'='*80}")
+                print(f"Running FIXED NESTED CV for {case_type.upper()} - {target} with {model_type.upper()}")
+                print(f"{'='*80}")
                 
-                if results is not None:
-                    config_name = f"{target}_{model_type}"
-                    all_results[config_name] = {
-                        'Target': target,
-                        'Model': model_type,
-                        'R2': results['avg_r2'],
-                        'MSE': results['avg_mse'],
-                        'Std_R2': results['std_r2'],
-                        'Std_MSE': results['std_mse'],
-                        'Best_N_Features': results['best_n_features']
-                    }
+                try:
+                    results = run_model_nested_cv(
+                        data_path, 
+                        target=target, 
+                        model_type=model_type,
+                        case_type=case_type
+                    )
                     
-                    print(f"Completed {target} with {model_type}")
-                else:
-                    print(f"Skipping {target} with {model_type} due to errors")
-                
-            except Exception as e:
-                print(f"Error running {target} with {model_type}: {str(e)}")
-                continue
+                    if results is not None:
+                        config_name = f"{case_type}_{target}_{model_type}"
+                        all_results[config_name] = {
+                            'Case': case_type,
+                            'Target': target,
+                            'Model': model_type,
+                            'R2': results['avg_r2'],
+                            'MSE': results['avg_mse'],
+                            'Std_R2': results['std_r2'],
+                            'Std_MSE': results['std_mse'],
+                            'Best_N_Features': results['best_n_features']
+                        }
+                        
+                        print(f"Completed {case_type} - {target} with {model_type}")
+                    else:
+                        print(f"Skipping {case_type} - {target} with {model_type} due to errors")
+                    
+                except Exception as e:
+                    print(f"Error running {case_type} - {target} with {model_type}: {str(e)}")
+                    continue
     
     # Save overall results
     if all_results:
@@ -512,15 +676,36 @@ if __name__ == "__main__":
         print(f"{'='*80}")
         print(results_df)
         
-        # Print best configurations for each target
+        # Print best configurations for each case and target
         print(f"\n{'='*60}")
         print("BEST CONFIGURATIONS BASED ON R² SCORE")
+        print(f"{'='*60}")
+        for case in cases:
+            print(f"\n{case.upper()}:")
+            case_results = results_df[results_df['Case'] == case]
+            if not case_results.empty:
+                for target in main_targets:
+                    target_case_results = case_results[case_results['Target'] == target]
+                    if not target_case_results.empty:
+                        best_config = target_case_results.loc[target_case_results['R2'].idxmax()]
+                        print(f"  {target}:")
+                        print(f"    Best Model: {best_config['Model']}")
+                        print(f"    Best R²: {best_config['R2']:.4f} ± {best_config['Std_R2']:.4f}")
+                        print(f"    MSE: {best_config['MSE']:.4f} ± {best_config['Std_MSE']:.4f}")
+                        print(f"    Best N_Features: {best_config['Best_N_Features']}")
+            else:
+                print(f"  No results available for {case}")
+                
+        # Print overall best across all cases
+        print(f"\n{'='*60}")
+        print("OVERALL BEST CONFIGURATIONS ACROSS ALL CASES")
         print(f"{'='*60}")
         for target in main_targets:
             target_results = results_df[results_df['Target'] == target]
             if not target_results.empty:
                 best_config = target_results.loc[target_results['R2'].idxmax()]
-                print(f"\n{target}:")
+                print(f"\n{target} (Overall Best):")
+                print(f"Best Case: {best_config['Case']}")
                 print(f"Best Model: {best_config['Model']}")
                 print(f"Best R²: {best_config['R2']:.4f} ± {best_config['Std_R2']:.4f}")
                 print(f"MSE: {best_config['MSE']:.4f} ± {best_config['Std_MSE']:.4f}")
