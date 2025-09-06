@@ -160,11 +160,11 @@ def create_node_pruned_graph_pipeline(pipeline, explainer, combined_edge_importa
     
     print(f"Node-pruned graph created with {len(kept_nodes)} nodes and {pruned_data.edge_index.shape[1]} edges")
     
-    # Store for visualization
+    # Store for visualization with actual edge weights from pruned data
     pipeline.dataset.explainer_sparsified_graph_data = {
         'edge_index': pruned_data.edge_index.clone(),
-        'edge_weight': torch.ones(pruned_data.edge_index.shape[1]),
-        'edge_type': torch.ones(pruned_data.edge_index.shape[1], dtype=torch.long),
+        'edge_weight': getattr(pruned_data, 'edge_weight', torch.ones(pruned_data.edge_index.shape[1])),
+        'edge_type': getattr(pruned_data, 'edge_type', torch.ones(pruned_data.edge_index.shape[1], dtype=torch.long)),
         'pruning_type': 'node_based',
         'kept_nodes': kept_nodes,
         'pruned_node_names': pruned_node_names
@@ -325,7 +325,8 @@ def create_attention_pruned_graph_pipeline(pipeline, explainer, model, importanc
         model,
         pipeline.dataset.node_feature_names,
         attention_threshold=importance_threshold,
-        min_nodes=10
+        min_nodes=10,
+        protected_nodes=getattr(pipeline.dataset, 'protected_nodes', None)  # Use dataset's protected nodes if available
     )
     
     # Check if attention-based pruning failed
@@ -372,11 +373,11 @@ def create_attention_pruned_graph_pipeline(pipeline, explainer, model, importanc
     
     print(f"Attention-pruned graph created with {len(kept_nodes)} nodes and {pruned_data.edge_index.shape[1]} edges")
     
-    # Store for visualization with attention information
+    # Store for visualization with actual edge weights and attention information
     pipeline.dataset.explainer_sparsified_graph_data = {
         'edge_index': pruned_data.edge_index.clone(),
-        'edge_weight': torch.ones(pruned_data.edge_index.shape[1]),
-        'edge_type': torch.ones(pruned_data.edge_index.shape[1], dtype=torch.long),
+        'edge_weight': getattr(pruned_data, 'edge_weight', torch.ones(pruned_data.edge_index.shape[1])),
+        'edge_type': getattr(pruned_data, 'edge_type', torch.ones(pruned_data.edge_index.shape[1], dtype=torch.long)),
         'pruning_type': 'attention_based',
         'kept_nodes': kept_nodes,
         'pruned_node_names': pruned_node_names,

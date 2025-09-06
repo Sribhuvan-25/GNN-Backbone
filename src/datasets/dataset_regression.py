@@ -67,7 +67,8 @@ class MicrobialGNNDataset:
         self.original_graph_data = {
             'edge_index': self.edge_index.clone(),
             'edge_weight': self.edge_weight.clone(),
-            'edge_type': self.edge_type.clone()
+            'edge_type': self.edge_type.clone(),
+            'original_node_names': self.node_feature_names.copy()  # Store original node names
         }
         
         # Initialize explainer-sparsified graph data as None
@@ -539,7 +540,76 @@ class MicrobialGNNDataset:
         
         print(f"KNN graph has {new_edge_index.shape[1]//2} undirected edges")
         
+        # Create immediate visualization of k-NN graph with all node names intact
+        self._visualize_knn_graph_immediate(new_edge_index, new_edge_weight, new_edge_type)
+        
         return new_edge_index, new_edge_weight, new_edge_type
+
+    def _visualize_knn_graph_immediate(self, edge_index, edge_weight, edge_type):
+        """Create immediate visualization of k-NN graph when it's created to preserve node names"""
+        try:
+            import matplotlib.pyplot as plt
+            import networkx as nx
+            
+            print("DEBUG: _visualize_knn_graph_immediate called!")
+            print(f"DEBUG: node_feature_names = {self.node_feature_names[:5]}...")  # Show first 5 names
+            
+            # Create output directory - use a generic location first
+            viz_dir = './graph_visualizations_debug'
+            os.makedirs(viz_dir, exist_ok=True)
+            
+            # Create NetworkX graph with guaranteed correct node names
+            G = nx.Graph()
+            
+            # Add all nodes with their original names (guaranteed to be intact at this point)
+            for i, name in enumerate(self.node_feature_names):
+                G.add_node(i, name=name)
+            
+            # Add edges with uniform styling and weight labels
+            edge_labels = {}
+            for i in range(0, edge_index.shape[1], 2):  # Process only one direction for undirected edges
+                u, v = edge_index[0, i].item(), edge_index[1, i].item()
+                weight = edge_weight[i].item()
+                G.add_edge(u, v, weight=weight)
+                edge_labels[(u, v)] = f'{abs(weight):.2f}'
+            
+            # Create layout
+            pos = nx.spring_layout(G, k=6, iterations=100, seed=42)
+            
+            # Create figure
+            plt.figure(figsize=(20, 16))
+            
+            # Draw nodes with proper names
+            node_labels = {i: name for i, name in enumerate(self.node_feature_names)}
+            
+            # Draw the graph components
+            nx.draw_networkx_nodes(G, pos, node_size=800, alpha=0.9, 
+                                 node_color=range(len(G.nodes())), cmap=plt.cm.tab20,
+                                 edgecolors='black', linewidths=0.5)
+            
+            # Draw edges with uniform style
+            nx.draw_networkx_edges(G, pos, alpha=0.4, width=0.8, edge_color='gray')
+            
+            # Draw node labels
+            nx.draw_networkx_labels(G, pos, labels=node_labels, font_size=8, font_weight='bold')
+            
+            # Draw edge weight labels
+            nx.draw_networkx_edge_labels(G, pos, edge_labels, font_size=6)
+            
+            plt.title(f'k-NN Graph - Created Immediately ({len(G.nodes())} nodes, {len(G.edges())} edges)', 
+                     fontsize=16, fontweight='bold', pad=20)
+            plt.axis('off')
+            
+            # Save the graph with unique filename
+            filename = f"{viz_dir}/knn_graph_IMMEDIATE_CREATION.png"
+            plt.savefig(filename, dpi=300, bbox_inches='tight', facecolor='white')
+            plt.close()
+            
+            print(f"IMMEDIATE k-NN graph visualization saved to: {filename}")
+            print(f"DEBUG: Graph had {len(G.nodes())} nodes with names: {list(node_labels.values())[:5]}...")
+            
+        except Exception as e:
+            print(f"Warning: Immediate k-NN visualization failed: {e}")
     
     def _create_data_objects(self):
         """Create PyG Data objects for each sample"""
@@ -611,10 +681,10 @@ class MicrobialGNNDataset:
             ax2.axis('off')
         
         plt.tight_layout()
-        plt.savefig(f"{save_dir}/graph_comparison.png", dpi=300, bbox_inches='tight')
+        plt.savefig(f"{save_dir}/graph_comparison_OLD_METHOD.png", dpi=300, bbox_inches='tight')
         plt.close()
         
-        print(f"Graph visualization saved to {save_dir}/graph_comparison.png")
+        print(f"OLD METHOD graph visualization saved to {save_dir}/graph_comparison_OLD_METHOD.png")
         
         # Also create individual high-resolution visualizations
         plt.figure(figsize=(15, 15))
@@ -627,7 +697,7 @@ class MicrobialGNNDataset:
             graph_type='original'
         )
         plt.tight_layout()
-        plt.savefig(f"{save_dir}/knn_graph.png", dpi=300, bbox_inches='tight')
+        plt.savefig(f"{save_dir}/knn_graph_OLD_SINGLE.png", dpi=300, bbox_inches='tight')
         plt.close()
         
         if self.explainer_sparsified_graph_data is not None:
@@ -641,7 +711,7 @@ class MicrobialGNNDataset:
                 graph_type='explainer'
             )
             plt.tight_layout()
-            plt.savefig(f"{save_dir}/explainer_graph.png", dpi=300, bbox_inches='tight')
+            plt.savefig(f"{save_dir}/explainer_graph_OLD_SINGLE.png", dpi=300, bbox_inches='tight')
             plt.close()
     
     def _get_node_labels(self, G, graph_type):
@@ -658,8 +728,13 @@ class MicrobialGNNDataset:
                 kept_nodes = explainer_data['kept_nodes']
                 return {node: self.node_feature_names[kept_nodes[node]] if node < len(kept_nodes) else f"Node_{node}"
                        for node in G.nodes()}
+        elif graph_type == 'original' and hasattr(self, 'original_graph_data') and 'original_node_names' in self.original_graph_data:
+            # Use stored original node names for k-NN graph to ensure consistency
+            original_names = self.original_graph_data['original_node_names']
+            return {node: original_names[node] if node < len(original_names) else f"Node_{node}"
+                   for node in G.nodes()}
         
-        # Default: use original node feature names (with bounds checking)
+        # Default: use current node feature names (with bounds checking)
         return {node: self.node_feature_names[node] if node < len(self.node_feature_names) else f"Node_{node}"
                for node in G.nodes()}
 
@@ -668,9 +743,16 @@ class MicrobialGNNDataset:
         # Create a NetworkX graph
         G = nx.Graph()
         
-        # Add nodes
-        for i, name in enumerate(self.node_feature_names):
-            G.add_node(i, name=name)
+        # Add nodes with appropriate names based on graph type
+        if graph_type == 'original' and hasattr(self, 'original_graph_data') and 'original_node_names' in self.original_graph_data:
+            # Use stored original node names for k-NN graph
+            node_names = self.original_graph_data['original_node_names']
+            for i in range(len(node_names)):
+                G.add_node(i, name=node_names[i])
+        else:
+            # Use current node names for explainer graphs
+            for i, name in enumerate(self.node_feature_names):
+                G.add_node(i, name=name)
         
         # Add edges with weights and types
         for i in range(0, edge_index.shape[1], 2):  # Process only one direction for undirected edges
@@ -732,20 +814,21 @@ class MicrobialGNNDataset:
         #     abs_weight_sum = sum(abs(data['weight']) for u, v, data in G.edges(node, data=True))
         #     node_size.append(200 + abs_weight_sum * 1000)  # Scale to visible range
         
-        # Scale edge width by correlation strength and color by type
+        # Use uniform edge styling with weight labels
         edge_colors = []
         edge_width = []
+        edge_labels = {}
         
         for u, v, data in G.edges(data=True):
-            # Edge color based on weight sign: negative = red, positive = blue/green
-            weight = data['weight']
-            if weight < 0:
-                edge_colors.append('red')  # negative correlation
-            else:
-                edge_colors.append('blue')  # positive correlation
+            # Use uniform gray color for all edges
+            edge_colors.append('gray')
             
-            # Width based on absolute weight (strength of correlation)
-            edge_width.append(abs(weight) * 3 + 0.5)  # Scale for better visibility
+            # Use uniform width for all edges
+            edge_width.append(0.8)
+            
+            # Add edge weight labels (absolute values)
+            weight = data['weight']
+            edge_labels[(u, v)] = f'{abs(weight):.2f}'
         
         # Try to find communities for node coloring
         try:
@@ -773,10 +856,8 @@ class MicrobialGNNDataset:
             ax=ax
         )
         
-        # Create a legend for edge types (updated colors)
-        ax.plot([], [], 'b-', linewidth=2, label='Positive correlation')
-        ax.plot([], [], 'r-', linewidth=2, label='Negative correlation')
-        ax.legend(loc='upper right')
+        # Draw edge weight labels
+        nx.draw_networkx_edge_labels(G, pos, edge_labels, font_size=6, ax=ax)
         
         ax.set_title(title, fontsize=16)
         ax.axis('off')

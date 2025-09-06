@@ -186,12 +186,46 @@ class DomainExpertCasesPipeline(MixedEmbeddingPipeline):
             family_filter_mode=family_filter_mode
         )
         
+        # Define protected nodes for this domain expert case
+        self.dataset.protected_nodes = self._get_protected_nodes_for_case(case_type)
+        if self.dataset.protected_nodes:
+            print(f"DEBUG: Protected nodes for {case_type} case: {self.dataset.protected_nodes}")
+            print(f"DEBUG: Available node names: {self.dataset.node_feature_names}")
+        else:
+            print(f"DEBUG: No protected nodes defined for {case_type}")
+        
         # Setup hyperparameter grids for production use
         self._setup_hyperparameter_grids()
         
         # Update target information
         self.target_names = self.dataset.target_cols
         self._log_initialization_info()
+    
+    def _get_protected_nodes_for_case(self, case_type):
+        """Define protected nodes (families) that should never be removed during pruning for each domain expert case."""
+        if case_type == 'case1' or case_type == 'case1_h2_hydrogenotrophic_only':
+            # Key hydrogenotrophic methanogen families that must be preserved
+            return [
+                'Methanoregulaceae',      # d__Archaea;p__Halobacterota;c__Methanomicrobia;o__Methanomicrobiales;f__Methanoregulaceae;g__Methanolinea
+                'Methanobacteriaceae',    # d__Archaea;p__Euryarchaeota;c__Methanobacteria;o__Methanobacteriales;f__Methanobacteriaceae;g__Methanobacterium
+                'Methanospirillaceae'     # d__Archaea;p__Halobacterota;c__Methanomicrobia;o__Methanomicrobiales;f__Methanospirillaceae;g__Methanospirillum
+            ]
+        elif case_type == 'case2' or case_type == 'case2_ace_acetoclastic_only':
+            # Key acetoclastic methanogen families that must be preserved  
+            return [
+                'Methanosaetaceae'        # d__Archaea;p__Halobacterota;c__Methanosarcinia;o__Methanosarciniales;f__Methanosaetaceae;g__Methanosaeta
+            ]
+        elif case_type == 'case3' or case_type == 'case3_mixed_pathway':
+            # Key families for both pathways that should be preserved
+            return [
+                'Methanoregulaceae',      # Hydrogenotrophic
+                'Methanobacteriaceae',    # Hydrogenotrophic  
+                'Methanospirillaceae',    # Hydrogenotrophic
+                'Methanosaetaceae'        # Acetoclastic
+            ]
+        else:
+            # No protected nodes for other cases
+            return None
     
     def _setup_hyperparameter_grids(self):
         """Setup comprehensive hyperparameter grids for production use."""
@@ -553,7 +587,7 @@ class DomainExpertCasesPipeline(MixedEmbeddingPipeline):
                     print(f"WARNING: Explainer generation returned None, skipping explainer graphs for {target_name}")
                     explainer_graphs = {}
                 
-                # Explicitly call graph visualization
+                # Create enhanced graph visualization using visualization utilities
                 try:
                     graphs_dir = os.path.join(self.save_dir, 'graphs')
                     os.makedirs(graphs_dir, exist_ok=True)
@@ -565,12 +599,14 @@ class DomainExpertCasesPipeline(MixedEmbeddingPipeline):
                         self.dataset.original_graph_data = {
                             'edge_index': first_data.edge_index,
                             'edge_weight': getattr(first_data, 'edge_weight', torch.ones(first_data.edge_index.shape[1])),
-                            'edge_type': getattr(first_data, 'edge_type', torch.ones(first_data.edge_index.shape[1], dtype=torch.long))
+                            'edge_type': getattr(first_data, 'edge_type', torch.ones(first_data.edge_index.shape[1], dtype=torch.long)),
+                            'original_node_names': self.dataset.node_feature_names.copy()  # Store original names
                         }
-                        print("Set original graph data for visualization")
+                        print("Set original graph data for visualization with node names")
                     
-                    self.dataset.visualize_graphs(save_dir=graphs_dir)
-                    print(f"Graph visualizations saved to: {graphs_dir}")
+                    # Create enhanced graph comparison using visualization utilities
+                    self._create_enhanced_graph_comparison(graphs_dir, target_name)
+                    print(f"Enhanced graph visualizations saved to: {graphs_dir}")
                 except Exception as viz_e:
                     print(f"Warning: Graph visualization failed: {viz_e}")
                     import traceback
@@ -590,6 +626,75 @@ class DomainExpertCasesPipeline(MixedEmbeddingPipeline):
             explainer_graphs = {}
         
         return explainer_graphs
+    
+    def _create_enhanced_graph_comparison(self, graphs_dir, target_name):
+        """Create enhanced graph comparison using visualization utilities."""
+        try:
+            from utils.visualization_utils import create_enhanced_graph_comparison
+            
+            # Get functional groups for coloring
+            functional_groups = self._get_functional_groups_for_case()
+            
+            # Get k-NN graph data
+            knn_graph_data = None
+            if hasattr(self.dataset, 'original_graph_data') and self.dataset.original_graph_data:
+                knn_graph_data = self.dataset.original_graph_data
+            
+            # Get explainer graph data
+            explainer_graph_data = None
+            if hasattr(self.dataset, 'explainer_sparsified_graph_data') and self.dataset.explainer_sparsified_graph_data:
+                explainer_graph_data = self.dataset.explainer_sparsified_graph_data
+            
+            # Create enhanced comparison
+            if knn_graph_data:
+                create_enhanced_graph_comparison(
+                    knn_graph_data=knn_graph_data,
+                    explainer_graph_data=explainer_graph_data,
+                    node_features=self.dataset.node_feature_names,
+                    output_dir=graphs_dir,
+                    functional_groups=functional_groups
+                )
+                print(f"Enhanced graph comparison created for {target_name}")
+            else:
+                print(f"Warning: No k-NN graph data available for {target_name}")
+                
+        except Exception as e:
+            print(f"Warning: Enhanced graph comparison failed: {e}")
+            import traceback
+            traceback.print_exc()
+    
+    def _get_functional_groups_for_case(self):
+        """Get functional groups for the current case for graph coloring."""
+        try:
+            # Get case-specific feature groups
+            case_features = self.case_impl.get_case_features(self.case_type)
+            
+            # Extract family names from taxonomy strings
+            from utils.taxonomy_utils import extract_family_from_taxonomy
+            
+            acetoclastic_families = []
+            hydrogenotrophic_families = []
+            syntrophic_families = []
+            
+            for taxonomy in case_features:
+                family_name = extract_family_from_taxonomy(taxonomy)
+                if family_name:
+                    # Categorize based on taxonomy
+                    if 'Methanosaetaceae' in taxonomy:
+                        acetoclastic_families.append(family_name)
+                    elif any(x in taxonomy for x in ['Methanoregulaceae', 'Methanobacteriaceae', 'Methanospirillaceae']):
+                        hydrogenotrophic_families.append(family_name)
+                    elif any(x in taxonomy for x in ['Syntroph', 'Synergist']):
+                        syntrophic_families.append(family_name)
+            
+            return {
+                'acetoclastic': acetoclastic_families,
+                'hydrogenotrophic': hydrogenotrophic_families,
+                'syntrophic': syntrophic_families
+            }
+        except Exception as e:
+            print(f"Warning: Could not determine functional groups: {e}")
+            return None
     
     def _extract_embeddings_from_best_models(self, training_results, target_idx, target_name):
         """
