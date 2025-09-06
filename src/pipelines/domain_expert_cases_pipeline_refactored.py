@@ -30,7 +30,7 @@ from torch_geometric.loader import DataLoader
 from sklearn.model_selection import KFold, GridSearchCV, ParameterGrid
 from sklearn.metrics import mean_squared_error, r2_score, mean_absolute_error
 from sklearn.svm import LinearSVR
-from sklearn.ensemble import ExtraTreesRegressor
+from sklearn.ensemble import ExtraTreesRegressor, RandomForestRegressor, GradientBoostingRegressor
 from sklearn.preprocessing import StandardScaler
 from sklearn.pipeline import Pipeline
 import torch.nn.functional as F
@@ -40,6 +40,21 @@ import pickle
 import warnings
 import json
 warnings.filterwarnings('ignore')
+
+# Import XGBoost and LightGBM with availability checking
+try:
+    import xgboost as xgb
+    XGBOOST_AVAILABLE = True
+except ImportError:
+    XGBOOST_AVAILABLE = False
+    print("Warning: XGBoost not available. Install with: pip install xgboost")
+
+try:
+    import lightgbm as lgb
+    LIGHTGBM_AVAILABLE = True
+except ImportError:
+    LIGHTGBM_AVAILABLE = False
+    print("Warning: LightGBM not available. Install with: pip install lightgbm")
 
 # Import the base pipeline
 from pipelines.embeddings_pipeline import MixedEmbeddingPipeline
@@ -925,13 +940,7 @@ class DomainExpertCasesPipeline(MixedEmbeddingPipeline):
                 print(f"DEBUG: {k} is empty")
         
         try:
-            # Prepare data for ML training
-            from sklearn.model_selection import KFold
-            from sklearn.svm import LinearSVR
-            from sklearn.ensemble import ExtraTreesRegressor
-            from sklearn.preprocessing import StandardScaler
-            from sklearn.pipeline import Pipeline
-            from sklearn.metrics import mean_squared_error, r2_score, mean_absolute_error
+            # All imports are already at the top of the file
             
             ml_results = {}
             # Debug target extraction to understand the tensor structure
@@ -973,72 +982,87 @@ class DomainExpertCasesPipeline(MixedEmbeddingPipeline):
                         # Setup cross-validation
                         kf = KFold(n_splits=self.num_folds, shuffle=True, random_state=42)
                         
-                        # Train LinearSVR
-                        svr_results = []
-                        for fold, (train_idx, test_idx) in enumerate(kf.split(emb_data)):
-                            X_train, X_test = emb_data[train_idx], emb_data[test_idx]
-                            y_train, y_test = target_values[train_idx], target_values[test_idx]
-                            
-                            # Create pipeline with scaling
-                            svr_pipeline = Pipeline([
+                        # Define all ML models to train
+                        ml_models = {
+                            'LinearSVR': Pipeline([
                                 ('scaler', StandardScaler()),
-                                ('svr', LinearSVR(random_state=42))
-                            ])
-                            
-                            # Train and predict
-                            svr_pipeline.fit(X_train, y_train)
-                            y_pred = svr_pipeline.predict(X_test)
-                            
-                            # Calculate metrics
-                            mse = mean_squared_error(y_test, y_pred)
-                            rmse = np.sqrt(mse)
-                            r2 = r2_score(y_test, y_pred)
-                            mae = mean_absolute_error(y_test, y_pred)
-                            
-                            svr_results.append({
-                                'fold': fold + 1,
-                                'mse': mse,
-                                'rmse': rmse,
-                                'r2': r2,
-                                'mae': mae,
-                                'predictions': y_pred,
-                                'targets': y_test
-                            })
-                        
-                        # Train ExtraTreesRegressor
-                        et_results = []
-                        for fold, (train_idx, test_idx) in enumerate(kf.split(emb_data)):
-                            X_train, X_test = emb_data[train_idx], emb_data[test_idx]
-                            y_train, y_test = target_values[train_idx], target_values[test_idx]
-                            
-                            # Create pipeline
-                            et_pipeline = Pipeline([
+                                ('regressor', LinearSVR(epsilon=0.1, tol=1e-4, C=1.0, max_iter=10000, random_state=42))
+                            ]),
+                            'ExtraTrees': Pipeline([
                                 ('scaler', StandardScaler()),
-                                ('et', ExtraTreesRegressor(n_estimators=100, random_state=42))
+                                ('regressor', ExtraTreesRegressor(n_estimators=100, random_state=42, n_jobs=-1))
+                            ]),
+                            'RandomForest': Pipeline([
+                                ('scaler', StandardScaler()),
+                                ('regressor', RandomForestRegressor(n_estimators=100, random_state=42, n_jobs=-1, max_depth=10))
+                            ]),
+                            'GradientBoosting': Pipeline([
+                                ('scaler', StandardScaler()),
+                                ('regressor', GradientBoostingRegressor(n_estimators=100, random_state=42, max_depth=6))
                             ])
-                            
-                            # Train and predict
-                            et_pipeline.fit(X_train, y_train)
-                            y_pred = et_pipeline.predict(X_test)
-                            
-                            # Calculate metrics
-                            mse = mean_squared_error(y_test, y_pred)
-                            rmse = np.sqrt(mse)
-                            r2 = r2_score(y_test, y_pred)
-                            mae = mean_absolute_error(y_test, y_pred)
-                            
-                            et_results.append({
-                                'fold': fold + 1,
-                                'mse': mse,
-                                'rmse': rmse,
-                                'r2': r2,
-                                'mae': mae,
-                                'predictions': y_pred,
-                                'targets': y_test
-                            })
+                        }
                         
-                        ml_results[f"{model_key}_LinearSVR"] = {'fold_results': svr_results}
-                        ml_results[f"{model_key}_ExtraTrees"] = {'fold_results': et_results}
+                        # Add XGBoost if available
+                        if XGBOOST_AVAILABLE:
+                            ml_models['XGBoost'] = Pipeline([
+                                ('scaler', StandardScaler()),
+                                ('regressor', xgb.XGBRegressor(
+                                    n_estimators=100,
+                                    max_depth=6,
+                                    learning_rate=0.1,
+                                    random_state=42,
+                                    n_jobs=-1,
+                                    verbosity=0
+                                ))
+                            ])
+                        
+                        # Add LightGBM if available
+                        if LIGHTGBM_AVAILABLE:
+                            ml_models['LightGBM'] = Pipeline([
+                                ('scaler', StandardScaler()),
+                                ('regressor', lgb.LGBMRegressor(
+                                    n_estimators=100,
+                                    max_depth=6,
+                                    learning_rate=0.1,
+                                    random_state=42,
+                                    n_jobs=-1,
+                                    verbosity=-1
+                                ))
+                            ])
+                        
+                        print(f"Training {len(ml_models)} ML models: {list(ml_models.keys())}")
+                        
+                        # Train all ML models
+                        for ml_name, ml_pipeline in ml_models.items():
+                            print(f"  Training {ml_name}...")
+                            ml_fold_results = []
+                            
+                            for fold, (train_idx, test_idx) in enumerate(kf.split(emb_data)):
+                                X_train, X_test = emb_data[train_idx], emb_data[test_idx]
+                                y_train, y_test = target_values[train_idx], target_values[test_idx]
+                                
+                                # Train and predict
+                                ml_pipeline.fit(X_train, y_train)
+                                y_pred = ml_pipeline.predict(X_test)
+                                
+                                # Calculate metrics
+                                mse = mean_squared_error(y_test, y_pred)
+                                rmse = np.sqrt(mse)
+                                r2 = r2_score(y_test, y_pred)
+                                mae = mean_absolute_error(y_test, y_pred)
+                                
+                                ml_fold_results.append({
+                                    'fold': fold + 1,
+                                    'mse': mse,
+                                    'rmse': rmse,
+                                    'r2': r2,
+                                    'mae': mae,
+                                    'predictions': y_pred,
+                                    'targets': y_test
+                                })
+                            
+                            # Store results for this ML model
+                            ml_results[f"{model_key}_{ml_name}"] = {'fold_results': ml_fold_results}
                         
                         print(f"Completed ML training for {model_key}")
                     else:
