@@ -542,7 +542,8 @@ def create_single_model_prediction_plot(fold_predictions, output_path, title, ta
     # Collect all predictions for combined plot
     all_actual = []
     all_predicted = []
-    fold_colors = plt.cm.Set3(np.linspace(0, 1, len(fold_predictions)))
+    # Use single color for all points instead of different fold colors
+    single_color = '#1f77b4'  # Blue color for all points
     
     # Plot individual folds
     for fold_idx, fold_data in enumerate(fold_predictions):
@@ -555,8 +556,8 @@ def create_single_model_prediction_plot(fold_predictions, output_path, title, ta
             r2 = r2_score(actual, predicted) if len(actual) > 1 else 0
             rmse = np.sqrt(mean_squared_error(actual, predicted))
             
-            # Scatter plot
-            ax.scatter(actual, predicted, alpha=0.7, s=50, c=[fold_colors[fold_idx]], 
+            # Scatter plot with single color
+            ax.scatter(actual, predicted, alpha=0.7, s=50, c=single_color, 
                       edgecolors='black', linewidth=0.5)
             
             # Perfect prediction line with outlier-robust axis limits
@@ -568,20 +569,21 @@ def create_single_model_prediction_plot(fold_predictions, output_path, title, ta
             all_values = np.concatenate([actual_array, predicted_array])
             q1, q99 = np.percentile(all_values, [1, 99])  # Use 1st and 99th percentiles
             
+            # Set axis range starting from 0 (no negative values)
             # If range is still reasonable, use actual min/max, otherwise use percentiles
             if (q99 - q1) < 1e6 and (q99 - q1) > 0:
-                min_val = min(actual_array.min(), predicted_array.min())
                 max_val = max(actual_array.max(), predicted_array.max())
             else:
-                min_val = q1
                 max_val = q99
                 
+            # Always start from 0 for both axes
+            min_val = 0
             ax.plot([min_val, max_val], [min_val, max_val], 'r--', alpha=0.8, linewidth=2)
             
-            # Set reasonable axis limits
-            margin = (max_val - min_val) * 0.05  # 5% margin
-            ax.set_xlim(min_val - margin, max_val + margin)
-            ax.set_ylim(min_val - margin, max_val + margin)
+            # Set axis limits starting from 0
+            margin = max_val * 0.05  # 5% margin
+            ax.set_xlim(0, max_val + margin)
+            ax.set_ylim(0, max_val + margin)
             
             ax.set_xlabel(f'Actual {target_name}')
             ax.set_ylabel(f'Predicted {target_name}')
@@ -596,13 +598,9 @@ def create_single_model_prediction_plot(fold_predictions, output_path, title, ta
     if len(fold_predictions) > 0:
         ax = axes[5]  # Last subplot
         
-        # Color by fold
-        fold_labels = []
-        for fold_idx, fold_data in enumerate(fold_predictions):
-            actual = fold_data['actual']
-            predicted = fold_data['predicted']
-            ax.scatter(actual, predicted, alpha=0.7, s=30, c=[fold_colors[fold_idx]], 
-                      label=f'Fold {fold_idx + 1}', edgecolors='black', linewidth=0.3)
+        # Use single color for all points (no fold-based coloring)
+        ax.scatter(all_actual, all_predicted, alpha=0.7, s=30, c=single_color, 
+                  edgecolors='black', linewidth=0.3)
         
         # Overall metrics
         overall_r2 = r2_score(all_actual, all_predicted) if len(all_actual) > 1 else 0
@@ -614,21 +612,22 @@ def create_single_model_prediction_plot(fold_predictions, output_path, title, ta
         all_predicted_array = np.array(all_predicted)
         all_values = np.concatenate([all_actual_array, all_predicted_array])
         
+        # Set axis range starting from 0 for combined plot
         # Use percentile-based bounds for extreme outliers
         q1, q99 = np.percentile(all_values, [1, 99])
         if (q99 - q1) < 1e6 and (q99 - q1) > 0:
-            min_val = min(all_actual_array.min(), all_predicted_array.min())
             max_val = max(all_actual_array.max(), all_predicted_array.max())
         else:
-            min_val = q1
             max_val = q99
             
+        # Always start from 0 for both axes
+        min_val = 0
         ax.plot([min_val, max_val], [min_val, max_val], 'r--', alpha=0.8, linewidth=2, label='Perfect Prediction')
         
-        # Set reasonable axis limits
-        margin = (max_val - min_val) * 0.05
-        ax.set_xlim(min_val - margin, max_val + margin)
-        ax.set_ylim(min_val - margin, max_val + margin)
+        # Set axis limits starting from 0
+        margin = max_val * 0.05
+        ax.set_xlim(0, max_val + margin)
+        ax.set_ylim(0, max_val + margin)
         
         ax.set_xlabel(f'Actual {target_name}')
         ax.set_ylabel(f'Predicted {target_name}')
@@ -681,21 +680,22 @@ def create_combined_prediction_comparison(predictions_dict, output_path, target_
                 all_predicted_array = np.array(all_predicted)
                 all_values = np.concatenate([all_actual_array, all_predicted_array])
                 
+                # Set axis range starting from 0 for model comparison
                 # Use percentile-based bounds for extreme outliers (RGGC models)
                 q1, q99 = np.percentile(all_values, [1, 99])
                 if (q99 - q1) < 1e6 and (q99 - q1) > 0:
-                    min_val = min(all_actual_array.min(), all_predicted_array.min())
                     max_val = max(all_actual_array.max(), all_predicted_array.max())
                 else:
-                    min_val = q1
                     max_val = q99
                     
+                # Always start from 0 for both axes
+                min_val = 0
                 ax.plot([min_val, max_val], [min_val, max_val], 'r--', alpha=0.8, linewidth=2)
                 
-                # Set reasonable axis limits
-                margin = (max_val - min_val) * 0.05  # 5% margin
-                ax.set_xlim(min_val - margin, max_val + margin)
-                ax.set_ylim(min_val - margin, max_val + margin)
+                # Set axis limits starting from 0
+                margin = max_val * 0.05  # 5% margin
+                ax.set_xlim(0, max_val + margin)
+                ax.set_ylim(0, max_val + margin)
                 
                 ax.set_xlabel(f'Actual {target_name}')
                 ax.set_ylabel(f'Predicted {target_name}')
