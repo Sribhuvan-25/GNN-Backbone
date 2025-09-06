@@ -740,7 +740,7 @@ class GNNExplainerRegression:
             return None, None, None, None
         
         # Determine important nodes based on attention scores
-        important_nodes = np.where(attention_scores > attention_threshold)[0]
+        important_nodes = np.where(attention_scores > attention_threshold)[0].copy()  # Ensure proper array
         
         # Sort nodes by attention score for fallback selection
         sorted_indices = np.argsort(attention_scores)[::-1]
@@ -749,7 +749,7 @@ class GNNExplainerRegression:
         if len(important_nodes) < min_nodes:
             print(f"Only {len(important_nodes)} nodes exceed attention threshold {attention_threshold}")
             print(f"Keeping top {min_nodes} most important nodes by attention score")
-            important_nodes = sorted_indices[:min_nodes]
+            important_nodes = sorted_indices[:min_nodes].copy()  # Fix negative stride issue
         
         print(f"Original graph: {data.x.shape[0]} nodes")
         print(f"Pruned graph: {len(important_nodes)} nodes ({len(important_nodes)/data.x.shape[0]*100:.1f}% retained)")
