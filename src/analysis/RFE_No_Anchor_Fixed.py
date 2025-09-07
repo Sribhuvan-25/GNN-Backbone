@@ -266,16 +266,18 @@ def _inner_loop_select(df, y, model_type, fixed_features=None, candidate_feature
     best_n_features = None
     all_combinations_results = []
     
-    # Define hyperparameter search space - always try to select exactly 50 additional features
+    # Define hyperparameter search space - test 50, 100, 200 additional features
     if candidate_features:
         max_candidates = len(candidate_features)
-        # Always try to select 50 additional features (or all available if less than 50)
-        n_features_options = [50]  # Always try for 50 additional features
-        if max_candidates < 50:
+        # Test different numbers of additional features: 50, 100, 200
+        n_features_options = [50, 100, 200]
+        # Filter out options that exceed available candidates
+        n_features_options = [n for n in n_features_options if n <= max_candidates]
+        if not n_features_options:
             print(f"    WARNING: Only {max_candidates} candidate features available, will use all {max_candidates}")
             n_features_options = [max_candidates]  # Use all available if less than 50
     else:
-        n_features_options = [50]  # Fallback if no candidate features
+        n_features_options = [50, 100, 200]  # Fallback if no candidate features
     
     print(f"    Inner CV: Testing {len(n_features_options)} feature count combinations...")
     print(f"    {'Combination':<15} {'N_Features':<12} {'Mean MSE':<10} {'Std MSE':<10} {'Mean R²':<10} {'Best':<6}")
@@ -576,6 +578,12 @@ def run_model_nested_cv(data_path, target="ACE-km", model_type='extratrees', cas
     print(f"  MSE = {avg_mse:.4f} ± {std_mse:.4f}")
     print(f"  RMSE = {np.sqrt(avg_mse):.4f}")
     
+    # Add mean ± std format for easy copying
+    print(f"\nResults in Mean ± Std Format:")
+    print(f"  R²: {avg_r2:.4f} ± {std_r2:.4f}")
+    print(f"  MSE: {avg_mse:.4f} ± {std_mse:.4f}")
+    print(f"  RMSE: {np.sqrt(avg_mse):.4f} ± {std_mse/(2*np.sqrt(avg_mse)):.4f}")
+    
     # Show hyperparameter selection frequency
     print(f"\nHyperparameter Selection Frequency:")
     n_features_list = [r['best_n_features'] for r in outer_results]
@@ -763,6 +771,7 @@ if __name__ == "__main__":
                         print(f"    Best R²: {best_config['R2']:.4f} ± {best_config['Std_R2']:.4f}")
                         print(f"    MSE: {best_config['MSE']:.4f} ± {best_config['Std_MSE']:.4f}")
                         print(f"    Best N_Features: {best_config['Best_N_Features']}")
+                        print(f"    Mean ± Std Format: R² = {best_config['R2']:.4f} ± {best_config['Std_R2']:.4f}, MSE = {best_config['MSE']:.4f} ± {best_config['Std_MSE']:.4f}")
             else:
                 print(f"  No results available for {case}")
                 
@@ -780,5 +789,6 @@ if __name__ == "__main__":
                 print(f"Best R²: {best_config['R2']:.4f} ± {best_config['Std_R2']:.4f}")
                 print(f"MSE: {best_config['MSE']:.4f} ± {best_config['Std_MSE']:.4f}")
                 print(f"Best N_Features: {best_config['Best_N_Features']}")
+                print(f"Mean ± Std Format: R² = {best_config['R2']:.4f} ± {best_config['Std_R2']:.4f}, MSE = {best_config['MSE']:.4f} ± {best_config['Std_MSE']:.4f}")
     
     print(f"\nAll results saved successfully!")
