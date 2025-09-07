@@ -108,76 +108,105 @@ def create_performance_plot(all_actual, all_predictions, target, n_features, fin
     plt.close()
     print(f"Saved plot: {filename}")
 
-def select_features_with_rfe(X, y, n_features=None, model_type='extratrees'):
-    """Perform RFE feature selection with detailed debugging for all model types"""
+def select_features_with_rfe(X_candidate, y, n_features=None, model_type='extratrees', fixed_features=None):
+    """Perform RFE feature selection on candidate features, optionally combining with fixed features"""
     if n_features is None:
-        return X.columns.tolist()
+        # If no RFE selection needed, return all candidate features + fixed features
+        all_features = list(X_candidate.columns)
+        if fixed_features:
+            all_features.extend(fixed_features)
+        return all_features
     
-    print(f"        RFE Debug: Starting with {len(X.columns)} features, selecting {n_features}")
-    start_time = time.time()
-        
-    # Create estimator based on model type
-    if model_type == 'linearsvr':
-        estimator = LinearSVR(random_state=42, max_iter=100000, tol=1e-4, dual=True)
-    elif model_type == 'extratrees':
-        estimator = ExtraTreesRegressor(n_estimators=200, random_state=42, n_jobs=-1)
-    elif model_type == 'randomforest':
-        estimator = RandomForestRegressor(n_estimators=200, random_state=42, n_jobs=-1, max_depth=10)
-    elif model_type == 'gradientboosting':
-        estimator = GradientBoostingRegressor(n_estimators=200, random_state=42, max_depth=6)
-    elif model_type == 'xgboost' and XGBOOST_AVAILABLE:
-        estimator = xgb.XGBRegressor(n_estimators=200, max_depth=6, learning_rate=0.1, random_state=42, n_jobs=-1, verbosity=0)
-    elif model_type == 'lightgbm' and LIGHTGBM_AVAILABLE:
-        estimator = lgb.LGBMRegressor(n_estimators=200, max_depth=6, learning_rate=0.1, random_state=42, n_jobs=-1, verbosity=-1)
+    # If we want more features than available candidates, use all candidates
+    if n_features >= len(X_candidate.columns):
+        print(f"        RFE Debug: Requested {n_features} features but only {len(X_candidate.columns)} candidates available")
+        print(f"        RFE Debug: Using all {len(X_candidate.columns)} candidate features")
+        selected_candidate_features = X_candidate.columns.tolist()
     else:
-        # Default fallback to ExtraTreesRegressor
-        estimator = ExtraTreesRegressor(n_estimators=200, random_state=42, n_jobs=-1)
-        print(f"        RFE Debug: Unknown model_type '{model_type}', using ExtraTreesRegressor as fallback")
+        print(f"        RFE Debug: Starting with {len(X_candidate.columns)} candidate features, selecting {n_features}")
+        start_time = time.time()
+            
+        # Create estimator based on model type
+        if model_type == 'linearsvr':
+            estimator = LinearSVR(random_state=42, max_iter=100000, tol=1e-4, dual=True)
+        elif model_type == 'extratrees':
+            estimator = ExtraTreesRegressor(n_estimators=200, random_state=42, n_jobs=-1)
+        elif model_type == 'randomforest':
+            estimator = RandomForestRegressor(n_estimators=200, random_state=42, n_jobs=-1, max_depth=10)
+        elif model_type == 'gradientboosting':
+            estimator = GradientBoostingRegressor(n_estimators=200, random_state=42, max_depth=6)
+        elif model_type == 'xgboost' and XGBOOST_AVAILABLE:
+            estimator = xgb.XGBRegressor(n_estimators=200, max_depth=6, learning_rate=0.1, random_state=42, n_jobs=-1, verbosity=0)
+        elif model_type == 'lightgbm' and LIGHTGBM_AVAILABLE:
+            estimator = lgb.LGBMRegressor(n_estimators=200, max_depth=6, learning_rate=0.1, random_state=42, n_jobs=-1, verbosity=-1)
+        else:
+            # Default fallback to ExtraTreesRegressor
+            estimator = ExtraTreesRegressor(n_estimators=200, random_state=42, n_jobs=-1)
+            print(f"        RFE Debug: Unknown model_type '{model_type}', using ExtraTreesRegressor as fallback")
+        
+        # Create RFE object
+        rfe = RFE(estimator=estimator, n_features_to_select=n_features)
+        
+        # Fit RFE
+        print(f"        RFE Debug: Fitting RFE with {type(estimator).__name__}...")
+        rfe.fit(X_candidate, y)
+        
+        # Get selected features
+        selected_candidate_features = X_candidate.columns[rfe.support_].tolist()
+        
+        # Debug output
+        print(f"        RFE Debug: Selected {len(selected_candidate_features)} candidate features in {time.time() - start_time:.2f}s")
+        print(f"        RFE Debug: First 5 selected candidate features: {selected_candidate_features[:5]}")
     
-    # Create RFE object
-    rfe = RFE(estimator=estimator, n_features_to_select=n_features)
+    # Combine fixed features with RFE-selected features
+    final_features = []
+    if fixed_features:
+        final_features.extend(fixed_features)
+        print(f"        RFE Debug: Added {len(fixed_features)} fixed features")
+    final_features.extend(selected_candidate_features)
     
-    # Fit RFE
-    print(f"        RFE Debug: Fitting RFE with {type(estimator).__name__}...")
-    rfe.fit(X, y)
+    print(f"        RFE Debug: Final feature set: {len(fixed_features) if fixed_features else 0} fixed + {len(selected_candidate_features)} RFE-selected = {len(final_features)} total")
     
-    # Get selected features
-    selected_features = X.columns[rfe.support_].tolist()
-    
-    # Debug output
-    print(f"        RFE Debug: Selected {len(selected_features)} features in {time.time() - start_time:.2f}s")
-    print(f"        RFE Debug: First 5 selected features: {selected_features[:5]}")
-    
-    # Ensure we got the right number
-    if len(selected_features) != n_features:
-        print(f"        RFE ERROR: Expected {n_features} features but got {len(selected_features)}")
-        # This shouldn't happen, but let's handle it
-        if len(selected_features) == 0:
-            print(f"        RFE ERROR: No features selected! Falling back to all features.")
-            return X.columns.tolist()
-    
-    return selected_features
+    return final_features
 
-def _train_and_evaluate_once(X, y, train_idx, val_idx, n_features, model_type):
+def _train_and_evaluate_once(df, y, train_idx, val_idx, n_features, model_type, fixed_features=None, candidate_features=None):
     """Train model on train_idx and evaluate on val_idx, returning MSE and R² scores"""
-    X_train, X_val = X.iloc[train_idx], X.iloc[val_idx]
+    # Get the training and validation data using the indices directly
+    # The indices from KFold are already aligned with the dataframe
     y_train, y_val = y.iloc[train_idx], y.iloc[val_idx]
     
-    # Perform RFE feature selection (or use all features if n_features is None)
-    if n_features is None:
-        selected_features = X_train.columns.tolist()
-        print(f"      Using all {len(selected_features)} features")
-    else:
-        print(f"      Performing RFE to select {n_features} features from {len(X_train.columns)}...")
-        selected_features = select_features_with_rfe(X_train, y_train, n_features, model_type)
-        print(f"      RFE selected {len(selected_features)} features")
-        
-        # Validate that RFE actually selected the right number of features
-        if len(selected_features) != n_features:
-            print(f"      WARNING: RFE selected {len(selected_features)} features but expected {n_features}")
+    # Get the training and validation indices from the dataframe
+    train_indices = df.index[train_idx]
+    val_indices = df.index[val_idx]
     
-    X_train_selected = X_train[selected_features]
-    X_val_selected = X_val[selected_features]
+    # Perform hybrid feature selection: fixed features + RFE on candidate features
+    if n_features is None:
+        # Use all candidate features + fixed features
+        selected_features = list(candidate_features) if candidate_features else []
+        if fixed_features:
+            selected_features.extend(fixed_features)
+        print(f"      Using all {len(candidate_features) if candidate_features else 0} candidate features + {len(fixed_features) if fixed_features else 0} fixed features")
+    else:
+        print(f"      Performing hybrid selection: {len(fixed_features) if fixed_features else 0} fixed + RFE select {n_features} from {len(candidate_features) if candidate_features else 0} candidates...")
+        
+        # Create candidate feature matrix for RFE
+        if candidate_features:
+            X_candidate_train = df.loc[train_indices, candidate_features]
+            selected_candidate_features = select_features_with_rfe(X_candidate_train, y_train, n_features, model_type, None)
+        else:
+            selected_candidate_features = []
+        
+        # Combine fixed and RFE-selected features
+        selected_features = []
+        if fixed_features:
+            selected_features.extend(fixed_features)
+        selected_features.extend(selected_candidate_features)
+        
+        print(f"      Hybrid selection resulted in {len(selected_features)} total features")
+    
+    # Create final feature matrices
+    X_train_selected = df.loc[train_indices, selected_features]
+    X_val_selected = df.loc[val_indices, selected_features]
     
     # Apply scaling and create model based on model type
     if model_type == 'linearsvr':
@@ -229,7 +258,7 @@ def _train_and_evaluate_once(X, y, train_idx, val_idx, n_features, model_type):
     r2 = r2_score(y_val, y_pred)
     return mse, r2, selected_features
 
-def _inner_loop_select(X, y, model_type):
+def _inner_loop_select(df, y, model_type, fixed_features=None, candidate_features=None):
     """Inner loop for hyperparameter selection using K-fold CV with MSE"""
     # FIXED: Use proper 5-fold inner CV for reliable hyperparameter selection
     inner_kf = KFold(n_splits=5, shuffle=True, random_state=42)
@@ -237,9 +266,16 @@ def _inner_loop_select(X, y, model_type):
     best_n_features = None
     all_combinations_results = []
     
-    # Define hyperparameter search space
-    # n_features_options = [None, 50, 75, 100]
-    n_features_options = [50]
+    # Define hyperparameter search space - always try to select exactly 50 additional features
+    if candidate_features:
+        max_candidates = len(candidate_features)
+        # Always try to select 50 additional features (or all available if less than 50)
+        n_features_options = [50]  # Always try for 50 additional features
+        if max_candidates < 50:
+            print(f"    WARNING: Only {max_candidates} candidate features available, will use all {max_candidates}")
+            n_features_options = [max_candidates]  # Use all available if less than 50
+    else:
+        n_features_options = [50]  # Fallback if no candidate features
     
     print(f"    Inner CV: Testing {len(n_features_options)} feature count combinations...")
     print(f"    {'Combination':<15} {'N_Features':<12} {'Mean MSE':<10} {'Std MSE':<10} {'Mean R²':<10} {'Best':<6}")
@@ -249,8 +285,8 @@ def _inner_loop_select(X, y, model_type):
         val_mse_scores = []
         val_r2_scores = []
         
-        for tr_idx, val_idx in inner_kf.split(X):
-            mse_val, r2_val, _ = _train_and_evaluate_once(X, y, tr_idx, val_idx, n_features, model_type)
+        for tr_idx, val_idx in inner_kf.split(df):
+            mse_val, r2_val, _ = _train_and_evaluate_once(df, y, tr_idx, val_idx, n_features, model_type, fixed_features, candidate_features)
             val_mse_scores.append(mse_val)
             val_r2_scores.append(r2_val)
         
@@ -332,7 +368,7 @@ def run_model_nested_cv(data_path, target="ACE-km", model_type='extratrees', cas
     # Get features (all columns except target columns)
     all_features = [col for col in df.columns if col not in target_columns]
     
-    # Apply case-specific feature filtering
+    # Apply case-specific feature filtering with hybrid approach
     if case_type in CASE_FEATURES:
         case_features = CASE_FEATURES[case_type]
         # Find intersection between case features and available features
@@ -344,23 +380,38 @@ def run_model_nested_cv(data_path, target="ACE-km", model_type='extratrees', cas
             print(f"Available features: {list(df.columns)[:10]}...")  # Show first 10
             return None
         
-        print(f"\n{case_type.upper()} FEATURE FILTERING:")
+        print(f"\n{case_type.upper()} HYBRID FEATURE SELECTION:")
         print(f"Case features required: {len(case_features)}")
         print(f"Case features available: {len(available_case_features)}")
         print(f"Available case features: {available_case_features}")
         
-        # Use only the case-specific features
-        X = df[available_case_features]
-        filtered_features = available_case_features
+        # HYBRID APPROACH: Fixed case features + RFE on remaining features
+        # Step 1: Get remaining features (excluding case features)
+        remaining_features = [f for f in all_features if f not in available_case_features]
+        print(f"Remaining features for RFE: {len(remaining_features)}")
+        
+        # Step 2: Create separate datasets for fixed and candidate features
+        X_fixed = df[available_case_features]  # Always included features
+        X_candidate = df[remaining_features]   # Features for RFE selection
+        
+        # Store the fixed features for later use
+        fixed_features = available_case_features
+        
+        print(f"Fixed features (always included): {len(fixed_features)}")
+        print(f"Candidate features (for RFE): {len(remaining_features)}")
+        
     else:
-        # Use all features if case_type is not recognized
-        X = df[all_features]
-        filtered_features = all_features
+        # Use all features if case_type is not recognized (no fixed features)
+        X_fixed = None
+        X_candidate = df[all_features]
+        fixed_features = None
+        print(f"\nNo case filtering - using all {len(all_features)} features for RFE")
     
     y = df[target]
     
     print(f"Final dataset shape: {df.shape}")
-    print(f"Total features after case filtering: {len(filtered_features)}")
+    print(f"Fixed features: {len(fixed_features) if fixed_features else 0}")
+    print(f"Candidate features: {len(X_candidate.columns)}")
     print(f"Target: {target}")
     print(f"Target range: {y.min():.4f} to {y.max():.4f}")
     print(f"Model type: {model_type}")
@@ -373,7 +424,7 @@ def run_model_nested_cv(data_path, target="ACE-km", model_type='extratrees', cas
     best_n_features = None
     
     # FIXED: Store actual CV splits for proper prediction collection
-    cv_splits = list(outer_kf.split(X))
+    cv_splits = list(outer_kf.split(df))
     
     print(f"\n{'='*60}")
     print(f"NESTED CV RESULTS FOR {model_type.upper()} - {target}")
@@ -386,25 +437,44 @@ def run_model_nested_cv(data_path, target="ACE-km", model_type='extratrees', cas
         print(f"  {'-'*50}")
         print(f"  Train samples: {len(train_idx)}, Test samples: {len(test_idx)}")
         
-        X_train, X_test = X.iloc[train_idx], X.iloc[test_idx]
         y_train, y_test = y.iloc[train_idx], y.iloc[test_idx]
         
         # 1. Inner loop: pick hyperparameters
         print(f"  Inner CV Hyperparameter Selection:")
-        best_n_features_inner = _inner_loop_select(X_train, y_train, model_type)
+        candidate_features_list = X_candidate.columns.tolist() if 'X_candidate' in locals() else None
+        # Create training subset for inner CV
+        df_train = df.iloc[train_idx]
+        y_train_subset = y.iloc[train_idx]
+        best_n_features_inner = _inner_loop_select(df_train, y_train_subset, model_type, fixed_features, candidate_features_list)
         
         # 2. Retrain on full train_data with best_params
         print(f"  Retraining with best n_features={best_n_features_inner}")
         
-        # Perform RFE feature selection with best n_features (or use all features if None)
+        # Perform hybrid feature selection with best n_features
         if best_n_features_inner is None:
-            selected_features = X_train.columns.tolist()
+            # Use all features
+            selected_features = list(X_candidate.columns) if 'X_candidate' in locals() else []
+            if fixed_features:
+                selected_features.extend(fixed_features)
             print(f"  Using all {len(selected_features)} features...")
         else:
-            selected_features = select_features_with_rfe(X_train, y_train, best_n_features_inner, model_type)
+            # Use hybrid selection: fixed + RFE on candidates
+            if 'X_candidate' in locals() and len(X_candidate.columns) > 0:
+                X_candidate_train = X_candidate.iloc[train_idx]
+                selected_candidate_features = select_features_with_rfe(X_candidate_train, y_train, best_n_features_inner, model_type, None)
+            else:
+                selected_candidate_features = []
+            
+            # Combine fixed and RFE-selected features
+            selected_features = []
+            if fixed_features:
+                selected_features.extend(fixed_features)
+            selected_features.extend(selected_candidate_features)
+            print(f"  Hybrid selection: {len(fixed_features) if fixed_features else 0} fixed + {len(selected_candidate_features)} RFE-selected = {len(selected_features)} total")
         
-        X_train_selected = X_train[selected_features]
-        X_test_selected = X_test[selected_features]
+        # Create final feature matrices
+        X_train_selected = df.loc[y_train.index, selected_features]
+        X_test_selected = df.loc[y_test.index, selected_features]
         
         # Apply scaling and create model based on model type
         if model_type == 'linearsvr':
