@@ -615,14 +615,14 @@ if __name__ == "__main__":
     
     cases = ['case1', 'case2', 'case3']
     
+    # Focus on the two main targets: ACE-km and H2-km
+    main_targets = ['ACE-km', 'H2-km']
+    
     print(f"Available model types ({len(model_types)}): {model_types}")
     print(f"Total experiments to run: {len(cases)} cases × {len(main_targets)} targets × {len(model_types)} models = {len(cases) * len(main_targets) * len(model_types)}")
     
     # Dictionary to store results
     all_results = {}
-    
-    # Focus on the two main targets: ACE-km and H2-km
-    main_targets = ['ACE-km', 'H2-km']
     
     # Run nested CV for all combinations of cases, targets, and model types
     for case_type in cases:
