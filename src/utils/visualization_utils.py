@@ -1,6 +1,7 @@
 """
 Visualization utilities for graph rendering and statistical plots.
 """
+import os
 import numpy as np
 import matplotlib.pyplot as plt
 import networkx as nx
@@ -108,7 +109,12 @@ def create_networkx_graph_from_edge_data(edge_index, edge_weight, node_features)
     
     # Add edges with weights
     edge_index_np = edge_index.cpu().numpy()
-    edge_weight_np = edge_weight.cpu().numpy()
+    
+    # Handle None edge_weight gracefully
+    if edge_weight is not None:
+        edge_weight_np = edge_weight.cpu().numpy()
+    else:
+        edge_weight_np = np.ones(edge_index_np.shape[1])  # Default weights
     
     for i in range(edge_index_np.shape[1]):
         src, dst = edge_index_np[:, i]
@@ -165,7 +171,14 @@ def save_graph_visualization(G, node_colors, output_path, title="Graph Visualiza
     pos = nx.spring_layout(G, k=8, iterations=150, seed=42)
     
     # Draw nodes with uniform size as requested
-    node_color_list = [node_colors.get(node, '#95A5A6') for node in G.nodes()]
+    # Convert node index to node name for color lookup
+    node_color_list = []
+    for node in G.nodes():
+        # Get node name from the graph's node data
+        node_name = G.nodes[node].get('name', f'node_{node}')
+        color = node_colors.get(node_name, '#95A5A6')  # Use node name as key
+        node_color_list.append(color)
+    
     nx.draw_networkx_nodes(G, pos, node_color=node_color_list, 
                           node_size=500, alpha=0.9, edgecolors='black', linewidths=0.5)
     
@@ -299,7 +312,16 @@ def create_enhanced_graph_comparison(knn_graph_data, explainer_graph_data, node_
         # Adjust node colors for pruned graph
         if 'kept_nodes' in explainer_graph_data:
             kept_indices = explainer_graph_data['kept_nodes']
-            pruned_node_colors = {i: node_colors[kept_indices[i]] for i in range(len(kept_indices))}
+            # Create pruned node colors safely, checking if indices exist
+            pruned_node_colors = {}
+            for i in range(len(kept_indices)):
+                original_idx = kept_indices[i]
+                if original_idx in node_colors:
+                    pruned_node_colors[i] = node_colors[original_idx]
+                else:
+                    # Fallback color if index not found
+                    pruned_node_colors[i] = '#4ECDC4'
+                    print(f"Warning: Node color not found for original index {original_idx}, using fallback")
         else:
             pruned_node_colors = node_colors
         
@@ -352,7 +374,13 @@ def create_side_by_side_comparison(knn_graph_data, explainer_graph_data, node_fe
         pos1 = nx.spring_layout(knn_G, k=6, iterations=100, seed=42)
         
         # Draw k-NN graph
-        node_color_list = [node_colors.get(node, '#95A5A6') for node in knn_G.nodes()]
+        # Convert node index to node name for color lookup
+        node_color_list = []
+        for node in knn_G.nodes():
+            node_name = knn_G.nodes[node].get('name', f'node_{node}')
+            color = node_colors.get(node_name, '#95A5A6')
+            node_color_list.append(color)
+        
         nx.draw_networkx_nodes(knn_G, pos1, ax=ax1, node_color=node_color_list,
                               node_size=300, alpha=0.9, edgecolors='black', linewidths=0.5)
         
@@ -385,12 +413,12 @@ def create_side_by_side_comparison(knn_graph_data, explainer_graph_data, node_fe
         )
         pos2 = nx.spring_layout(explainer_G, k=6, iterations=100, seed=42)
         
-        # Adjust colors for pruned nodes
-        if 'kept_nodes' in explainer_graph_data:
-            kept_indices = explainer_graph_data['kept_nodes']
-            pruned_node_colors = [node_colors.get(kept_indices[node], '#95A5A6') for node in explainer_G.nodes()]
-        else:
-            pruned_node_colors = [node_colors.get(node, '#95A5A6') for node in explainer_G.nodes()]
+        # Adjust colors for pruned nodes - use node names for color lookup
+        pruned_node_colors = []
+        for node in explainer_G.nodes():
+            node_name = explainer_G.nodes[node].get('name', f'node_{node}')
+            color = node_colors.get(node_name, '#95A5A6')
+            pruned_node_colors.append(color)
         
         nx.draw_networkx_nodes(explainer_G, pos2, ax=ax2, node_color=pruned_node_colors,
                               node_size=300, alpha=0.9, edgecolors='black', linewidths=0.5)

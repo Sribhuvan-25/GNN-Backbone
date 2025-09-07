@@ -155,9 +155,9 @@ class MixedEmbeddingPipeline:
         }
         self.explainer_param_grid = list(ParameterGrid(self.explainer_hyperparams))
         
-        # Always train all three models in mixed approach
-        self.gnn_models_to_train = ['gcn', 'rggc', 'gat']
-        print("Pipeline configured for MIXED model comparison")
+        # Always train all models including the new KG-GT in mixed approach
+        self.gnn_models_to_train = ['gcn', 'rggc', 'gat', 'kg_gt']
+        print("Pipeline configured for MIXED model comparison (including KG-GT)")
         
         if self.use_nested_cv:
             print("Using NESTED CROSS-VALIDATION for hyperparameter tuning")
@@ -220,6 +220,18 @@ class MixedEmbeddingPipeline:
                 num_heads=8,  # Increased from 4 to 8 attention heads
                 estimate_uncertainty=False
             ).to(device)
+        elif model_type == 'kg_gt' or model_type == 'kggt':
+            from models.GNNmodelsRegression import create_knowledge_guided_graph_transformer
+            model = create_knowledge_guided_graph_transformer(
+                hidden_channels=self.hidden_dim,
+                output_dim=num_targets,
+                dropout_prob=self.dropout_rate,
+                input_channel=1,
+                num_heads=8,
+                num_layers=4,
+                estimate_uncertainty=False,  # Match other models for consistency
+                use_edge_features=True
+            ).to(device)
         # Add DGCNN option for dynamic graph construction
         elif model_type == 'dgcnn':
             try:
@@ -268,9 +280,24 @@ class MixedEmbeddingPipeline:
         train_data = [data_list[i] for i in train_idx]
         val_data = [data_list[i] for i in val_idx]
         
-        # Move all data to the correct device
+        # Move all data to the correct device and ensure no gradients are carried over
         train_data = self._move_data_to_device(train_data)
         val_data = self._move_data_to_device(val_data)
+        
+        # CRITICAL: Ensure all data tensors are detached from any computational graphs
+        for data in train_data:
+            data.x = data.x.detach() if data.x.requires_grad else data.x
+            data.edge_index = data.edge_index.detach() if data.edge_index.requires_grad else data.edge_index
+            data.y = data.y.detach() if data.y.requires_grad else data.y
+            if hasattr(data, 'batch') and data.batch is not None:
+                data.batch = data.batch.detach() if data.batch.requires_grad else data.batch
+                
+        for data in val_data:
+            data.x = data.x.detach() if data.x.requires_grad else data.x
+            data.edge_index = data.edge_index.detach() if data.edge_index.requires_grad else data.edge_index
+            data.y = data.y.detach() if data.y.requires_grad else data.y
+            if hasattr(data, 'batch') and data.batch is not None:
+                data.batch = data.batch.detach() if data.batch.requires_grad else data.batch
         
         # Create data loaders
         batch_size = min(self.batch_size, len(train_data) // 4)
@@ -296,8 +323,14 @@ class MixedEmbeddingPipeline:
                 # Data is already on device from _move_data_to_device
                 optimizer.zero_grad()
                 
-                out, feat = model(batch_data.x, batch_data.edge_index, batch_data.batch)
-                target = batch_data.y[:, target_idx].view(-1, 1)
+                # CRITICAL: Ensure all input tensors are completely detached from any previous computational graphs
+                x_input = batch_data.x.detach() if batch_data.x.requires_grad else batch_data.x
+                edge_input = batch_data.edge_index.detach() if batch_data.edge_index.requires_grad else batch_data.edge_index  
+                batch_input = batch_data.batch.detach() if batch_data.batch.requires_grad else batch_data.batch
+                target_input = batch_data.y[:, target_idx].detach() if batch_data.y.requires_grad else batch_data.y[:, target_idx]
+                
+                out, feat = model(x_input, edge_input, batch_input)
+                target = target_input.view(-1, 1)
                 
                 loss = criterion(out, target)
                 loss.backward()
@@ -338,8 +371,14 @@ class MixedEmbeddingPipeline:
         with torch.no_grad():
             for batch_data in val_loader:
                 # Data is already on device from _move_data_to_device
-                out, feat = model(batch_data.x, batch_data.edge_index, batch_data.batch)
-                target = batch_data.y[:, target_idx].view(-1, 1)
+                # CRITICAL: Ensure all input tensors are completely detached from any previous computational graphs
+                x_input = batch_data.x.detach() if batch_data.x.requires_grad else batch_data.x
+                edge_input = batch_data.edge_index.detach() if batch_data.edge_index.requires_grad else batch_data.edge_index  
+                batch_input = batch_data.batch.detach() if batch_data.batch.requires_grad else batch_data.batch
+                target_input = batch_data.y[:, target_idx].detach() if batch_data.y.requires_grad else batch_data.y[:, target_idx]
+                
+                out, feat = model(x_input, edge_input, batch_input)
+                target = target_input.view(-1, 1)
                 
                 all_preds.append(out.cpu().numpy())
                 all_targets.append(target.cpu().numpy())
@@ -395,11 +434,22 @@ class MixedEmbeddingPipeline:
             val_scores = []
             
             for tr_idx, val_idx in inner_kf.split(temp_data_list):
+                # Create completely fresh model instance to avoid autograd issues
                 model = self._create_gnn_model_with_params(model_type, local_hidden_dim, num_targets=1)
+                model.to(device)
+                
+                # Ensure no gradients are carried over
+                for param in model.parameters():
+                    param.grad = None
+                
                 mse_score = self._train_and_evaluate_once_with_params(
                     model, temp_data_list, tr_idx, val_idx, target_idx, 
                     hidden_dim=local_hidden_dim
                 )
+                
+                # Explicitly delete model to free computational graph
+                del model
+                torch.cuda.empty_cache() if torch.cuda.is_available() else None
                 val_scores.append(mse_score)
             
             mean_val = np.mean(val_scores)
@@ -480,8 +530,14 @@ class MixedEmbeddingPipeline:
                 # Data is already on device from _move_data_to_device
                 optimizer.zero_grad()
                 
-                out, feat = model(batch_data.x, batch_data.edge_index, batch_data.batch)
-                target = batch_data.y[:, target_idx].view(-1, 1)
+                # CRITICAL: Ensure all input tensors are completely detached from any previous computational graphs
+                x_input = batch_data.x.detach() if batch_data.x.requires_grad else batch_data.x
+                edge_input = batch_data.edge_index.detach() if batch_data.edge_index.requires_grad else batch_data.edge_index  
+                batch_input = batch_data.batch.detach() if batch_data.batch.requires_grad else batch_data.batch
+                target_input = batch_data.y[:, target_idx].detach() if batch_data.y.requires_grad else batch_data.y[:, target_idx]
+                
+                out, feat = model(x_input, edge_input, batch_input)
+                target = target_input.view(-1, 1)
                 
                 loss = criterion(out, target)
                 loss.backward()
@@ -524,8 +580,14 @@ class MixedEmbeddingPipeline:
         with torch.no_grad():
             for batch_data in test_loader:
                 # Data is already on device from _move_data_to_device
-                out, feat = model(batch_data.x, batch_data.edge_index, batch_data.batch)
-                target = batch_data.y[:, target_idx].view(-1, 1)
+                # CRITICAL: Ensure all input tensors are completely detached from any previous computational graphs
+                x_input = batch_data.x.detach() if batch_data.x.requires_grad else batch_data.x
+                edge_input = batch_data.edge_index.detach() if batch_data.edge_index.requires_grad else batch_data.edge_index  
+                batch_input = batch_data.batch.detach() if batch_data.batch.requires_grad else batch_data.batch
+                target_input = batch_data.y[:, target_idx].detach() if batch_data.y.requires_grad else batch_data.y[:, target_idx]
+                
+                out, feat = model(x_input, edge_input, batch_input)
+                target = target_input.view(-1, 1)
                 
                 all_preds.append(out.cpu().numpy())
                 all_targets.append(target.cpu().numpy())
@@ -2453,6 +2515,18 @@ class MixedEmbeddingPipeline:
                 num_heads=8,
                 estimate_uncertainty=False
             ).to(device)
+        elif model_type == 'kg_gt' or model_type == 'kggt':
+            from models.GNNmodelsRegression import create_knowledge_guided_graph_transformer
+            model = create_knowledge_guided_graph_transformer(
+                hidden_channels=hidden_dim,
+                output_dim=num_targets,
+                dropout_prob=self.dropout_rate,
+                input_channel=1,
+                num_heads=8,
+                num_layers=4,
+                estimate_uncertainty=False,
+                use_edge_features=True
+            ).to(device)
         else:
             raise ValueError(f"Unknown model type: {model_type}")
         
@@ -2464,16 +2538,36 @@ class MixedEmbeddingPipeline:
         if max_epochs is None:
             max_epochs = min(self.num_epochs, 50)  # Shorter training for inner CV
         
-        # Ensure model is on the correct device
+        # Ensure model is on the correct device and in clean state
         model = model.to(device)
+        model.train()
+        
+        # Critical: Ensure no leftover gradients from previous runs
+        for param in model.parameters():
+            param.grad = None
         
         # Split data and move to device
         train_data = [data_list[i] for i in train_idx]
         val_data = [data_list[i] for i in val_idx]
         
-        # Move all data to the correct device
+        # Move all data to the correct device and ensure no gradients are carried over
         train_data = self._move_data_to_device(train_data)
         val_data = self._move_data_to_device(val_data)
+        
+        # CRITICAL: Ensure all data tensors are detached from any computational graphs
+        for data in train_data:
+            data.x = data.x.detach() if data.x.requires_grad else data.x
+            data.edge_index = data.edge_index.detach() if data.edge_index.requires_grad else data.edge_index
+            data.y = data.y.detach() if data.y.requires_grad else data.y
+            if hasattr(data, 'batch') and data.batch is not None:
+                data.batch = data.batch.detach() if data.batch.requires_grad else data.batch
+                
+        for data in val_data:
+            data.x = data.x.detach() if data.x.requires_grad else data.x
+            data.edge_index = data.edge_index.detach() if data.edge_index.requires_grad else data.edge_index
+            data.y = data.y.detach() if data.y.requires_grad else data.y
+            if hasattr(data, 'batch') and data.batch is not None:
+                data.batch = data.batch.detach() if data.batch.requires_grad else data.batch
         
         # Create data loaders
         batch_size = min(self.batch_size, len(train_data) // 4)
@@ -2499,8 +2593,14 @@ class MixedEmbeddingPipeline:
                 # Data is already on device from _move_data_to_device
                 optimizer.zero_grad()
                 
-                out, feat = model(batch_data.x, batch_data.edge_index, batch_data.batch)
-                target = batch_data.y[:, target_idx].view(-1, 1)
+                # CRITICAL: Ensure all input tensors are completely detached from any previous computational graphs
+                x_input = batch_data.x.detach() if batch_data.x.requires_grad else batch_data.x
+                edge_input = batch_data.edge_index.detach() if batch_data.edge_index.requires_grad else batch_data.edge_index  
+                batch_input = batch_data.batch.detach() if batch_data.batch.requires_grad else batch_data.batch
+                target_input = batch_data.y[:, target_idx].detach() if batch_data.y.requires_grad else batch_data.y[:, target_idx]
+                
+                out, feat = model(x_input, edge_input, batch_input)
+                target = target_input.view(-1, 1)
                 
                 loss = criterion(out, target)
                 loss.backward()
@@ -2541,8 +2641,14 @@ class MixedEmbeddingPipeline:
         with torch.no_grad():
             for batch_data in val_loader:
                 # Data is already on device from _move_data_to_device
-                out, feat = model(batch_data.x, batch_data.edge_index, batch_data.batch)
-                target = batch_data.y[:, target_idx].view(-1, 1)
+                # CRITICAL: Ensure all input tensors are completely detached from any previous computational graphs
+                x_input = batch_data.x.detach() if batch_data.x.requires_grad else batch_data.x
+                edge_input = batch_data.edge_index.detach() if batch_data.edge_index.requires_grad else batch_data.edge_index  
+                batch_input = batch_data.batch.detach() if batch_data.batch.requires_grad else batch_data.batch
+                target_input = batch_data.y[:, target_idx].detach() if batch_data.y.requires_grad else batch_data.y[:, target_idx]
+                
+                out, feat = model(x_input, edge_input, batch_input)
+                target = target_input.view(-1, 1)
                 
                 all_preds.append(out.cpu().numpy())
                 all_targets.append(target.cpu().numpy())

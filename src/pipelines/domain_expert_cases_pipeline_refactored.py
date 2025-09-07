@@ -30,7 +30,7 @@ from torch_geometric.loader import DataLoader
 from sklearn.model_selection import KFold, GridSearchCV, ParameterGrid
 from sklearn.metrics import mean_squared_error, r2_score, mean_absolute_error
 from sklearn.svm import LinearSVR
-from sklearn.ensemble import ExtraTreesRegressor
+from sklearn.ensemble import ExtraTreesRegressor, RandomForestRegressor, GradientBoostingRegressor
 from sklearn.preprocessing import StandardScaler
 from sklearn.pipeline import Pipeline
 import torch.nn.functional as F
@@ -40,6 +40,21 @@ import pickle
 import warnings
 import json
 warnings.filterwarnings('ignore')
+
+# Import XGBoost and LightGBM with availability checking
+try:
+    import xgboost as xgb
+    XGBOOST_AVAILABLE = True
+except ImportError:
+    XGBOOST_AVAILABLE = False
+    print("Warning: XGBoost not available. Install with: pip install xgboost")
+
+try:
+    import lightgbm as lgb
+    LIGHTGBM_AVAILABLE = True
+except ImportError:
+    LIGHTGBM_AVAILABLE = False
+    print("Warning: LightGBM not available. Install with: pip install lightgbm")
 
 # Import the base pipeline
 from pipelines.embeddings_pipeline import MixedEmbeddingPipeline
@@ -326,6 +341,12 @@ class DomainExpertCasesPipeline(MixedEmbeddingPipeline):
         # Create comprehensive results summary
         self._create_final_results_summary(results)
         
+        # Create final case-level graph visualizations
+        print(f"\n{'='*80}")
+        print("CREATING FINAL CASE-LEVEL GRAPH VISUALIZATIONS")
+        print(f"{'='*80}")
+        self._create_case_level_graph_visualizations()
+        
         return results
     
     def _run_single_target_pipeline(self, target_idx, target_name):
@@ -422,7 +443,90 @@ class DomainExpertCasesPipeline(MixedEmbeddingPipeline):
         
         self._generate_comprehensive_results(results, target_name)
         
+        # Stage 7: Create final graph visualizations
+        print(f"\n{'='*50}")
+        print("STAGE 7: Final Graph Visualizations")
+        print(f"{'='*50}")
+        
+        self._create_final_graph_visualizations(target_name)
+        
         return results
+    
+    def _create_case_level_graph_visualizations(self):
+        """Create case-level graph visualizations that summarize the entire case."""
+        try:
+            print(f"Creating case-level graph visualizations for {self.case_type}...")
+            
+            # Create case-level graphs directory
+            case_graphs_dir = os.path.join(self.save_dir, 'case_graphs')
+            os.makedirs(case_graphs_dir, exist_ok=True)
+            
+            # Ensure the dataset has the original graph data
+            if not hasattr(self.dataset, 'original_graph_data') or self.dataset.original_graph_data is None:
+                # Set original graph data from the first data sample
+                first_data = self.dataset.data_list[0]
+                self.dataset.original_graph_data = {
+                    'edge_index': first_data.edge_index,
+                    'edge_weight': getattr(first_data, 'edge_weight', torch.ones(first_data.edge_index.shape[1])),
+                    'edge_type': getattr(first_data, 'edge_type', torch.ones(first_data.edge_index.shape[1], dtype=torch.long)),
+                    'original_node_names': self.dataset.node_feature_names.copy()
+                }
+                print("Set original graph data for case-level visualization")
+            
+            # Create enhanced graph comparison for the case
+            self._create_enhanced_graph_comparison(case_graphs_dir, f"{self.case_type}_summary")
+            
+            # Also create standard visualization
+            try:
+                self.dataset.visualize_graphs(save_dir=case_graphs_dir)
+                print(f"Case-level standard graph comparison created")
+            except Exception as e:
+                print(f"Warning: Case-level standard graph visualization failed: {e}")
+            
+            print(f"Case-level graph visualizations completed for {self.case_type}")
+            
+        except Exception as e:
+            print(f"Warning: Case-level graph visualization failed: {e}")
+            import traceback
+            traceback.print_exc()
+    
+    def _create_final_graph_visualizations(self, target_name):
+        """Create final comprehensive graph visualizations for the target."""
+        try:
+            print(f"Creating final graph visualizations for {target_name}...")
+            
+            # Create graphs directory
+            graphs_dir = os.path.join(self.save_dir, 'graphs')
+            os.makedirs(graphs_dir, exist_ok=True)
+            
+            # Ensure the dataset has the original graph data for comparison
+            if not hasattr(self.dataset, 'original_graph_data') or self.dataset.original_graph_data is None:
+                # Set original graph data from the first data sample
+                first_data = self.dataset.data_list[0]
+                self.dataset.original_graph_data = {
+                    'edge_index': first_data.edge_index,
+                    'edge_weight': getattr(first_data, 'edge_weight', torch.ones(first_data.edge_index.shape[1])),
+                    'edge_type': getattr(first_data, 'edge_type', torch.ones(first_data.edge_index.shape[1], dtype=torch.long)),
+                    'original_node_names': self.dataset.node_feature_names.copy()  # Store original names
+                }
+                print("Set original graph data for final visualization with node names")
+            
+            # Create enhanced graph comparison using visualization utilities
+            self._create_enhanced_graph_comparison(graphs_dir, target_name)
+            
+            # Also create the standard graph comparison using the dataset's visualize_graphs method
+            try:
+                self.dataset.visualize_graphs(save_dir=graphs_dir)
+                print(f"Standard graph comparison created for {target_name}")
+            except Exception as e:
+                print(f"Warning: Standard graph visualization failed: {e}")
+            
+            print(f"Final graph visualizations completed for {target_name}")
+            
+        except Exception as e:
+            print(f"Warning: Final graph visualization failed for {target_name}: {e}")
+            import traceback
+            traceback.print_exc()
     
     def _train_models_with_hyperparameter_tuning(self, target_idx, target_name, 
                                                 graph_type, phase, explainer_graphs=None):
@@ -557,7 +661,7 @@ class DomainExpertCasesPipeline(MixedEmbeddingPipeline):
                 # Generate explainer-sparsified graphs
                 print(f"DEBUG: About to call create_explainer_sparsified_graph with model {best_model_info['model_type']}")
                 print(f"DEBUG: Model is GAT: {best_model_info['model_type'] == 'gat'}")
-                print(f"DEBUG: use_attention_pruning=True, use_node_pruning=True")
+                print(f"DEBUG: Using UNIFIED pruning method (combines edge + attention for all models)")
                 
                 try:
                     explainer_data = create_explainer_sparsified_graph(
@@ -565,8 +669,7 @@ class DomainExpertCasesPipeline(MixedEmbeddingPipeline):
                         model=model,
                         target_idx=target_idx,
                         importance_threshold=self.importance_threshold,
-                        use_node_pruning=True,
-                        use_attention_pruning=True,
+                        use_node_pruning=True,  # Uses unified method that combines edge + attention
                         target_name=target_name
                     )
                 except Exception as explainer_error:
@@ -824,6 +927,19 @@ class DomainExpertCasesPipeline(MixedEmbeddingPipeline):
                                         dropout_prob=self.dropout_rate,
                                         input_channel=1
                                     )
+                                elif model_type == 'kg_gt' or model_type == 'kggt':
+                                    from models.GNNmodelsRegression import create_knowledge_guided_graph_transformer
+                                    print(f"DEBUG: Creating Knowledge-Guided Graph Transformer with hidden_dim={self.hidden_dim}")
+                                    model = create_knowledge_guided_graph_transformer(
+                                        hidden_channels=self.hidden_dim,
+                                        output_dim=1,
+                                        dropout_prob=self.dropout_rate,
+                                        input_channel=1,
+                                        num_heads=8,
+                                        num_layers=4,
+                                        estimate_uncertainty=True,
+                                        use_edge_features=True
+                                    )
                                 else:
                                     continue
                                 
@@ -925,13 +1041,7 @@ class DomainExpertCasesPipeline(MixedEmbeddingPipeline):
                 print(f"DEBUG: {k} is empty")
         
         try:
-            # Prepare data for ML training
-            from sklearn.model_selection import KFold
-            from sklearn.svm import LinearSVR
-            from sklearn.ensemble import ExtraTreesRegressor
-            from sklearn.preprocessing import StandardScaler
-            from sklearn.pipeline import Pipeline
-            from sklearn.metrics import mean_squared_error, r2_score, mean_absolute_error
+            # All imports are already at the top of the file
             
             ml_results = {}
             # Debug target extraction to understand the tensor structure
@@ -973,72 +1083,87 @@ class DomainExpertCasesPipeline(MixedEmbeddingPipeline):
                         # Setup cross-validation
                         kf = KFold(n_splits=self.num_folds, shuffle=True, random_state=42)
                         
-                        # Train LinearSVR
-                        svr_results = []
-                        for fold, (train_idx, test_idx) in enumerate(kf.split(emb_data)):
-                            X_train, X_test = emb_data[train_idx], emb_data[test_idx]
-                            y_train, y_test = target_values[train_idx], target_values[test_idx]
-                            
-                            # Create pipeline with scaling
-                            svr_pipeline = Pipeline([
+                        # Define all ML models to train
+                        ml_models = {
+                            'LinearSVR': Pipeline([
                                 ('scaler', StandardScaler()),
-                                ('svr', LinearSVR(random_state=42))
-                            ])
-                            
-                            # Train and predict
-                            svr_pipeline.fit(X_train, y_train)
-                            y_pred = svr_pipeline.predict(X_test)
-                            
-                            # Calculate metrics
-                            mse = mean_squared_error(y_test, y_pred)
-                            rmse = np.sqrt(mse)
-                            r2 = r2_score(y_test, y_pred)
-                            mae = mean_absolute_error(y_test, y_pred)
-                            
-                            svr_results.append({
-                                'fold': fold + 1,
-                                'mse': mse,
-                                'rmse': rmse,
-                                'r2': r2,
-                                'mae': mae,
-                                'predictions': y_pred,
-                                'targets': y_test
-                            })
-                        
-                        # Train ExtraTreesRegressor
-                        et_results = []
-                        for fold, (train_idx, test_idx) in enumerate(kf.split(emb_data)):
-                            X_train, X_test = emb_data[train_idx], emb_data[test_idx]
-                            y_train, y_test = target_values[train_idx], target_values[test_idx]
-                            
-                            # Create pipeline
-                            et_pipeline = Pipeline([
+                                ('regressor', LinearSVR(epsilon=0.1, tol=1e-4, C=1.0, max_iter=10000, random_state=42))
+                            ]),
+                            'ExtraTrees': Pipeline([
                                 ('scaler', StandardScaler()),
-                                ('et', ExtraTreesRegressor(n_estimators=100, random_state=42))
+                                ('regressor', ExtraTreesRegressor(n_estimators=100, random_state=42, n_jobs=-1))
+                            ]),
+                            'RandomForest': Pipeline([
+                                ('scaler', StandardScaler()),
+                                ('regressor', RandomForestRegressor(n_estimators=100, random_state=42, n_jobs=-1, max_depth=10))
+                            ]),
+                            'GradientBoosting': Pipeline([
+                                ('scaler', StandardScaler()),
+                                ('regressor', GradientBoostingRegressor(n_estimators=100, random_state=42, max_depth=6))
                             ])
-                            
-                            # Train and predict
-                            et_pipeline.fit(X_train, y_train)
-                            y_pred = et_pipeline.predict(X_test)
-                            
-                            # Calculate metrics
-                            mse = mean_squared_error(y_test, y_pred)
-                            rmse = np.sqrt(mse)
-                            r2 = r2_score(y_test, y_pred)
-                            mae = mean_absolute_error(y_test, y_pred)
-                            
-                            et_results.append({
-                                'fold': fold + 1,
-                                'mse': mse,
-                                'rmse': rmse,
-                                'r2': r2,
-                                'mae': mae,
-                                'predictions': y_pred,
-                                'targets': y_test
-                            })
+                        }
                         
-                        ml_results[f"{model_key}_LinearSVR"] = {'fold_results': svr_results}
-                        ml_results[f"{model_key}_ExtraTrees"] = {'fold_results': et_results}
+                        # Add XGBoost if available
+                        if XGBOOST_AVAILABLE:
+                            ml_models['XGBoost'] = Pipeline([
+                                ('scaler', StandardScaler()),
+                                ('regressor', xgb.XGBRegressor(
+                                    n_estimators=100,
+                                    max_depth=6,
+                                    learning_rate=0.1,
+                                    random_state=42,
+                                    n_jobs=-1,
+                                    verbosity=0
+                                ))
+                            ])
+                        
+                        # Add LightGBM if available
+                        if LIGHTGBM_AVAILABLE:
+                            ml_models['LightGBM'] = Pipeline([
+                                ('scaler', StandardScaler()),
+                                ('regressor', lgb.LGBMRegressor(
+                                    n_estimators=100,
+                                    max_depth=6,
+                                    learning_rate=0.1,
+                                    random_state=42,
+                                    n_jobs=-1,
+                                    verbosity=-1
+                                ))
+                            ])
+                        
+                        print(f"Training {len(ml_models)} ML models: {list(ml_models.keys())}")
+                        
+                        # Train all ML models
+                        for ml_name, ml_pipeline in ml_models.items():
+                            print(f"  Training {ml_name}...")
+                            ml_fold_results = []
+                            
+                            for fold, (train_idx, test_idx) in enumerate(kf.split(emb_data)):
+                                X_train, X_test = emb_data[train_idx], emb_data[test_idx]
+                                y_train, y_test = target_values[train_idx], target_values[test_idx]
+                                
+                                # Train and predict
+                                ml_pipeline.fit(X_train, y_train)
+                                y_pred = ml_pipeline.predict(X_test)
+                                
+                                # Calculate metrics
+                                mse = mean_squared_error(y_test, y_pred)
+                                rmse = np.sqrt(mse)
+                                r2 = r2_score(y_test, y_pred)
+                                mae = mean_absolute_error(y_test, y_pred)
+                                
+                                ml_fold_results.append({
+                                    'fold': fold + 1,
+                                    'mse': mse,
+                                    'rmse': rmse,
+                                    'r2': r2,
+                                    'mae': mae,
+                                    'predictions': y_pred,
+                                    'targets': y_test
+                                })
+                            
+                            # Store results for this ML model
+                            ml_results[f"{model_key}_{ml_name}"] = {'fold_results': ml_fold_results}
                         
                         print(f"Completed ML training for {model_key}")
                     else:

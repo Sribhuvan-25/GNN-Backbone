@@ -58,7 +58,9 @@ class GNNExplainerRegression:
         
         # Get original prediction for reference
         with torch.no_grad():
-            original_out = self.model(data.x, data.edge_index, data.batch)
+            # Create batch tensor if it doesn't exist (for single graph)
+            batch = data.batch if data.batch is not None else torch.zeros(data.x.size(0), dtype=torch.long, device=self.device)
+            original_out = self.model(data.x, data.edge_index, batch)
             if isinstance(original_out, tuple):
                 original_pred = original_out[0][:, target_idx] if original_out[0].shape[1] > 1 else original_out[0].squeeze()
             else:
@@ -99,7 +101,9 @@ class GNNExplainerRegression:
             masked_edge_index = original_edge_index[:, keep_edges]
             
             # Forward pass with masked edges
-            out = self.model(data.x, masked_edge_index, data.batch)
+            # Create batch tensor if it doesn't exist (for single graph)
+            batch = data.batch if data.batch is not None else torch.zeros(data.x.size(0), dtype=torch.long, device=self.device)
+            out = self.model(data.x, masked_edge_index, batch)
             
             # Handle different model output formats
             if isinstance(out, tuple):
@@ -470,6 +474,15 @@ class GNNExplainerRegression:
             # RGGC: Use gating mechanism + gradient importance
             print("Extracting attention scores from RGGC gating mechanism")
             return self._extract_rggc_attention_scores(model, data, node_names)
+        elif 'knowledge' in model_type or 'transformer' in model_type:
+            # KG-GT: Use transformer attention weights
+            print("Extracting attention scores from KG-GT transformer layers")
+            kg_gt_scores = self._extract_kg_gt_attention_scores(model, data, node_names)
+            if kg_gt_scores is not None:
+                return kg_gt_scores
+            # Fallback to gradient method
+            print("KG-GT attention extraction failed, using gradient method")
+            return self._extract_gradient_attention_scores(model, data, node_names)
         else:
             # GCN or other: Use gradient-based importance
             print("Extracting attention scores using gradient-based method")
@@ -596,13 +609,21 @@ class GNNExplainerRegression:
             # Ensure input requires gradients
             x.requires_grad_(True)
             
-            # Forward pass
-            if len(inspect.signature(model.forward).parameters) == 3:
+            # Forward pass - handle different model signatures robustly
+            try:
+                # First try with batch (most models including KG-GT need this)
                 output = model(x, edge_index, batch)
                 prediction = output[0] if isinstance(output, tuple) else output
-            else:
-                output = model(x, edge_index)
-                prediction = output[0] if isinstance(output, tuple) else output
+            except Exception as e_batch:
+                try:
+                    # Fallback: try without batch
+                    output = model(x, edge_index)
+                    prediction = output[0] if isinstance(output, tuple) else output
+                except Exception as e_no_batch:
+                    print(f"Both forward pass attempts failed:")
+                    print(f"  With batch: {e_batch}")
+                    print(f"  Without batch: {e_no_batch}")
+                    raise e_batch
             
             # Get gradient w.r.t. input features
             if prediction.dim() > 1:
@@ -626,6 +647,100 @@ class GNNExplainerRegression:
             print(f"Gradient-based attention extraction failed: {e}")
             # Fallback: uniform importance
             return np.ones(data.x.size(0))
+    
+    def _extract_kg_gt_attention_scores(self, model, data, node_names=None):
+        """Extract attention scores from KG-GT transformer layers"""
+        try:
+            model.eval()
+            
+            # Get batch tensor
+            batch = torch.zeros(data.x.size(0), dtype=torch.long, device=self.device)
+            
+            # Storage for attention weights
+            attention_weights_list = []
+            
+            # Hook function to capture attention weights
+            def attention_hook(module, input, output):
+                # GraphTransformerLayer should store attention weights
+                if hasattr(module, '_last_attention_weights'):
+                    attention_weights_list.append(module._last_attention_weights.detach())
+                elif hasattr(module, 'attention_weights'):
+                    attention_weights_list.append(module.attention_weights.detach())
+            
+            # Register hooks on transformer layers
+            hooks = []
+            for name, module in model.named_modules():
+                if 'transformer' in name.lower() or 'attention' in name.lower():
+                    hooks.append(module.register_forward_hook(attention_hook))
+            
+            # Forward pass to capture attention
+            with torch.no_grad():
+                _ = model(data.x, data.edge_index, batch)
+            
+            # Remove hooks
+            for hook in hooks:
+                hook.remove()
+            
+            if len(attention_weights_list) > 0:
+                # Aggregate attention weights across layers and heads
+                final_attention = attention_weights_list[-1]  # Use last layer
+                
+                # Convert edge-wise attention to node-wise attention
+                node_attention = torch.zeros(data.x.size(0), device=self.device)
+                edge_index = data.edge_index
+                
+                # Aggregate incoming attention for each node
+                for i in range(edge_index.size(1)):
+                    target_node = edge_index[1, i]
+                    if i < final_attention.size(0):
+                        node_attention[target_node] += final_attention[i].mean()  # Average across heads
+                
+                # Normalize
+                node_attention = node_attention / (node_attention.sum() + 1e-8)
+                return node_attention.cpu().numpy()
+            else:
+                print("No attention weights captured from KG-GT model")
+                return None
+                
+        except Exception as e:
+            print(f"KG-GT attention extraction failed: {e}")
+            return None
+    
+    def compute_node_importance_from_edges(self, edge_importance_matrix):
+        """
+        Compute node importance scores from edge importance matrix
+        
+        Args:
+            edge_importance_matrix: NxN matrix of edge importance scores (tensor or numpy array)
+            
+        Returns:
+            node_importance: Array of importance scores for each node
+        """
+        import numpy as np
+        import torch
+        
+        # Convert to numpy if it's a tensor
+        if torch.is_tensor(edge_importance_matrix):
+            edge_importance_matrix = edge_importance_matrix.detach().cpu().numpy()
+        
+        # Sum importance of all edges connected to each node, normalized by degree
+        num_nodes = edge_importance_matrix.shape[0]
+        node_importance = np.zeros(num_nodes)
+        
+        for i in range(num_nodes):
+            # Sum of edge weights for this node (both incoming and outgoing)
+            edge_sum = np.sum(edge_importance_matrix[i, :]) + np.sum(edge_importance_matrix[:, i])
+            
+            # Degree of this node (number of non-zero connections)
+            degree = np.sum(edge_importance_matrix[i, :] > 0) + np.sum(edge_importance_matrix[:, i] > 0)
+            
+            # Normalize by degree to avoid bias towards high-degree nodes
+            if degree > 0:
+                node_importance[i] = edge_sum / degree
+            else:
+                node_importance[i] = 0.0
+        
+        return node_importance
     
     def create_node_pruned_graph(self, data, edge_importance_matrix, node_names=None, 
                                 importance_threshold=0.2, min_nodes=10):
@@ -740,8 +855,33 @@ class GNNExplainerRegression:
             print("This should not happen as gradient method provides fallback")
             return None, None, None, None
         
-        # Determine important nodes based on attention scores
-        important_nodes = np.where(attention_scores > attention_threshold)[0].copy()  # Ensure proper array
+        # Implement adaptive thresholding for better pruning
+        score_min, score_max = attention_scores.min(), attention_scores.max()
+        score_mean, score_std = attention_scores.mean(), attention_scores.std()
+        
+        print(f"Attention score statistics:")
+        print(f"  Min: {score_min:.6f}, Max: {score_max:.6f}")
+        print(f"  Mean: {score_mean:.6f}, Std: {score_std:.6f}")
+        print(f"  Original threshold: {attention_threshold}")
+        
+        # If all scores are very close (std is small), use percentile-based threshold
+        if score_std < 0.1:
+            # Use 70th percentile for more aggressive pruning
+            adaptive_threshold = np.percentile(attention_scores, 70)
+            print(f"  Low variance detected, using 70th percentile threshold: {adaptive_threshold:.6f}")
+        elif score_max - score_min < 0.1:
+            # Very narrow range, use mean + small offset
+            adaptive_threshold = score_mean + 0.1 * score_std
+            print(f"  Narrow range detected, using mean + 0.1*std threshold: {adaptive_threshold:.6f}")
+        else:
+            # Normal case - use original or mean + std
+            adaptive_threshold = max(attention_threshold, score_mean + 0.5 * score_std)
+            print(f"  Using adaptive threshold: {adaptive_threshold:.6f}")
+        
+        # Determine important nodes based on adaptive attention scores
+        important_nodes = np.where(attention_scores > adaptive_threshold)[0].copy()  # Ensure proper array
+        
+        print(f"Nodes above adaptive threshold: {len(important_nodes)}/{len(attention_scores)}")
         
         # Sort nodes by attention score for fallback selection
         sorted_indices = np.argsort(attention_scores)[::-1]
@@ -866,7 +1006,9 @@ class GNNExplainerRegression:
                         hooks.append(module.register_forward_hook(attention_hook))
                 
                 # Forward pass
-                _ = model(data.x, data.edge_index, data.batch)
+                # Create batch tensor if it doesn't exist (for single graph)
+                batch = data.batch if data.batch is not None else torch.zeros(data.x.size(0), dtype=torch.long, device=self.device)
+                _ = model(data.x, data.edge_index, batch)
                 
                 # Remove hooks
                 for hook in hooks:

@@ -8,7 +8,7 @@ from explainers.explainer_regression import GNNExplainerRegression
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
 def create_explainer_sparsified_graph(pipeline, model, target_idx=0, importance_threshold=0.3, 
-                                     use_node_pruning=True, use_attention_pruning=True, target_name=None):
+                                     use_node_pruning=True, use_attention_pruning=None, target_name=None):
     """
     Create a sparsified graph based on GNNExplainer results with node-based pruning
     
@@ -111,19 +111,14 @@ def create_explainer_sparsified_graph(pipeline, model, target_idx=0, importance_
     
     explainer.get_node_importance(combined_edge_importance, pipeline.dataset.node_feature_names, save_path)
     
-    # Choose pruning method
-    print(f"DEBUG: Choosing pruning method - use_node_pruning={use_node_pruning}, use_attention_pruning={use_attention_pruning}")
-    print(f"DEBUG: Model type: {type(model).__name__}, is_gat_model={is_gat_model(model) if use_attention_pruning else 'N/A'}")
+    # Use unified pruning method that combines edge and attention importance
+    print(f"DEBUG: Using UNIFIED pruning method (combines edge + attention importance for ALL models)")
+    print(f"DEBUG: Model type: {type(model).__name__}")
     
     if use_node_pruning:
-        if use_attention_pruning:
-            print("DEBUG: Using UNIVERSAL ATTENTION-based node pruning (works for ALL GNN types)")
-            return create_attention_pruned_graph_pipeline(pipeline, explainer, model, importance_threshold, combined_edge_importance, target_name)
-        else:
-            print("DEBUG: Using REGULAR node-based pruning with edge importance")
-            return create_node_pruned_graph_pipeline(pipeline, explainer, combined_edge_importance, importance_threshold, target_name)
+        return create_unified_pruned_graph_pipeline(pipeline, explainer, model, importance_threshold, combined_edge_importance, target_name)
     else:
-        print("DEBUG: Using EDGE-based pruning")
+        print("DEBUG: Using EDGE-based pruning only")
         return create_edge_pruned_graph_pipeline(pipeline, explainer, combined_edge_importance, importance_threshold, non_zero_importance)
 
 def create_node_pruned_graph_pipeline(pipeline, explainer, combined_edge_importance, importance_threshold, target_name=None):
@@ -388,6 +383,240 @@ def create_attention_pruned_graph_pipeline(pipeline, explainer, model, importanc
     pipeline.dataset.node_feature_names = pruned_node_names
     
     # Visualize graphs with attention information
+    pipeline.dataset.visualize_graphs(save_dir=f"{pipeline.save_dir}/graphs")
+    
+    return new_data_list
+
+
+def create_unified_pruned_graph_pipeline(pipeline, explainer, model, importance_threshold, combined_edge_importance, target_name=None):
+    """
+    UNIFIED node pruning method that combines edge importance + attention scores
+    
+    This method:
+    1. Always uses edge-based importance (from GNNExplainer) as baseline
+    2. Attempts to extract attention scores (model-specific)  
+    3. Combines both scores intelligently based on quality
+    4. Uses adaptive thresholding to guarantee actual pruning
+    5. Works consistently for ALL model types
+    
+    Args:
+        pipeline: Pipeline instance
+        explainer: GNNExplainer instance
+        model: Trained model
+        importance_threshold: Base threshold (will be adapted)
+        combined_edge_importance: Edge importance matrix from GNNExplainer
+        target_name: Target name for saving results
+    """
+    from torch_geometric.data import Data
+    import numpy as np
+    import torch
+    
+    print(f"\n{'='*60}")
+    print("UNIFIED NODE PRUNING (Edge + Attention)")
+    print(f"{'='*60}")
+    
+    # Use first sample as template
+    template_data = pipeline.dataset.data_list[0]
+    
+    # Step 1: Get edge-based node importance (always available)
+    print("Step 1: Computing edge-based node importance...")
+    edge_node_importance = explainer.compute_node_importance_from_edges(combined_edge_importance)
+    print(f"Edge importance range: {edge_node_importance.min():.4f} - {edge_node_importance.max():.4f}")
+    
+    # Step 2: Try to get attention-based importance  
+    print("Step 2: Extracting attention scores...")
+    try:
+        attention_scores = explainer.extract_universal_attention_scores(model, template_data, pipeline.dataset.node_feature_names)
+        if attention_scores is not None:
+            attention_std = np.std(attention_scores)
+            print(f"Attention scores range: {attention_scores.min():.4f} - {attention_scores.max():.4f} (std: {attention_std:.4f})")
+        else:
+            attention_scores = np.ones(len(edge_node_importance))
+            attention_std = 0.0
+            print("Attention extraction failed, using uniform scores")
+    except Exception as e:
+        print(f"Attention extraction error: {e}")
+        attention_scores = np.ones(len(edge_node_importance))
+        attention_std = 0.0
+    
+    # Step 3: Intelligently combine edge and attention importance
+    print("Step 3: Combining importance scores...")
+    
+    if attention_std > 0.1:
+        # Good attention scores - combine them
+        print("Good attention variance detected, combining edge + attention scores")
+        # Normalize both to [0,1] range  
+        edge_norm = (edge_node_importance - edge_node_importance.min()) / (edge_node_importance.max() - edge_node_importance.min() + 1e-8)
+        attention_norm = (attention_scores - attention_scores.min()) / (attention_scores.max() - attention_scores.min() + 1e-8)
+        # Weighted combination (favor edge importance slightly as it's more reliable)
+        combined_importance = 0.6 * edge_norm + 0.4 * attention_norm
+        print("Using weighted combination: 60% edge + 40% attention")
+    else:
+        # Poor attention scores - use edge importance only
+        print("Poor attention variance detected, using edge-based importance only")
+        combined_importance = edge_node_importance
+    
+    # Step 4: Adaptive thresholding to guarantee pruning
+    print("Step 4: Applying adaptive thresholding...")
+    
+    # More aggressive pruning - aim to keep 50-60% of nodes (prune 40-50%)
+    target_retention = 0.55  # Keep 55% of nodes
+    adaptive_threshold = np.percentile(combined_importance, (1 - target_retention) * 100)
+    
+    print(f"Combined importance range: {combined_importance.min():.4f} - {combined_importance.max():.4f}")
+    print(f"Original threshold: {importance_threshold:.4f}")
+    print(f"Adaptive threshold (55% retention): {adaptive_threshold:.4f}")
+    
+    # Use the more aggressive threshold
+    final_threshold = max(adaptive_threshold, importance_threshold)
+    print(f"Final threshold: {final_threshold:.4f}")
+    
+    # Step 5: Get nodes above threshold + handle protected nodes
+    important_nodes_mask = combined_importance > final_threshold
+    important_nodes = np.where(important_nodes_mask)[0]
+    
+    # Handle protected nodes - always include methanogenic families
+    protected_node_names = ['Methanobacteriaceae', 'Methanosaetaceae', 'Methanoregulaceae', 'Methanospirillaceae']
+    protected_indices = set()
+    
+    for protected_name in protected_node_names:
+        if protected_name in pipeline.dataset.node_feature_names:
+            idx = pipeline.dataset.node_feature_names.index(protected_name)
+            protected_indices.add(idx)
+            print(f"Protected node '{protected_name}' found at index {idx}")
+    
+    # Combine threshold-based selection with protected nodes
+    important_nodes_set = set(important_nodes) | protected_indices
+    
+    # If too few nodes, keep top nodes by importance (more aggressive minimum)
+    min_nodes = max(5, int(0.25 * len(pipeline.dataset.node_feature_names)))  # At least 25% of original nodes or minimum 5
+    if len(important_nodes_set) < min_nodes:
+        print(f"Only {len(important_nodes_set)} nodes exceed threshold, ensuring minimum {min_nodes} nodes")
+        sorted_indices = np.argsort(combined_importance)[::-1]  # Sort by importance descending
+        for idx in sorted_indices:
+            if len(important_nodes_set) >= min_nodes:
+                break
+            important_nodes_set.add(idx)
+    
+    kept_nodes = np.array(sorted(important_nodes_set), dtype=np.int64)
+    pruned_node_names = [pipeline.dataset.node_feature_names[i] for i in kept_nodes]
+    
+    print(f"Pruning results:")
+    print(f"  Original nodes: {template_data.x.shape[0]}")
+    print(f"  Pruned nodes: {len(kept_nodes)} ({len(kept_nodes)/template_data.x.shape[0]*100:.1f}% retained)")
+    
+    # Step 6: Apply pruning to all samples
+    print("Step 6: Applying pruning to all samples...")
+    
+    new_data_list = []
+    old_to_new = {old_idx: new_idx for new_idx, old_idx in enumerate(kept_nodes)}
+    
+    for i, original_data in enumerate(pipeline.dataset.data_list):
+        # Apply same node selection to this sample
+        pruned_x = original_data.x[kept_nodes]
+        
+        # Filter edges - keep only edges between kept nodes
+        new_edges = []
+        for j in range(original_data.edge_index.shape[1]):
+            u, v = original_data.edge_index[0, j].item(), original_data.edge_index[1, j].item()
+            if u in old_to_new and v in old_to_new:
+                new_u, new_v = old_to_new[u], old_to_new[v]
+                new_edges.append([new_u, new_v])
+        
+        if len(new_edges) > 0:
+            pruned_edge_index = torch.tensor(new_edges, dtype=torch.long).T
+        else:
+            pruned_edge_index = torch.empty((2, 0), dtype=torch.long)
+        
+        # Create new data object with completely detached tensors
+        # Preserve edge weights and types from original data
+        pruned_edge_weight = None
+        pruned_edge_type = None
+        
+        if len(new_edges) > 0:
+            # Extract corresponding edge weights and types for kept edges
+            pruned_edge_weight = []
+            pruned_edge_type = []
+            
+            for j in range(original_data.edge_index.shape[1]):
+                u, v = original_data.edge_index[0, j].item(), original_data.edge_index[1, j].item()
+                if u in old_to_new and v in old_to_new:
+                    # Get original edge weight and type
+                    if hasattr(original_data, 'edge_weight') and original_data.edge_weight is not None:
+                        pruned_edge_weight.append(original_data.edge_weight[j].item())
+                    else:
+                        pruned_edge_weight.append(1.0)  # Default weight
+                    
+                    if hasattr(original_data, 'edge_type') and original_data.edge_type is not None:
+                        pruned_edge_type.append(original_data.edge_type[j].item())
+                    else:
+                        pruned_edge_type.append(1)  # Default type (positive)
+            
+            pruned_edge_weight = torch.tensor(pruned_edge_weight, dtype=torch.float32)
+            pruned_edge_type = torch.tensor(pruned_edge_type, dtype=torch.long)
+        else:
+            # Empty graph case
+            pruned_edge_weight = torch.empty((0,), dtype=torch.float32)
+            pruned_edge_type = torch.empty((0,), dtype=torch.long)
+        
+        pruned_sample = Data(
+            x=pruned_x.detach().clone() if pruned_x.requires_grad else pruned_x.clone(),
+            edge_index=pruned_edge_index.detach().clone() if pruned_edge_index.requires_grad else pruned_edge_index.clone(),
+            edge_weight=pruned_edge_weight,
+            edge_type=pruned_edge_type,
+            y=original_data.y.detach().clone() if original_data.y.requires_grad else original_data.y.clone()
+        )
+        
+        new_data_list.append(pruned_sample)
+    
+    # Update dataset node names
+    pipeline.dataset.node_feature_names = pruned_node_names
+    
+    # Save combined importance scores for analysis
+    if target_name:
+        importance_filename = f"unified_importance_{target_name.replace('-', '_')}.csv"
+    else:
+        importance_filename = "unified_importance.csv"
+    
+    import pandas as pd
+    
+    # Ensure all arrays have the same length
+    num_original_nodes = len(pipeline.dataset.node_feature_names)
+    original_node_names = pipeline.dataset.node_feature_names[:num_original_nodes]
+    
+    # Truncate or pad arrays to match node names length
+    edge_imp_adj = edge_node_importance[:num_original_nodes] if len(edge_node_importance) >= num_original_nodes else np.pad(edge_node_importance, (0, num_original_nodes - len(edge_node_importance)), 'constant')
+    attention_adj = attention_scores[:num_original_nodes] if len(attention_scores) >= num_original_nodes else np.pad(attention_scores, (0, num_original_nodes - len(attention_scores)), 'constant') 
+    combined_adj = combined_importance[:num_original_nodes] if len(combined_importance) >= num_original_nodes else np.pad(combined_importance, (0, num_original_nodes - len(combined_importance)), 'constant')
+    
+    importance_df = pd.DataFrame({
+        'node_name': original_node_names,
+        'edge_importance': edge_imp_adj,
+        'attention_score': attention_adj,
+        'combined_importance': combined_adj,
+        'kept': [i in kept_nodes for i in range(num_original_nodes)]
+    })
+    importance_df.to_csv(f"{pipeline.save_dir}/{importance_filename}", index=False)
+    print(f"Unified importance scores saved to: {importance_filename}")
+    
+    print(f"✓ UNIFIED pruning completed successfully!")
+    
+    # Store for visualization using the first pruned sample
+    if len(new_data_list) > 0:
+        first_pruned_sample = new_data_list[0]
+        pipeline.dataset.explainer_sparsified_graph_data = {
+            'edge_index': first_pruned_sample.edge_index.clone(),
+            'edge_weight': getattr(first_pruned_sample, 'edge_weight', torch.ones(first_pruned_sample.edge_index.shape[1])),
+            'edge_type': getattr(first_pruned_sample, 'edge_type', torch.ones(first_pruned_sample.edge_index.shape[1], dtype=torch.long)),
+            'pruning_type': 'unified_node_based',
+            'kept_nodes': kept_nodes,
+            'pruned_node_names': pruned_node_names
+        }
+        print(f"Explainer graph data stored for visualization: {first_pruned_sample.edge_index.shape[1]} edges")
+    else:
+        print("WARNING: No pruned samples generated, cannot store explainer graph data")
+    
+    # Visualize graphs
     pipeline.dataset.visualize_graphs(save_dir=f"{pipeline.save_dir}/graphs")
     
     return new_data_list
