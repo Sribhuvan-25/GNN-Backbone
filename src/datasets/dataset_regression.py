@@ -757,8 +757,19 @@ class MicrobialGNNDataset:
         # Add edges with weights and types
         for i in range(0, edge_index.shape[1], 2):  # Process only one direction for undirected edges
             u, v = edge_index[0, i].item(), edge_index[1, i].item()
-            weight = edge_weight[i].item()
-            edge_t = edge_type[i].item()
+            
+            # Handle None edge_weight gracefully
+            if edge_weight is not None:
+                weight = edge_weight[i].item()
+            else:
+                weight = 1.0  # Default weight
+                
+            # Handle None edge_type gracefully  
+            if edge_type is not None:
+                edge_t = edge_type[i].item()
+            else:
+                edge_t = 1  # Default type (positive)
+                
             G.add_edge(u, v, weight=weight, type=edge_t)
         
         # Create layout with bulletproof NetworkX handling

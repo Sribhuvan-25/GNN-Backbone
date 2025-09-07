@@ -521,7 +521,7 @@ class EnhancedRegressionHead(nn.Module):
     Improvements over basic regression head:
     - Multi-layer feature processing with residuals
     - Layer normalization for stability
-    - Always returns (prediction, features, uncertainty) for consistency
+    - Pipeline-compatible return: (prediction, features) with uncertainty stored internally
     """
     def __init__(self, hidden_dim, output_dim=1, dropout_prob=0.2, estimate_uncertainty=True):
         super(EnhancedRegressionHead, self).__init__()
@@ -587,7 +587,7 @@ class EnhancedRegressionHead(nn.Module):
             # Return dummy variance for consistency
             var = torch.ones_like(mean) * 1e-6
         
-        # CONSISTENT RETURN: Always return (prediction, uncertainty) 
+        # Return both mean and variance for internal use
         return mean, var
 
 
@@ -596,7 +596,7 @@ class KnowledgeGuidedGraphTransformer(nn.Module):
     OPTIMIZED Knowledge-Guided Graph Transformer (KG-GT) for Microbial Regression
     
     CRITICAL FIXES:
-    - Consistent return type: Always (prediction, embeddings, uncertainty)
+    - Pipeline-compatible return type: (prediction, embeddings) 
     - Input validation for robustness
     - Better weight initialization 
     - Memory-efficient layer processing
@@ -680,6 +680,8 @@ class KnowledgeGuidedGraphTransformer(nn.Module):
             raise ValueError(f"Expected x to be 2D, got {x.dim()}D")
         if edge_index.dim() != 2 or edge_index.size(0) != 2:
             raise ValueError(f"Expected edge_index shape [2, num_edges], got {edge_index.shape}")
+        if batch is None:
+            raise ValueError("Batch tensor cannot be None")
         if batch.dim() != 1:
             raise ValueError(f"Expected batch to be 1D, got {batch.dim()}D")
         if x.size(0) != batch.size(0):
@@ -705,8 +707,10 @@ class KnowledgeGuidedGraphTransformer(nn.Module):
         # Enhanced regression head (always returns mean, var)
         mean, var = self.regression_head(embeddings)
         
-        # CONSISTENT RETURN TYPE: Always (prediction, embeddings, uncertainty)
-        return mean, embeddings, var
+        # FIXED: Match existing pipeline signature (prediction, embeddings)
+        # Store uncertainty as model attribute for future access (detached to avoid graph retention)
+        self._last_uncertainty = var.detach() if var.requires_grad else var
+        return mean, embeddings
 
 
 # Factory function for creating KG-GT models

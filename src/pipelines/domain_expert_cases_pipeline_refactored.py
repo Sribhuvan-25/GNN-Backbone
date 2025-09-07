@@ -341,6 +341,12 @@ class DomainExpertCasesPipeline(MixedEmbeddingPipeline):
         # Create comprehensive results summary
         self._create_final_results_summary(results)
         
+        # Create final case-level graph visualizations
+        print(f"\n{'='*80}")
+        print("CREATING FINAL CASE-LEVEL GRAPH VISUALIZATIONS")
+        print(f"{'='*80}")
+        self._create_case_level_graph_visualizations()
+        
         return results
     
     def _run_single_target_pipeline(self, target_idx, target_name):
@@ -437,7 +443,90 @@ class DomainExpertCasesPipeline(MixedEmbeddingPipeline):
         
         self._generate_comprehensive_results(results, target_name)
         
+        # Stage 7: Create final graph visualizations
+        print(f"\n{'='*50}")
+        print("STAGE 7: Final Graph Visualizations")
+        print(f"{'='*50}")
+        
+        self._create_final_graph_visualizations(target_name)
+        
         return results
+    
+    def _create_case_level_graph_visualizations(self):
+        """Create case-level graph visualizations that summarize the entire case."""
+        try:
+            print(f"Creating case-level graph visualizations for {self.case_type}...")
+            
+            # Create case-level graphs directory
+            case_graphs_dir = os.path.join(self.save_dir, 'case_graphs')
+            os.makedirs(case_graphs_dir, exist_ok=True)
+            
+            # Ensure the dataset has the original graph data
+            if not hasattr(self.dataset, 'original_graph_data') or self.dataset.original_graph_data is None:
+                # Set original graph data from the first data sample
+                first_data = self.dataset.data_list[0]
+                self.dataset.original_graph_data = {
+                    'edge_index': first_data.edge_index,
+                    'edge_weight': getattr(first_data, 'edge_weight', torch.ones(first_data.edge_index.shape[1])),
+                    'edge_type': getattr(first_data, 'edge_type', torch.ones(first_data.edge_index.shape[1], dtype=torch.long)),
+                    'original_node_names': self.dataset.node_feature_names.copy()
+                }
+                print("Set original graph data for case-level visualization")
+            
+            # Create enhanced graph comparison for the case
+            self._create_enhanced_graph_comparison(case_graphs_dir, f"{self.case_type}_summary")
+            
+            # Also create standard visualization
+            try:
+                self.dataset.visualize_graphs(save_dir=case_graphs_dir)
+                print(f"Case-level standard graph comparison created")
+            except Exception as e:
+                print(f"Warning: Case-level standard graph visualization failed: {e}")
+            
+            print(f"Case-level graph visualizations completed for {self.case_type}")
+            
+        except Exception as e:
+            print(f"Warning: Case-level graph visualization failed: {e}")
+            import traceback
+            traceback.print_exc()
+    
+    def _create_final_graph_visualizations(self, target_name):
+        """Create final comprehensive graph visualizations for the target."""
+        try:
+            print(f"Creating final graph visualizations for {target_name}...")
+            
+            # Create graphs directory
+            graphs_dir = os.path.join(self.save_dir, 'graphs')
+            os.makedirs(graphs_dir, exist_ok=True)
+            
+            # Ensure the dataset has the original graph data for comparison
+            if not hasattr(self.dataset, 'original_graph_data') or self.dataset.original_graph_data is None:
+                # Set original graph data from the first data sample
+                first_data = self.dataset.data_list[0]
+                self.dataset.original_graph_data = {
+                    'edge_index': first_data.edge_index,
+                    'edge_weight': getattr(first_data, 'edge_weight', torch.ones(first_data.edge_index.shape[1])),
+                    'edge_type': getattr(first_data, 'edge_type', torch.ones(first_data.edge_index.shape[1], dtype=torch.long)),
+                    'original_node_names': self.dataset.node_feature_names.copy()  # Store original names
+                }
+                print("Set original graph data for final visualization with node names")
+            
+            # Create enhanced graph comparison using visualization utilities
+            self._create_enhanced_graph_comparison(graphs_dir, target_name)
+            
+            # Also create the standard graph comparison using the dataset's visualize_graphs method
+            try:
+                self.dataset.visualize_graphs(save_dir=graphs_dir)
+                print(f"Standard graph comparison created for {target_name}")
+            except Exception as e:
+                print(f"Warning: Standard graph visualization failed: {e}")
+            
+            print(f"Final graph visualizations completed for {target_name}")
+            
+        except Exception as e:
+            print(f"Warning: Final graph visualization failed for {target_name}: {e}")
+            import traceback
+            traceback.print_exc()
     
     def _train_models_with_hyperparameter_tuning(self, target_idx, target_name, 
                                                 graph_type, phase, explainer_graphs=None):
@@ -572,7 +661,7 @@ class DomainExpertCasesPipeline(MixedEmbeddingPipeline):
                 # Generate explainer-sparsified graphs
                 print(f"DEBUG: About to call create_explainer_sparsified_graph with model {best_model_info['model_type']}")
                 print(f"DEBUG: Model is GAT: {best_model_info['model_type'] == 'gat'}")
-                print(f"DEBUG: use_attention_pruning=True, use_node_pruning=True")
+                print(f"DEBUG: Using UNIFIED pruning method (combines edge + attention for all models)")
                 
                 try:
                     explainer_data = create_explainer_sparsified_graph(
@@ -580,8 +669,7 @@ class DomainExpertCasesPipeline(MixedEmbeddingPipeline):
                         model=model,
                         target_idx=target_idx,
                         importance_threshold=self.importance_threshold,
-                        use_node_pruning=True,
-                        use_attention_pruning=True,
+                        use_node_pruning=True,  # Uses unified method that combines edge + attention
                         target_name=target_name
                     )
                 except Exception as explainer_error:
@@ -838,6 +926,19 @@ class DomainExpertCasesPipeline(MixedEmbeddingPipeline):
                                         output_dim=1,
                                         dropout_prob=self.dropout_rate,
                                         input_channel=1
+                                    )
+                                elif model_type == 'kg_gt' or model_type == 'kggt':
+                                    from models.GNNmodelsRegression import create_knowledge_guided_graph_transformer
+                                    print(f"DEBUG: Creating Knowledge-Guided Graph Transformer with hidden_dim={self.hidden_dim}")
+                                    model = create_knowledge_guided_graph_transformer(
+                                        hidden_channels=self.hidden_dim,
+                                        output_dim=1,
+                                        dropout_prob=self.dropout_rate,
+                                        input_channel=1,
+                                        num_heads=8,
+                                        num_layers=4,
+                                        estimate_uncertainty=True,
+                                        use_edge_features=True
                                     )
                                 else:
                                     continue
