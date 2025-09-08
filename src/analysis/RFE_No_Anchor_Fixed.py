@@ -342,6 +342,9 @@ def run_model_nested_cv(data_path, target="ACE-km", model_type='extratrees', cas
     case_type : str
         Domain expert case type ('case1', 'case2', 'case3')
     """
+    # Create directories if they don't exist
+    create_directories()
+    
     print(f"Loading data from {data_path}...")
     # Load data
     df = pd.read_csv(data_path)
