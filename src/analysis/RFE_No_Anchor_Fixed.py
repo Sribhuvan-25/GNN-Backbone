@@ -638,6 +638,9 @@ def run_model_nested_cv(data_path, target="ACE-km", model_type='extratrees', cas
     # Save hyperparameter selection summary
     save_hyperparameter_summary(outer_results, target, model_type, case_type)
     
+    # Save metrics in mean ± std format
+    save_metrics_summary(avg_r2, std_r2, avg_mse, std_mse, target, model_type, case_type)
+    
     return {
         'avg_r2': avg_r2,
         'avg_mse': avg_mse,
@@ -647,6 +650,37 @@ def run_model_nested_cv(data_path, target="ACE-km", model_type='extratrees', cas
         'fold_results': outer_results,
         'feature_frequency': feature_df
     }
+
+def save_metrics_summary(avg_r2, std_r2, avg_mse, std_mse, target, model_type, case_type='case3'):
+    """Save metrics summary in mean ± std format"""
+    print(f"Saving metrics summary in mean ± std format...")
+    
+    # Calculate RMSE and its standard deviation
+    rmse = np.sqrt(avg_mse)
+    rmse_std = std_mse / (2 * np.sqrt(avg_mse))  # Delta method for RMSE std
+    
+    # Create metrics summary
+    metrics_data = {
+        'Metric': ['R²', 'MSE', 'RMSE'],
+        'Mean': [avg_r2, avg_mse, rmse],
+        'Std': [std_r2, std_mse, rmse_std],
+        'Mean_Plus_Minus_Std': [
+            f"{avg_r2:.4f} ± {std_r2:.4f}",
+            f"{avg_mse:.4f} ± {std_mse:.4f}",
+            f"{rmse:.4f} ± {rmse_std:.4f}"
+        ],
+        'Target': [target, target, target],
+        'Model': [model_type, model_type, model_type],
+        'Case': [case_type, case_type, case_type]
+    }
+    
+    metrics_df = pd.DataFrame(metrics_data)
+    csv_path = f'results_rfe_nested_cv_fixed/{case_type}/metrics/{target}_{model_type}_metrics_summary.csv'
+    metrics_df.to_csv(csv_path, index=False)
+    
+    print(f"Metrics summary saved: {csv_path}")
+    
+    return csv_path
 
 def save_hyperparameter_summary(outer_results, target, model_type, case_type='case3'):
     """Save hyperparameter selection summary for RFE nested CV"""
@@ -673,6 +707,50 @@ def save_hyperparameter_summary(outer_results, target, model_type, case_type='ca
     summary_df.to_csv(csv_path, index=False)
     
     print(f"Hyperparameter selection summary saved: {csv_path}")
+    
+    return csv_path
+
+def save_comprehensive_metrics_summary(all_results):
+    """Save comprehensive metrics summary in mean ± std format for all configurations"""
+    print(f"Saving comprehensive metrics summary in mean ± std format...")
+    
+    comprehensive_data = []
+    
+    for config_name, result in all_results.items():
+        case = result['Case']
+        target = result['Target']
+        model = result['Model']
+        r2_mean = result['R2']
+        r2_std = result['Std_R2']
+        mse_mean = result['MSE']
+        mse_std = result['Std_MSE']
+        
+        # Calculate RMSE and its standard deviation
+        rmse_mean = np.sqrt(mse_mean)
+        rmse_std = mse_std / (2 * np.sqrt(mse_mean))  # Delta method for RMSE std
+        
+        comprehensive_data.append({
+            'Configuration': config_name,
+            'Case': case,
+            'Target': target,
+            'Model': model,
+            'R2_Mean': r2_mean,
+            'R2_Std': r2_std,
+            'R2_Mean_Plus_Minus_Std': f"{r2_mean:.4f} ± {r2_std:.4f}",
+            'MSE_Mean': mse_mean,
+            'MSE_Std': mse_std,
+            'MSE_Mean_Plus_Minus_Std': f"{mse_mean:.4f} ± {mse_std:.4f}",
+            'RMSE_Mean': rmse_mean,
+            'RMSE_Std': rmse_std,
+            'RMSE_Mean_Plus_Minus_Std': f"{rmse_mean:.4f} ± {rmse_std:.4f}",
+            'Best_N_Features': result['Best_N_Features']
+        })
+    
+    comprehensive_df = pd.DataFrame(comprehensive_data)
+    csv_path = 'results_rfe_nested_cv_fixed/metrics/comprehensive_metrics_summary_mean_std.csv'
+    comprehensive_df.to_csv(csv_path, index=False)
+    
+    print(f"Comprehensive metrics summary saved: {csv_path}")
     
     return csv_path
 
@@ -747,6 +825,9 @@ if __name__ == "__main__":
         overall_path = 'results_rfe_nested_cv_fixed/metrics/overall_results_nested_cv.csv'
         results_df.to_csv(overall_path)
         print(f"Saved overall results: {overall_path}")
+        
+        # Save comprehensive metrics summary in mean ± std format
+        save_comprehensive_metrics_summary(all_results)
         
         # Print final results
         print(f"\n{'='*80}")
