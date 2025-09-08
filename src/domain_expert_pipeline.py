@@ -1,6 +1,4 @@
 import os
-# Force CPU usage to avoid MPS device issues
-os.environ['CUDA_VISIBLE_DEVICES'] = ''
 import torch
 import numpy as np
 import pandas as pd
@@ -34,8 +32,8 @@ from GNNmodelsRegression import (
     GaussianNLLLoss
 )
 
-# Set device to CPU
-device = torch.device('cpu')
+# Set device
+device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 print(f"Using device: {device}")
 
 # Reproducibility
@@ -330,42 +328,86 @@ class DomainExpertCasesPipeline(MixedEmbeddingPipeline):
             return self._run_case5()
     
     def _run_case1(self):
-        """Case 1: Use only hydrogenotrophic features for the H2 dataset"""
-        print("Case 1: Using only hydrogenotrophic features for H2 dataset")
-        print("Target: H2-km only")
+        """Case 1: Use only hydrogenotrophic features for both ACE-km and H2-km datasets"""
+        print("Case 1: Using only hydrogenotrophic features for both targets")
+        print("Targets: ACE-km and H2-km")
         print(f"Anchored features: {self.anchored_features}")
         
-        # Filter to only H2-km target
-        h2_target_idx = None
-        for i, target in enumerate(self.target_names):
-            if 'H2' in target:
-                h2_target_idx = i
-                break
-        
-        if h2_target_idx is None:
-            raise ValueError("H2-km target not found in dataset")
-        
-        # Run pipeline for H2 target only using parent class methods
-        return self._run_single_target_pipeline(h2_target_idx, "H2-km")
-    
-    def _run_case2(self):
-        """Case 2: Use only acetoclastic features for ACE dataset"""
-        print("Case 2: Using only acetoclastic features for ACE dataset")
-        print("Target: ACE-km only")
-        print(f"Anchored features: {self.anchored_features}")
-        
-        # Filter to only ACE-km target
+        # Find both target indices
         ace_target_idx = None
+        h2_target_idx = None
         for i, target in enumerate(self.target_names):
             if 'ACE' in target:
                 ace_target_idx = i
-                break
+            elif 'H2' in target:
+                h2_target_idx = i
         
         if ace_target_idx is None:
             raise ValueError("ACE-km target not found in dataset")
+        if h2_target_idx is None:
+            raise ValueError("H2-km target not found in dataset")
         
-        # Run pipeline for ACE target only using parent class methods
-        return self._run_single_target_pipeline(ace_target_idx, "ACE-km")
+        # Run pipeline for both targets
+        results = {}
+        
+        print(f"\n{'='*60}")
+        print("CASE 1a: ACE-km with hydrogenotrophic features only")
+        print(f"{'='*60}")
+        results['ace_km'] = self._run_single_target_pipeline(ace_target_idx, "ACE-km")
+        
+        print(f"\n{'='*60}")
+        print("CASE 1b: H2-km with hydrogenotrophic features only")
+        print(f"{'='*60}")
+        results['h2_km'] = self._run_single_target_pipeline(h2_target_idx, "H2-km")
+        
+        # Save combined case 1 results
+        self._save_case1_combined_results(results)
+        
+        # Create combined visualization for Case 1
+        self._create_case1_combined_visualization(results, ace_target_idx, h2_target_idx)
+        
+        return results
+    
+    def _run_case2(self):
+        """Case 2: Use only acetoclastic features for both ACE-km and H2-km datasets"""
+        print("Case 2: Using only acetoclastic features for both targets")
+        print("Targets: ACE-km and H2-km")
+        print(f"Anchored features: {self.anchored_features}")
+        
+        # Find both target indices
+        ace_target_idx = None
+        h2_target_idx = None
+        for i, target in enumerate(self.target_names):
+            if 'ACE' in target:
+                ace_target_idx = i
+            elif 'H2' in target:
+                h2_target_idx = i
+        
+        if ace_target_idx is None:
+            raise ValueError("ACE-km target not found in dataset")
+        if h2_target_idx is None:
+            raise ValueError("H2-km target not found in dataset")
+        
+        # Run pipeline for both targets
+        results = {}
+        
+        print(f"\n{'='*60}")
+        print("CASE 2a: ACE-km with acetoclastic features only")
+        print(f"{'='*60}")
+        results['ace_km'] = self._run_single_target_pipeline(ace_target_idx, "ACE-km")
+        
+        print(f"\n{'='*60}")
+        print("CASE 2b: H2-km with acetoclastic features only")
+        print(f"{'='*60}")
+        results['h2_km'] = self._run_single_target_pipeline(h2_target_idx, "H2-km")
+        
+        # Save combined case 2 results
+        self._save_case2_combined_results(results)
+        
+        # Create combined visualization for Case 2
+        self._create_case2_combined_visualization(results, ace_target_idx, h2_target_idx)
+        
+        return results
     
     def _run_case3(self):
         """Case 3: Use all feature groups for both ACE-km and H2-km datasets"""
@@ -628,7 +670,7 @@ class DomainExpertCasesPipeline(MixedEmbeddingPipeline):
         
         # Step 4: Extract embeddings from best model (using parent class method)
         print(f"\nSTEP 4: Extracting embeddings from best GNN model")
-        embeddings, targets = self.extract_embeddings(best_explainer_model, self.dataset.data_list)
+        embeddings, targets = self.extract_embeddings(best_explainer_model, explainer_data)
         
         # Save embeddings
         os.makedirs(f"{self.save_dir}/embeddings", exist_ok=True)
@@ -1024,7 +1066,7 @@ class DomainExpertCasesPipeline(MixedEmbeddingPipeline):
             
             # 3. Train model with best hyperparameters
             model = self._create_gnn_model_with_params(model_type, best_hidden_dim, num_targets=1)
-            model = super()._train_model_full_with_params(model, best_train_data, target_idx, best_hidden_dim)
+            model = self._train_model_full_with_params(model, best_train_data, target_idx, best_hidden_dim)
             
             # 4. Generate explainer-sparsified graph if this is the KNN phase (after model is trained)
             if phase == "knn":
@@ -1058,7 +1100,6 @@ class DomainExpertCasesPipeline(MixedEmbeddingPipeline):
                 'train_size': len(train_data),
                 'test_size': len(test_data),
                 'predictions': fold_predictions,
-                'targets': [pred['actual'] for pred in fold_predictions],
                 'graph_info': {
                     'k_neighbors': best_k_neighbors,
                     'hidden_dim': best_hidden_dim,
@@ -1112,12 +1153,12 @@ class DomainExpertCasesPipeline(MixedEmbeddingPipeline):
             final_model = self._create_gnn_model_with_params(
                 model_type, best_hyperparams['hidden_dim'], num_targets=1
             )
-            final_model = super()._train_model_full_with_params(
+            final_model = self._train_model_full_with_params(
                 final_model, final_data_list, target_idx, best_hyperparams['hidden_dim']
             )
         else:
             final_model = self.create_gnn_model(model_type, num_targets=1)
-            final_model = super()._train_model_full_with_params(final_model, data_list, target_idx)
+            final_model = self._train_model_full(final_model, data_list, target_idx)
         
         return {
             'model': final_model,
@@ -1144,15 +1185,13 @@ class DomainExpertCasesPipeline(MixedEmbeddingPipeline):
         G = to_networkx(graph_data, to_undirected=True)
         
         # Save graph visualization
-        plt.figure(figsize=(14, 12))
-        # Use better layout with more spacing
-        pos = nx.spring_layout(G, k=3, iterations=100, seed=42)
+        plt.figure(figsize=(12, 10))
+        pos = nx.spring_layout(G, k=1, iterations=50, seed=42)
         
-        # Draw the graph with uniform styling
+        # Draw the graph
         nx.draw_networkx_nodes(G, pos, node_color='lightblue', 
-                              node_size=500, alpha=0.8)
-        # Uniform edge color without positive/negative symbolism
-        nx.draw_networkx_edges(G, pos, alpha=0.6, edge_color='darkgray', width=1.0)
+                              node_size=300, alpha=0.8)
+        nx.draw_networkx_edges(G, pos, alpha=0.5, edge_color='gray', width=0.8)
         
         # Add labels if there aren't too many nodes
         if len(G.nodes()) <= 50:
@@ -1481,7 +1520,7 @@ class DomainExpertCasesPipeline(MixedEmbeddingPipeline):
 
     def _train_model_full_with_params(self, model, train_data, target_idx, hidden_dim=None):
         """Train model with specific parameters"""
-        return super()._train_model_full_with_params(model, train_data, target_idx, hidden_dim)
+        return self._train_model_full(model, train_data, target_idx)
 
     def _train_and_evaluate_once_with_params(self, model, data_list, tr_idx, val_idx, target_idx, hidden_dim=None):
         """Train and evaluate model once with specific parameters"""
@@ -1489,7 +1528,7 @@ class DomainExpertCasesPipeline(MixedEmbeddingPipeline):
         val_data = [data_list[i] for i in val_idx]
         
         # Train the model
-        super()._train_model_full_with_params(model, train_data, target_idx)
+        self._train_model_full(model, train_data, target_idx)
         
         # Evaluate the model
         mse, r2 = self._evaluate_model(model, val_data, target_idx)
@@ -1535,20 +1574,9 @@ class DomainExpertCasesPipeline(MixedEmbeddingPipeline):
                 targets = target.cpu().numpy().flatten()
                 
                 for pred, actual in zip(predictions, targets):
-                    # Handle case where pred might be a tensor or complex type
-                    if hasattr(pred, 'item'):
-                        pred_val = pred.item()
-                    else:
-                        pred_val = pred
-                    
-                    if hasattr(actual, 'item'):
-                        actual_val = actual.item()
-                    else:
-                        actual_val = actual
-                    
                     fold_predictions.append({
-                        'predicted': float(pred_val),
-                        'actual': float(actual_val)
+                        'predicted': float(pred),
+                        'actual': float(actual)
                     })
         
         return fold_predictions
@@ -1656,7 +1684,7 @@ class DomainExpertCasesPipeline(MixedEmbeddingPipeline):
         ax3.set_ylabel('Average R²')
         ax3.tick_params(axis='x', rotation=0)
         
-        # Plot 4: Performance by k-neighbors
+        # Plot 4: Performance by k-nei
         ax4 = axes[1, 1]
         perf_by_k = combined_df.groupby('k_neighbors')['r2'].mean()
         perf_by_k.plot(kind='bar', ax=ax4, color='lightcoral')
@@ -1963,18 +1991,16 @@ class DomainExpertCasesPipeline(MixedEmbeddingPipeline):
                 # ACE data
                 actual_ace = []
                 pred_ace = []
-                for fold_predictions in results_ace['fold_predictions']:
-                    for prediction in fold_predictions:
-                        actual_ace.append(prediction['actual'])
-                        pred_ace.append(prediction['predicted'])
+                for fold_data in results_ace['fold_predictions']:
+                    actual_ace.extend(fold_data['actual'])
+                    pred_ace.extend(fold_data['predicted'])
                 
                 # H2 data
                 actual_h2 = []
                 pred_h2 = []
-                for fold_predictions in results_h2['fold_predictions']:
-                    for prediction in fold_predictions:
-                        actual_h2.append(prediction['actual'])
-                        pred_h2.append(prediction['predicted'])
+                for fold_data in results_h2['fold_predictions']:
+                    actual_h2.extend(fold_data['actual'])
+                    pred_h2.extend(fold_data['predicted'])
                 
                 # Plot both targets
                 ax.scatter(actual_ace, pred_ace, c=colors[0], alpha=0.7, s=60, label=labels[0], edgecolors='black', linewidth=0.5)
@@ -2059,6 +2085,576 @@ class DomainExpertCasesPipeline(MixedEmbeddingPipeline):
         
         print(f"Combined visualization saved: case3_combined_visualization.png/pdf")
         return combined_metrics_summary
+
+    def _save_case1_combined_results(self, combined_results):
+        """Save combined Case 1 results for both targets"""
+        # Save combined results
+        with open(f"{self.save_dir}/case1_combined_results.pkl", 'wb') as f:
+            pickle.dump(combined_results, f)
+        
+        # Create combined summary
+        summary_data = []
+        
+        for target_name, target_results in combined_results.items():
+            # Add GNN results
+            for phase in ['knn', 'explainer']:
+                if phase in target_results:
+                    for model_type, result in target_results[phase].items():
+                        summary_data.append({
+                            'case': 'case1',
+                            'target': target_name.upper(),
+                            'phase': phase,
+                            'model_type': model_type,
+                            'model_category': 'GNN',
+                            'mse': result['avg_metrics']['mse'],
+                            'rmse': result['avg_metrics']['rmse'],
+                            'r2': result['avg_metrics']['r2'],
+                            'mae': result['avg_metrics']['mae'],
+                            'features_count': len(self.dataset.node_feature_names)
+                        })
+            
+            # Add ML results
+            if 'ml_models' in target_results:
+                for model_type, result in target_results['ml_models'].items():
+                    summary_data.append({
+                        'case': 'case1',
+                        'target': target_name.upper(),
+                        'phase': 'embeddings',
+                        'model_type': model_type,
+                        'model_category': 'ML',
+                        'mse': result['avg_metrics']['mse'],
+                        'rmse': result['avg_metrics']['rmse'],
+                        'r2': result['avg_metrics']['r2'],
+                        'mae': result['avg_metrics']['mae'],
+                        'features_count': len(self.dataset.node_feature_names)
+                    })
+        
+        # Save summary
+        summary_df = pd.DataFrame(summary_data)
+        summary_df.to_csv(f"{self.save_dir}/case1_combined_summary.csv", index=False)
+        
+        print(f"\nCase 1 combined results saved to {self.save_dir}")
+        print(f"Summary: {len(summary_data)} model results across both targets")
+
+    def _create_case1_combined_visualization(self, combined_results, ace_target_idx, h2_target_idx):
+        """Create combined visualization for Case 1 with both targets"""
+        print(f"\nCreating combined Case 1 visualization...")
+        
+        # Extract results
+        ace_results = combined_results['ace_km']
+        h2_results = combined_results['h2_km']
+        
+        # Find best models from each target
+        best_models_ace = self._find_best_models_from_results(ace_results)
+        best_models_h2 = self._find_best_models_from_results(h2_results)
+        
+        # Create combined plots for each model category
+        self._plot_case1_combined_results(
+            ace_results, h2_results, 
+            best_models_ace, best_models_h2
+        )
+        
+        # Calculate and save combined metrics
+        combined_metrics = self._calculate_case1_combined_metrics(
+            ace_results, h2_results,
+            best_models_ace, best_models_h2
+        )
+        
+        # Save combined metrics
+        combined_metrics_df = pd.DataFrame(combined_metrics)
+        combined_metrics_df.to_csv(f"{self.save_dir}/case1_combined_metrics.csv", index=False)
+        
+        print(f"Combined visualization and metrics saved to {self.save_dir}")
+        return combined_metrics
+
+    def _plot_case1_combined_results(self, ace_results, h2_results, best_models_ace, best_models_h2):
+        """Create combined plots showing both targets with different colors"""
+        
+        # Create figure with subplots
+        fig, axes = plt.subplots(2, 2, figsize=(15, 12))
+        fig.suptitle('Case 1: Combined Performance - Hydrogenotrophic Features Only\nACE-km vs H2-km', fontsize=16, fontweight='bold')
+        
+        plot_configs = [
+            ('knn', 'KNN-Sparsified GNN'),
+            ('explainer', 'Explainer-Sparsified GNN'),
+            ('ml', 'ML on Embeddings')
+        ]
+        
+        # Colors for the two targets
+        colors = ['#1f77b4', '#ff7f0e']  # Blue for ACE-km, Orange for H2-km
+        labels = ['ACE-km (Hydrogenotrophic only)', 'H2-km (Hydrogenotrophic only)']
+        
+        plot_idx = 0
+        combined_metrics_summary = []
+        
+        for phase, phase_name in plot_configs:
+            if plot_idx >= 3:  # We only have 3 plots to make
+                break
+                
+            ax = axes[plot_idx // 2, plot_idx % 2]
+            
+            # Get best models for this phase
+            if phase == 'ml':
+                model_ace = best_models_ace['ml']
+                model_h2 = best_models_h2['ml']
+                results_ace = ace_results.get('ml_models', {}).get(model_ace, {})
+                results_h2 = h2_results.get('ml_models', {}).get(model_h2, {})
+            else:
+                model_ace = best_models_ace[phase]
+                model_h2 = best_models_h2[phase]
+                results_ace = ace_results.get(phase, {}).get(model_ace, {})
+                results_h2 = h2_results.get(phase, {}).get(model_h2, {})
+            
+            # Extract predictions and actual values
+            if 'fold_predictions' in results_ace and 'fold_predictions' in results_h2:
+                # ACE data
+                actual_ace = []
+                pred_ace = []
+                for fold_data in results_ace['fold_predictions']:
+                    actual_ace.extend(fold_data['actual'])
+                    pred_ace.extend(fold_data['predicted'])
+                
+                # H2 data
+                actual_h2 = []
+                pred_h2 = []
+                for fold_data in results_h2['fold_predictions']:
+                    actual_h2.extend(fold_data['actual'])
+                    pred_h2.extend(fold_data['predicted'])
+                
+                # Plot both targets
+                ax.scatter(actual_ace, pred_ace, c=colors[0], alpha=0.7, s=60, label=labels[0], edgecolors='black', linewidth=0.5)
+                ax.scatter(actual_h2, pred_h2, c=colors[1], alpha=0.7, s=60, label=labels[1], edgecolors='black', linewidth=0.5)
+                
+                # Calculate individual metrics
+                ace_r2 = r2_score(actual_ace, pred_ace)
+                ace_mse = mean_squared_error(actual_ace, pred_ace)
+                ace_rmse = np.sqrt(ace_mse)
+                ace_mae = mean_absolute_error(actual_ace, pred_ace)
+                
+                h2_r2 = r2_score(actual_h2, pred_h2)
+                h2_mse = mean_squared_error(actual_h2, pred_h2)
+                h2_rmse = np.sqrt(h2_mse)
+                h2_mae = mean_absolute_error(actual_h2, pred_h2)
+                
+                combined_metrics_summary.append({
+                    'phase': phase,
+                    'model_ace': model_ace,
+                    'model_h2': model_h2,
+                    'ace_r2': ace_r2,
+                    'ace_mse': ace_mse,
+                    'ace_rmse': ace_rmse,
+                    'ace_mae': ace_mae,
+                    'h2_r2': h2_r2,
+                    'h2_mse': h2_mse,
+                    'h2_rmse': h2_rmse,
+                    'h2_mae': h2_mae,
+                    'n_samples_ace': len(actual_ace),
+                    'n_samples_h2': len(actual_h2)
+                })
+                
+                # Add perfect prediction lines for both targets
+                all_actual = actual_ace + actual_h2
+                all_pred = pred_ace + pred_h2
+                min_val = min(min(all_actual), min(all_pred))
+                max_val = max(max(all_actual), max(all_pred))
+                ax.plot([min_val, max_val], [min_val, max_val], 'k--', alpha=0.8, linewidth=2, label='Perfect Prediction')
+                
+                # Formatting
+                ax.set_xlabel('Actual Values', fontsize=12)
+                ax.set_ylabel('Predicted Values', fontsize=12)
+                ax.set_title(f'{phase_name}\nACE R²={ace_r2:.3f}, H2 R²={h2_r2:.3f}', fontsize=11, fontweight='bold')
+                ax.legend(fontsize=9)
+                ax.grid(True, alpha=0.3)
+                
+                # Add text box with metrics
+                textstr = f'ACE-km: R²={ace_r2:.3f}, RMSE={ace_rmse:.3f}\nH2-km: R²={h2_r2:.3f}, RMSE={h2_rmse:.3f}\nSamples: {len(actual_ace)} + {len(actual_h2)}'
+                props = dict(boxstyle='round', facecolor='wheat', alpha=0.8)
+                ax.text(0.05, 0.95, textstr, transform=ax.transAxes, fontsize=9,
+                       verticalalignment='top', bbox=props)
+            
+            plot_idx += 1
+        
+        # Remove empty subplot
+        if plot_idx < 4:
+            fig.delaxes(axes[1, 1])
+        
+        # Add overall summary
+        fig.text(0.02, 0.02, 
+                f'Case 1: Hydrogenotrophic features only applied to both ACE-km and H2-km targets',
+                fontsize=10, style='italic')
+        
+        plt.tight_layout()
+        plt.savefig(f"{self.save_dir}/case1_combined_visualization.png", dpi=300, bbox_inches='tight')
+        plt.savefig(f"{self.save_dir}/case1_combined_visualization.pdf", bbox_inches='tight')
+        plt.close()
+        
+        # Save combined metrics summary
+        with open(f"{self.save_dir}/case1_combined_metrics_summary.txt", 'w') as f:
+            f.write("Case 1: Combined Metrics Summary (Both Targets)\n")
+            f.write("=" * 50 + "\n\n")
+            
+            for metrics in combined_metrics_summary:
+                f.write(f"{metrics['phase'].upper()} Phase:\n")
+                f.write(f"  ACE-km Model: {metrics['model_ace']}\n")
+                f.write(f"  H2-km Model: {metrics['model_h2']}\n")
+                f.write(f"  ACE-km R²: {metrics['ace_r2']:.4f}, RMSE: {metrics['ace_rmse']:.4f}\n")
+                f.write(f"  H2-km R²: {metrics['h2_r2']:.4f}, RMSE: {metrics['h2_rmse']:.4f}\n")
+                f.write(f"  Samples: ACE={metrics['n_samples_ace']}, H2={metrics['n_samples_h2']}\n")
+                f.write("\n")
+        
+        print(f"Combined visualization saved: case1_combined_visualization.png/pdf")
+        return combined_metrics_summary
+
+    def _calculate_case1_combined_metrics(self, ace_results, h2_results, best_models_ace, best_models_h2):
+        """Calculate detailed combined metrics for Case 1"""
+        combined_metrics = []
+        
+        # Process each phase for both targets
+        for phase in ['knn', 'explainer']:
+            if phase in ace_results and phase in h2_results:
+                for model_type in ace_results[phase].keys():
+                    if model_type in h2_results[phase]:
+                        # Get results for this model from both targets
+                        results_ace = ace_results[phase][model_type]
+                        results_h2 = h2_results[phase][model_type]
+                        
+                        combined_metrics.append({
+                            'phase': phase,
+                            'model_type': model_type,
+                            'target': 'ACE-km',
+                            'r2': results_ace['avg_metrics']['r2'],
+                            'mse': results_ace['avg_metrics']['mse'],
+                            'rmse': results_ace['avg_metrics']['rmse'],
+                            'mae': results_ace['avg_metrics']['mae'],
+                            'is_best': model_type == best_models_ace[phase]
+                        })
+                        
+                        combined_metrics.append({
+                            'phase': phase,
+                            'model_type': model_type,
+                            'target': 'H2-km',
+                            'r2': results_h2['avg_metrics']['r2'],
+                            'mse': results_h2['avg_metrics']['mse'],
+                            'rmse': results_h2['avg_metrics']['rmse'],
+                            'mae': results_h2['avg_metrics']['mae'],
+                            'is_best': model_type == best_models_h2[phase]
+                        })
+        
+        # Process ML models
+        if 'ml_models' in ace_results and 'ml_models' in h2_results:
+            for model_type in ace_results['ml_models'].keys():
+                if model_type in h2_results['ml_models']:
+                    results_ace = ace_results['ml_models'][model_type]
+                    results_h2 = h2_results['ml_models'][model_type]
+                    
+                    combined_metrics.append({
+                        'phase': 'ml_embeddings',
+                        'model_type': model_type,
+                        'target': 'ACE-km',
+                        'r2': results_ace['avg_metrics']['r2'],
+                        'mse': results_ace['avg_metrics']['mse'],
+                        'rmse': results_ace['avg_metrics']['rmse'],
+                        'mae': results_ace['avg_metrics']['mae'],
+                        'is_best': model_type == best_models_ace['ml']
+                    })
+                    
+                    combined_metrics.append({
+                        'phase': 'ml_embeddings',
+                        'model_type': model_type,
+                        'target': 'H2-km',
+                        'r2': results_h2['avg_metrics']['r2'],
+                        'mse': results_h2['avg_metrics']['mse'],
+                        'rmse': results_h2['avg_metrics']['rmse'],
+                        'mae': results_h2['avg_metrics']['mae'],
+                        'is_best': model_type == best_models_h2['ml']
+                    })
+        
+        return combined_metrics
+
+    def _save_case2_combined_results(self, combined_results):
+        """Save combined Case 2 results for both targets"""
+        # Save combined results
+        with open(f"{self.save_dir}/case2_combined_results.pkl", 'wb') as f:
+            pickle.dump(combined_results, f)
+        
+        # Create combined summary
+        summary_data = []
+        
+        for target_name, target_results in combined_results.items():
+            # Add GNN results
+            for phase in ['knn', 'explainer']:
+                if phase in target_results:
+                    for model_type, result in target_results[phase].items():
+                        summary_data.append({
+                            'case': 'case2',
+                            'target': target_name.upper(),
+                            'phase': phase,
+                            'model_type': model_type,
+                            'model_category': 'GNN',
+                            'mse': result['avg_metrics']['mse'],
+                            'rmse': result['avg_metrics']['rmse'],
+                            'r2': result['avg_metrics']['r2'],
+                            'mae': result['avg_metrics']['mae'],
+                            'features_count': len(self.dataset.node_feature_names)
+                        })
+            
+            # Add ML results
+            if 'ml_models' in target_results:
+                for model_type, result in target_results['ml_models'].items():
+                    summary_data.append({
+                        'case': 'case2',
+                        'target': target_name.upper(),
+                        'phase': 'embeddings',
+                        'model_type': model_type,
+                        'model_category': 'ML',
+                        'mse': result['avg_metrics']['mse'],
+                        'rmse': result['avg_metrics']['rmse'],
+                        'r2': result['avg_metrics']['r2'],
+                        'mae': result['avg_metrics']['mae'],
+                        'features_count': len(self.dataset.node_feature_names)
+                    })
+        
+        # Save summary
+        summary_df = pd.DataFrame(summary_data)
+        summary_df.to_csv(f"{self.save_dir}/case2_combined_summary.csv", index=False)
+        
+        print(f"\nCase 2 combined results saved to {self.save_dir}")
+        print(f"Summary: {len(summary_data)} model results across both targets")
+
+    def _create_case2_combined_visualization(self, combined_results, ace_target_idx, h2_target_idx):
+        """Create combined visualization for Case 2 with both targets"""
+        print(f"\nCreating combined Case 2 visualization...")
+        
+        # Extract results
+        ace_results = combined_results['ace_km']
+        h2_results = combined_results['h2_km']
+        
+        # Find best models from each target
+        best_models_ace = self._find_best_models_from_results(ace_results)
+        best_models_h2 = self._find_best_models_from_results(h2_results)
+        
+        # Create combined plots for each model category
+        self._plot_case2_combined_results(
+            ace_results, h2_results, 
+            best_models_ace, best_models_h2
+        )
+        
+        # Calculate and save combined metrics
+        combined_metrics = self._calculate_case2_combined_metrics(
+            ace_results, h2_results,
+            best_models_ace, best_models_h2
+        )
+        
+        # Save combined metrics
+        combined_metrics_df = pd.DataFrame(combined_metrics)
+        combined_metrics_df.to_csv(f"{self.save_dir}/case2_combined_metrics.csv", index=False)
+        
+        print(f"Combined visualization and metrics saved to {self.save_dir}")
+        return combined_metrics
+
+    def _plot_case2_combined_results(self, ace_results, h2_results, best_models_ace, best_models_h2):
+        """Create combined plots showing both targets with different colors"""
+        
+        # Create figure with subplots
+        fig, axes = plt.subplots(2, 2, figsize=(15, 12))
+        fig.suptitle('Case 2: Combined Performance - Acetoclastic Features Only\nACE-km vs H2-km', fontsize=16, fontweight='bold')
+        
+        plot_configs = [
+            ('knn', 'KNN-Sparsified GNN'),
+            ('explainer', 'Explainer-Sparsified GNN'),
+            ('ml', 'ML on Embeddings')
+        ]
+        
+        # Colors for the two targets
+        colors = ['#1f77b4', '#ff7f0e']  # Blue for ACE-km, Orange for H2-km
+        labels = ['ACE-km (Acetoclastic only)', 'H2-km (Acetoclastic only)']
+        
+        plot_idx = 0
+        combined_metrics_summary = []
+        
+        for phase, phase_name in plot_configs:
+            if plot_idx >= 3:  # We only have 3 plots to make
+                break
+                
+            ax = axes[plot_idx // 2, plot_idx % 2]
+            
+            # Get best models for this phase
+            if phase == 'ml':
+                model_ace = best_models_ace['ml']
+                model_h2 = best_models_h2['ml']
+                results_ace = ace_results.get('ml_models', {}).get(model_ace, {})
+                results_h2 = h2_results.get('ml_models', {}).get(model_h2, {})
+            else:
+                model_ace = best_models_ace[phase]
+                model_h2 = best_models_h2[phase]
+                results_ace = ace_results.get(phase, {}).get(model_ace, {})
+                results_h2 = h2_results.get(phase, {}).get(model_h2, {})
+            
+            # Extract predictions and actual values
+            if 'fold_predictions' in results_ace and 'fold_predictions' in results_h2:
+                # ACE data
+                actual_ace = []
+                pred_ace = []
+                for fold_data in results_ace['fold_predictions']:
+                    actual_ace.extend(fold_data['actual'])
+                    pred_ace.extend(fold_data['predicted'])
+                
+                # H2 data
+                actual_h2 = []
+                pred_h2 = []
+                for fold_data in results_h2['fold_predictions']:
+                    actual_h2.extend(fold_data['actual'])
+                    pred_h2.extend(fold_data['predicted'])
+                
+                # Plot both targets
+                ax.scatter(actual_ace, pred_ace, c=colors[0], alpha=0.7, s=60, label=labels[0], edgecolors='black', linewidth=0.5)
+                ax.scatter(actual_h2, pred_h2, c=colors[1], alpha=0.7, s=60, label=labels[1], edgecolors='black', linewidth=0.5)
+                
+                # Calculate individual metrics
+                ace_r2 = r2_score(actual_ace, pred_ace)
+                ace_mse = mean_squared_error(actual_ace, pred_ace)
+                ace_rmse = np.sqrt(ace_mse)
+                ace_mae = mean_absolute_error(actual_ace, pred_ace)
+                
+                h2_r2 = r2_score(actual_h2, pred_h2)
+                h2_mse = mean_squared_error(actual_h2, pred_h2)
+                h2_rmse = np.sqrt(h2_mse)
+                h2_mae = mean_absolute_error(actual_h2, pred_h2)
+                
+                combined_metrics_summary.append({
+                    'phase': phase,
+                    'model_ace': model_ace,
+                    'model_h2': model_h2,
+                    'ace_r2': ace_r2,
+                    'ace_mse': ace_mse,
+                    'ace_rmse': ace_rmse,
+                    'ace_mae': ace_mae,
+                    'h2_r2': h2_r2,
+                    'h2_mse': h2_mse,
+                    'h2_rmse': h2_rmse,
+                    'h2_mae': h2_mae,
+                    'n_samples_ace': len(actual_ace),
+                    'n_samples_h2': len(actual_h2)
+                })
+                
+                # Add perfect prediction lines for both targets
+                all_actual = actual_ace + actual_h2
+                all_pred = pred_ace + pred_h2
+                min_val = min(min(all_actual), min(all_pred))
+                max_val = max(max(all_actual), max(all_pred))
+                ax.plot([min_val, max_val], [min_val, max_val], 'k--', alpha=0.8, linewidth=2, label='Perfect Prediction')
+                
+                # Formatting
+                ax.set_xlabel('Actual Values', fontsize=12)
+                ax.set_ylabel('Predicted Values', fontsize=12)
+                ax.set_title(f'{phase_name}\nACE R²={ace_r2:.3f}, H2 R²={h2_r2:.3f}', fontsize=11, fontweight='bold')
+                ax.legend(fontsize=9)
+                ax.grid(True, alpha=0.3)
+                
+                # Add text box with metrics
+                textstr = f'ACE-km: R²={ace_r2:.3f}, RMSE={ace_rmse:.3f}\nH2-km: R²={h2_r2:.3f}, RMSE={h2_rmse:.3f}\nSamples: {len(actual_ace)} + {len(actual_h2)}'
+                props = dict(boxstyle='round', facecolor='wheat', alpha=0.8)
+                ax.text(0.05, 0.95, textstr, transform=ax.transAxes, fontsize=9,
+                       verticalalignment='top', bbox=props)
+            
+            plot_idx += 1
+        
+        # Remove empty subplot
+        if plot_idx < 4:
+            fig.delaxes(axes[1, 1])
+        
+        # Add overall summary
+        fig.text(0.02, 0.02, 
+                f'Case 2: Acetoclastic features only applied to both ACE-km and H2-km targets',
+                fontsize=10, style='italic')
+        
+        plt.tight_layout()
+        plt.savefig(f"{self.save_dir}/case2_combined_visualization.png", dpi=300, bbox_inches='tight')
+        plt.savefig(f"{self.save_dir}/case2_combined_visualization.pdf", bbox_inches='tight')
+        plt.close()
+        
+        # Save combined metrics summary
+        with open(f"{self.save_dir}/case2_combined_metrics_summary.txt", 'w') as f:
+            f.write("Case 2: Combined Metrics Summary (Both Targets)\n")
+            f.write("=" * 50 + "\n\n")
+            
+            for metrics in combined_metrics_summary:
+                f.write(f"{metrics['phase'].upper()} Phase:\n")
+                f.write(f"  ACE-km Model: {metrics['model_ace']}\n")
+                f.write(f"  H2-km Model: {metrics['model_h2']}\n")
+                f.write(f"  ACE-km R²: {metrics['ace_r2']:.4f}, RMSE: {metrics['ace_rmse']:.4f}\n")
+                f.write(f"  H2-km R²: {metrics['h2_r2']:.4f}, RMSE: {metrics['h2_rmse']:.4f}\n")
+                f.write(f"  Samples: ACE={metrics['n_samples_ace']}, H2={metrics['n_samples_h2']}\n")
+                f.write("\n")
+        
+        print(f"Combined visualization saved: case2_combined_visualization.png/pdf")
+        return combined_metrics_summary
+
+    def _calculate_case2_combined_metrics(self, ace_results, h2_results, best_models_ace, best_models_h2):
+        """Calculate detailed combined metrics for Case 2"""
+        combined_metrics = []
+        
+        # Process each phase for both targets
+        for phase in ['knn', 'explainer']:
+            if phase in ace_results and phase in h2_results:
+                for model_type in ace_results[phase].keys():
+                    if model_type in h2_results[phase]:
+                        # Get results for this model from both targets
+                        results_ace = ace_results[phase][model_type]
+                        results_h2 = h2_results[phase][model_type]
+                        
+                        combined_metrics.append({
+                            'phase': phase,
+                            'model_type': model_type,
+                            'target': 'ACE-km',
+                            'r2': results_ace['avg_metrics']['r2'],
+                            'mse': results_ace['avg_metrics']['mse'],
+                            'rmse': results_ace['avg_metrics']['rmse'],
+                            'mae': results_ace['avg_metrics']['mae'],
+                            'is_best': model_type == best_models_ace[phase]
+                        })
+                        
+                        combined_metrics.append({
+                            'phase': phase,
+                            'model_type': model_type,
+                            'target': 'H2-km',
+                            'r2': results_h2['avg_metrics']['r2'],
+                            'mse': results_h2['avg_metrics']['mse'],
+                            'rmse': results_h2['avg_metrics']['rmse'],
+                            'mae': results_h2['avg_metrics']['mae'],
+                            'is_best': model_type == best_models_h2[phase]
+                        })
+        
+        # Process ML models
+        if 'ml_models' in ace_results and 'ml_models' in h2_results:
+            for model_type in ace_results['ml_models'].keys():
+                if model_type in h2_results['ml_models']:
+                    results_ace = ace_results['ml_models'][model_type]
+                    results_h2 = h2_results['ml_models'][model_type]
+                    
+                    combined_metrics.append({
+                        'phase': 'ml_embeddings',
+                        'model_type': model_type,
+                        'target': 'ACE-km',
+                        'r2': results_ace['avg_metrics']['r2'],
+                        'mse': results_ace['avg_metrics']['mse'],
+                        'rmse': results_ace['avg_metrics']['rmse'],
+                        'mae': results_ace['avg_metrics']['mae'],
+                        'is_best': model_type == best_models_ace['ml']
+                    })
+                    
+                    combined_metrics.append({
+                        'phase': 'ml_embeddings',
+                        'model_type': model_type,
+                        'target': 'H2-km',
+                        'r2': results_h2['avg_metrics']['r2'],
+                        'mse': results_h2['avg_metrics']['mse'],
+                        'rmse': results_h2['avg_metrics']['rmse'],
+                        'mae': results_h2['avg_metrics']['mae'],
+                        'is_best': model_type == best_models_h2['ml']
+                    })
+        
+        return combined_metrics
 
     def _calculate_case3_combined_metrics(self, ace_results, h2_results, best_models_ace, best_models_h2):
         """Calculate detailed combined metrics for Case 3"""
@@ -2274,7 +2870,7 @@ class DomainExpertCasesPipeline(MixedEmbeddingPipeline):
         for phase, phase_name in plot_configs:
             if plot_idx >= 3:  # We only have 3 plots to make
                 break
-                
+          
             ax = axes[plot_idx // 2, plot_idx % 2]
             
             # Get best models for this phase
@@ -2659,6 +3255,7 @@ def run_all_cases(data_path="../Data/New_data.csv"):
     """Run all domain expert cases"""
     print("Running all domain expert cases...")
     
+    # cases = ['case1', 'case2', 'case3', 'case4', 'case5']
     cases = ['case1', 'case2', 'case3']
     all_results = {}
     
@@ -2671,9 +3268,9 @@ def run_all_cases(data_path="../Data/New_data.csv"):
             pipeline = DomainExpertCasesPipeline(
                 data_path=data_path,
                 case_type=case,
-                k_neighbors=10,
-                hidden_dim=256,
-                num_epochs=100,
+                k_neighbors=15,
+                hidden_dim=512,
+                num_epochs=200,
                 num_folds=5,
                 save_dir="./domain_expert_results",
                 importance_threshold=0.2,
@@ -2711,8 +3308,8 @@ def test_single_case(data_path="../Data/New_data.csv", case_type='case1'):
             data_path=data_path,
             case_type=case_type,
             k_neighbors=10,
-            hidden_dim=32,  # Reduced for testing
-            num_epochs=5,   # Reduced for testing
+            hidden_dim=64,  # Reduced for testing
+            num_epochs=2,   # Reduced for testing
             num_folds=2,    # Reduced for testing
             save_dir=f"./domain_expert_results_test/{case_type}",
             importance_threshold=0.2,
@@ -2727,8 +3324,6 @@ def test_single_case(data_path="../Data/New_data.csv", case_type='case1'):
         
     except Exception as e:
         print(f"Error testing {case_type}: {e}")
-        import traceback
-        traceback.print_exc()
         return None
 
 
@@ -2749,21 +3344,18 @@ def validate_implementation():
     return True
 
 if __name__ == "__main__":
-    results = run_all_cases()
-
-# if __name__ == "__main__":
-#     # Validate implementation first
-#     if validate_implementation():
-#         # Test single case first
-#         print("\nTesting single case with nested CV...")
-#         test_results = test_single_case(case_type='case1')
+    # Validate implementation first
+    if validate_implementation():
+        # Test single case first
+        print("\nTesting single case with nested CV...")
+        test_results = test_single_case(case_type='case1')
         
-#         if test_results:
-#             print("Test successful! Running all cases...")
-#             # Run all cases
-#             results = run_all_cases()
-#             print("Domain expert cases pipeline completed!")
-#         else:
-#             print("Test failed! Check the error above.")
-#     else:
-#         print("Implementation validation failed!")
+        if test_results:
+            print("Test successful! Running all cases...")
+            # Run all cases
+            results = run_all_cases()
+            print("Domain expert cases pipeline completed!")
+        else:
+            print("Test failed! Check the error above.")
+    else:
+        print("Implementation validation failed!") 

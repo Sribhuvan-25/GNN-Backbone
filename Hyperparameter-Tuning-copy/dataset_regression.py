@@ -618,23 +618,23 @@ class MicrobialGNNDataset:
                 pos[node] = (math.cos(angle), math.sin(angle))
             return pos
         
-        # Try NetworkX layout with multiple fallbacks
+        # Try NetworkX layout with multiple fallbacks - better spacing
         pos = None
         try:
-            # Try basic spring_layout first
-            pos = nx.spring_layout(G, k=0.3)
+            # Try spring layout with better spacing parameters
+            pos = nx.spring_layout(G, k=2, iterations=100, seed=42)
         except Exception as e1:
             try:
-                # Try with seed parameter
-                pos = nx.spring_layout(G, k=0.3, seed=42)
+                # Try with different parameters
+                pos = nx.spring_layout(G, k=1.5, iterations=50, seed=42)
             except Exception as e2:
                 try:
-                    # Try with random_state parameter
-                    pos = nx.spring_layout(G, k=0.3, random_state=42)
+                    # Try basic spring layout
+                    pos = nx.spring_layout(G, k=1, seed=42)
                 except Exception as e3:
                     try:
-                        # Try without any parameters
-                        pos = nx.spring_layout(G)
+                        # Try without k parameter
+                        pos = nx.spring_layout(G, seed=42)
                     except Exception as e4:
                         try:
                             # Try circular layout
@@ -648,26 +648,22 @@ class MicrobialGNNDataset:
                                 print(f"NetworkX layout failed, using custom layout. Errors: {e1}, {e2}, {e3}, {e4}, {e5}, {e6}")
                                 pos = create_custom_layout(G)
         
-        # Calculate node size based on degree centrality
-        node_size = []
-        for node in G.nodes():
-            # Use degree centrality
-            degree = G.degree(node, weight='weight')
-            node_size.append(100 + 500 * degree)
+        # Use consistent node size for all nodes
+        node_size = [800] * len(G.nodes())  # Uniform size for all nodes
         
-        # Scale edge width by correlation strength and color by type
+        # Scale edge width by correlation strength with uniform coloring
         edge_colors = []
         edge_width = []
+        edge_weights_display = []
         
         for u, v, data in G.edges(data=True):
-            # Edge type determines color: 0 = negative correlation, 1 = positive correlation
-            if data['type'] == 0:
-                edge_colors.append('red')  # negative correlation
-            else:
-                edge_colors.append('green')  # positive correlation
+            # Use uniform edge color (no positive/negative symbolism)
+            edge_colors.append('darkgray')
             
-            # Width based on weight
-            edge_width.append(abs(data['weight']) * 2 + 0.5)
+            # Width based on absolute weight
+            abs_weight = abs(data['weight'])
+            edge_width.append(abs_weight * 2 + 0.5)
+            edge_weights_display.append(abs_weight)
         
         # Try to find communities for node coloring
         try:
@@ -678,13 +674,13 @@ class MicrobialGNNDataset:
             # Fallback if community detection fails
             node_colors = list(range(len(G.nodes)))
         
-        # Draw the graph
+        # Draw the graph with uniform styling and better node spacing
         nx.draw_networkx(
             G, 
             pos=pos,
             with_labels=True,
-            labels={node: self.node_feature_names[node] for node in G.nodes()},
-            node_size=node_size,
+            labels={node: self.node_feature_names[node][:12] for node in G.nodes()},
+            node_size=node_size,  # Uniform node sizes
             node_color=node_colors,
             width=edge_width,
             edge_color=edge_colors,
@@ -695,10 +691,14 @@ class MicrobialGNNDataset:
             ax=ax
         )
         
-        # Create a legend for edge types
-        ax.plot([], [], 'g-', linewidth=2, label='Positive correlation')
-        ax.plot([], [], 'r-', linewidth=2, label='Negative correlation')
-        ax.legend(loc='upper right')
+        # Add individual edge weight labels
+        if len(G.edges()) <= 50:  # Only show edge labels if not too many edges
+            edge_labels = {}
+            for u, v, data in G.edges(data=True):
+                weight = abs(data['weight'])
+                edge_labels[(u, v)] = f"{weight:.3f}"
+            
+            nx.draw_networkx_edge_labels(G, pos, edge_labels, font_size=6, alpha=0.8, ax=ax)
         
         ax.set_title(title, fontsize=16)
         ax.axis('off')

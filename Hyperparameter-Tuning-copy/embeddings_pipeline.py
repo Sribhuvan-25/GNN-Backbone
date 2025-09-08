@@ -2226,8 +2226,8 @@ from GNNmodelsRegression import (
     GaussianNLLLoss
 )
 
-# Set device
-device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+# Set device to CPU
+device = torch.device('cpu')
 print(f"Using device: {device}")
 
 # Set random seed for reproducibility
@@ -3069,8 +3069,17 @@ class MixedEmbeddingPipeline:
         all_fold_preds = []
         all_fold_targets = []
         for fold_result in fold_results:
-            all_fold_preds.extend(fold_result['predictions'])
-            all_fold_targets.extend(fold_result['targets'])
+            # Handle both dict format and simple list format
+            if isinstance(fold_result['predictions'], list) and len(fold_result['predictions']) > 0:
+                if isinstance(fold_result['predictions'][0], dict):
+                    # Dict format: [{'predicted': val, 'actual': val}, ...]
+                    for pred_dict in fold_result['predictions']:
+                        all_fold_preds.append(pred_dict['predicted'])
+                        all_fold_targets.append(pred_dict['actual'])
+                else:
+                    # Simple list format
+                    all_fold_preds.extend(fold_result['predictions'])
+                    all_fold_targets.extend(fold_result['targets'])
         
         all_fold_preds = np.array(all_fold_preds)
         all_fold_targets = np.array(all_fold_targets)
@@ -3227,8 +3236,17 @@ class MixedEmbeddingPipeline:
             all_fold_preds = []
             all_fold_targets = []
             for fold_result in fold_results:
-                all_fold_preds.extend(fold_result['predictions'])
-                all_fold_targets.extend(fold_result['targets'])
+                # Handle both dict format and simple list format
+                if isinstance(fold_result['predictions'], list) and len(fold_result['predictions']) > 0:
+                    if isinstance(fold_result['predictions'][0], dict):
+                        # Dict format: [{'predicted': val, 'actual': val}, ...]
+                        for pred_dict in fold_result['predictions']:
+                            all_fold_preds.append(pred_dict['predicted'])
+                            all_fold_targets.append(pred_dict['actual'])
+                    else:
+                        # Simple list format
+                        all_fold_preds.extend(fold_result['predictions'])
+                        all_fold_targets.extend(fold_result['targets'])
             
             all_fold_preds = np.array(all_fold_preds)
             all_fold_targets = np.array(all_fold_targets)
@@ -3288,10 +3306,10 @@ class MixedEmbeddingPipeline:
         return sparsified_data_list
 
     def plot_results(self, gnn_results, ml_results, target_idx):
-        """Create simple prediction vs actual plot for best ML model"""
+        """Create prediction vs actual plots for all ML models"""
         target_name = self.target_names[target_idx]
         
-        # Find best ML model
+        # Find best ML model for summary
         ml_models = list(ml_results.keys())
         ml_r2_scores = [ml_results[model]['avg_metrics']['r2'] for model in ml_models]
         best_ml_model = ml_models[np.argmax(ml_r2_scores)]
@@ -3300,40 +3318,120 @@ class MixedEmbeddingPipeline:
         
         print(f"\nBest ML model: {best_ml_model} (R² = {best_r2:.4f}, MSE = {best_mse:.4f})")
         
-        # Create simple prediction vs actual plot
-        fig, ax = plt.subplots(1, 1, figsize=(8, 6))
+        # Create plots directory if it doesn't exist
+        os.makedirs(f"{self.save_dir}/plots", exist_ok=True)
         
-        # Collect all predictions and targets from folds
-        all_preds = []
-        all_targets = []
-        for fold_result in ml_results[best_ml_model]['fold_results']:
-            all_preds.extend(fold_result['predictions'])
-            all_targets.extend(fold_result['targets'])
+        # Create individual plots for each ML model
+        for model_name in ml_models:
+            model_results = ml_results[model_name]
+            model_r2 = model_results['avg_metrics']['r2']
+            model_mse = model_results['avg_metrics']['mse']
+            
+            # Create plot for this model
+            fig, ax = plt.subplots(1, 1, figsize=(8, 6))
+            
+            # Collect all predictions and targets from folds
+            all_preds = []
+            all_targets = []
+            for fold_result in model_results['fold_results']:
+                # ML model results are in simple numpy array format
+                all_preds.extend(fold_result['predictions'])
+                all_targets.extend(fold_result['targets'])
+            
+            # Check if we have data to plot
+            if len(all_targets) > 0 and len(all_preds) > 0:
+                # Create scatter plot
+                ax.scatter(all_targets, all_preds, alpha=0.6, edgecolor='k', facecolor='none', s=50)
+                
+                # Add diagonal line
+                min_val = min(min(all_targets), min(all_preds))
+                max_val = max(max(all_targets), max(all_preds))
+                ax.plot([min_val, max_val], [min_val, max_val], 'r--', linewidth=2, label='Perfect Prediction')
+            else:
+                # No data to plot, show message
+                ax.text(0.5, 0.5, 'No prediction data available', 
+                       transform=ax.transAxes, ha='center', va='center', fontsize=14)
+            
+            # Mark if this is the best model
+            best_indicator = " (Best)" if model_name == best_ml_model else ""
+            ax.set_title(f'{model_name}{best_indicator}\nR² = {model_r2:.4f}, MSE = {model_mse:.4f}')
+            ax.set_xlabel('Actual Values')
+            ax.set_ylabel('Predicted Values')
+            ax.grid(True, alpha=0.3)
+            
+            # Add R² text box
+            if len(all_targets) > 0:
+                ax.text(0.05, 0.95, f'R² = {model_r2:.4f}\nMSE = {model_mse:.1f}', 
+                       transform=ax.transAxes, 
+                       bbox=dict(boxstyle="round,pad=0.3", facecolor="white", alpha=0.8),
+                       verticalalignment='top', fontsize=10)
+            
+            plt.tight_layout()
+            
+            # Save individual plot
+            plot_filename = f"{self.save_dir}/plots/{target_name}_{model_name}_pred_vs_actual.png"
+            plt.savefig(plot_filename, dpi=150, bbox_inches='tight')
+            plt.close()
+            
+            print(f"{model_name} plot saved: {plot_filename}")
         
-        # Create scatter plot
-        ax.scatter(all_targets, all_preds, alpha=0.6, edgecolor='k', facecolor='none', s=50)
+        # Create a combined plot with all models
+        self._create_combined_ml_plot(ml_results, target_name)
         
-        # Add diagonal line
-        min_val = min(min(all_targets), min(all_preds))
-        max_val = max(max(all_targets), max(all_preds))
-        ax.plot([min_val, max_val], [min_val, max_val], 'r--', linewidth=2)
+        print(f"\nAll ML model plots created for {target_name}")
+    
+    def _create_combined_ml_plot(self, ml_results, target_name):
+        """Create a combined plot showing all ML models"""
+        ml_models = list(ml_results.keys())
+        n_models = len(ml_models)
         
-        ax.set_title(f'Best ML Model: {best_ml_model}\nR² = {best_r2:.4f}, MSE = {best_mse:.4f}')
-        ax.set_xlabel('True Values')
-        ax.set_ylabel('Predicted Values')
-        ax.grid(True, alpha=0.3)
+        # Create subplots
+        fig, axes = plt.subplots(2, 2, figsize=(12, 10))
+        axes = axes.flatten()
         
-        # Add R² text
-        ax.text(0.05, 0.95, f'R² = {best_r2:.4f}', transform=ax.transAxes, 
-                bbox=dict(boxstyle="round,pad=0.3", facecolor="white", alpha=0.8),
-                verticalalignment='top')
+        for idx, model_name in enumerate(ml_models):
+            if idx >= 4:  # Only show first 4 models
+                break
+                
+            ax = axes[idx]
+            model_results = ml_results[model_name]
+            model_r2 = model_results['avg_metrics']['r2']
+            model_mse = model_results['avg_metrics']['mse']
+            
+            # Collect predictions and targets
+            all_preds = []
+            all_targets = []
+            for fold_result in model_results['fold_results']:
+                all_preds.extend(fold_result['predictions'])
+                all_targets.extend(fold_result['targets'])
+            
+            if len(all_targets) > 0 and len(all_preds) > 0:
+                # Create scatter plot
+                ax.scatter(all_targets, all_preds, alpha=0.6, edgecolor='k', facecolor='none', s=30)
+                
+                # Add diagonal line
+                min_val = min(min(all_targets), min(all_preds))
+                max_val = max(max(all_targets), max(all_preds))
+                ax.plot([min_val, max_val], [min_val, max_val], 'r--', linewidth=1.5)
+            
+            ax.set_title(f'{model_name}\nR² = {model_r2:.3f}', fontsize=10)
+            ax.set_xlabel('Actual Values', fontsize=9)
+            ax.set_ylabel('Predicted Values', fontsize=9)
+            ax.grid(True, alpha=0.3)
         
+        # Hide unused subplots
+        for idx in range(n_models, 4):
+            axes[idx].set_visible(False)
+        
+        plt.suptitle(f'All ML Models - {target_name}', fontsize=14, fontweight='bold')
         plt.tight_layout()
-        plt.savefig(f"{self.save_dir}/plots/{target_name}_best_ml_pred_vs_actual.png", 
-                   dpi=150, bbox_inches='tight')
+        
+        # Save combined plot
+        combined_filename = f"{self.save_dir}/plots/{target_name}_all_models_combined.png"
+        plt.savefig(combined_filename, dpi=150, bbox_inches='tight')
         plt.close()
         
-        print(f"Best ML model plot saved: {self.save_dir}/plots/{target_name}_best_ml_pred_vs_actual.png")
+        print(f"Combined plot saved: {combined_filename}")
 
     def save_results(self, all_results):
         """Save all results to files"""
@@ -3656,8 +3754,17 @@ class MixedEmbeddingPipeline:
         fold_r2s = []
         
         for fold_result in fold_results:
-            all_preds.extend(fold_result['predictions'])
-            all_targets.extend(fold_result['targets'])
+            # Handle both dict format and simple list format
+            if isinstance(fold_result['predictions'], list) and len(fold_result['predictions']) > 0:
+                if isinstance(fold_result['predictions'][0], dict):
+                    # Dict format: [{'predicted': val, 'actual': val}, ...]
+                    for pred_dict in fold_result['predictions']:
+                        all_preds.append(pred_dict['predicted'])
+                        all_targets.append(pred_dict['actual'])
+                else:
+                    # Simple list format
+                    all_preds.extend(fold_result['predictions'])
+                    all_targets.extend(fold_result['targets'])
             fold_r2s.append(fold_result['r2'])
         
         all_preds = np.array(all_preds)
@@ -3750,8 +3857,17 @@ class MixedEmbeddingPipeline:
         all_preds = []
         all_targets = []
         for fold_result in fold_results:
-            all_preds.extend(fold_result['predictions'])
-            all_targets.extend(fold_result['targets'])
+            # Handle both dict format and simple list format
+            if isinstance(fold_result['predictions'], list) and len(fold_result['predictions']) > 0:
+                if isinstance(fold_result['predictions'][0], dict):
+                    # Dict format: [{'predicted': val, 'actual': val}, ...]
+                    for pred_dict in fold_result['predictions']:
+                        all_preds.append(pred_dict['predicted'])
+                        all_targets.append(pred_dict['actual'])
+                else:
+                    # Simple list format
+                    all_preds.extend(fold_result['predictions'])
+                    all_targets.extend(fold_result['targets'])
         
         all_preds = np.array(all_preds)
         all_targets = np.array(all_targets)
@@ -3933,8 +4049,17 @@ class MixedEmbeddingPipeline:
             all_preds = []
             all_targets = []
             for fold_result in results['fold_results']:
-                all_preds.extend(fold_result['predictions'])
-                all_targets.extend(fold_result['targets'])
+                # Handle both dict format and simple list format
+                if isinstance(fold_result['predictions'], list) and len(fold_result['predictions']) > 0:
+                    if isinstance(fold_result['predictions'][0], dict):
+                        # Dict format: [{'predicted': val, 'actual': val}, ...]
+                        for pred_dict in fold_result['predictions']:
+                            all_preds.append(pred_dict['predicted'])
+                            all_targets.append(pred_dict['actual'])
+                    else:
+                        # Simple list format
+                        all_preds.extend(fold_result['predictions'])
+                        all_targets.extend(fold_result['targets'])
             
             errors = np.array(all_targets) - np.array(all_preds)
             mse_val = results['avg_metrics']['mse']

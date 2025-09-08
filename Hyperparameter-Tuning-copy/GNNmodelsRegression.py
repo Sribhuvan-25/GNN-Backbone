@@ -9,6 +9,18 @@ import torch.nn.functional as F
 from torch.nn import Sequential, Linear, ReLU, GRU, BatchNorm1d
 from torch_geometric.nn import EdgeConv, GCNConv, GraphConv, ResGatedGraphConv, GATConv
 from torch_geometric.nn import global_mean_pool, global_max_pool, global_add_pool
+
+# Custom MPS-compatible pooling function
+def mps_safe_global_mean_pool(x, batch):
+    """MPS-safe version of global_mean_pool"""
+    if x.device.type == 'mps':
+        # Move to CPU for pooling operation, then back to MPS
+        x_cpu = x.cpu()
+        batch_cpu = batch.cpu() if batch is not None else None
+        result = global_mean_pool(x_cpu, batch_cpu)
+        return result.to(x.device)
+    else:
+        return global_mean_pool(x, batch)
 from torch_geometric.data import InMemoryDataset, Data, DataLoader
 from torch_geometric.utils import from_networkx
 
@@ -136,7 +148,7 @@ class simple_GCN_res_regression(torch.nn.Module):
         X_5 = self.bn5(X_5) + X_4  
 
         # Multi-level pooling for better graph representation
-        x_mean = global_mean_pool(X_5, batch)
+        x_mean = mps_safe_global_mean_pool(X_5, batch)
         
         # Pass through regression head
         x = self.regression_head(x_mean)
@@ -190,7 +202,7 @@ class simple_GCN_res_plus_regression(torch.nn.Module):
         X_5 = self.bn5(X_5) + X_4  
 
         # Multi-level pooling for better graph representation
-        x_mean = global_mean_pool(X_5, batch)
+        x_mean = mps_safe_global_mean_pool(X_5, batch)
         
         # Store node embeddings for feature extraction
         feat = x_mean
@@ -243,7 +255,7 @@ class simple_RGGC_regression(torch.nn.Module):
         X_5 = self.dropout(X_5)
         X_5 = self.bn5(X_5)
 
-        x_mean = global_mean_pool(X_5, batch)
+        x_mean = mps_safe_global_mean_pool(X_5, batch)
         
         # Pass through regression head
         x = self.regression_head(x_mean)
@@ -292,7 +304,7 @@ class simple_RGGC_plus_regression(torch.nn.Module):
         X_5 = self.dropout(X_5)
         X_5 = self.bn5(X_5)
 
-        x_mean = global_mean_pool(X_5, batch)
+        x_mean = mps_safe_global_mean_pool(X_5, batch)
         feat = x_mean
         
         # Pass through regression head
@@ -343,7 +355,7 @@ class simple_GAT_regression(torch.nn.Module):
         X_5 = self.dropout(X_5)  
         X_5 = self.bn5(X_5)
         
-        x_mean = global_mean_pool(X_5, batch)
+        x_mean = mps_safe_global_mean_pool(X_5, batch)
         feat = x_mean
         
         # Pass through regression head

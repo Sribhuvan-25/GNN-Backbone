@@ -1,6 +1,4 @@
 import os
-# Force CPU usage to avoid MPS device issues
-os.environ['CUDA_VISIBLE_DEVICES'] = ''
 import torch
 import numpy as np
 import pandas as pd
@@ -34,8 +32,8 @@ from GNNmodelsRegression import (
     GaussianNLLLoss
 )
 
-# Set device to CPU
-device = torch.device('cpu')
+# Set device
+device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 print(f"Using device: {device}")
 
 # Reproducibility
@@ -628,7 +626,7 @@ class DomainExpertCasesPipeline(MixedEmbeddingPipeline):
         
         # Step 4: Extract embeddings from best model (using parent class method)
         print(f"\nSTEP 4: Extracting embeddings from best GNN model")
-        embeddings, targets = self.extract_embeddings(best_explainer_model, self.dataset.data_list)
+        embeddings, targets = self.extract_embeddings(best_explainer_model, explainer_data)
         
         # Save embeddings
         os.makedirs(f"{self.save_dir}/embeddings", exist_ok=True)
@@ -1024,7 +1022,7 @@ class DomainExpertCasesPipeline(MixedEmbeddingPipeline):
             
             # 3. Train model with best hyperparameters
             model = self._create_gnn_model_with_params(model_type, best_hidden_dim, num_targets=1)
-            model = super()._train_model_full_with_params(model, best_train_data, target_idx, best_hidden_dim)
+            model = self._train_model_full_with_params(model, best_train_data, target_idx, best_hidden_dim)
             
             # 4. Generate explainer-sparsified graph if this is the KNN phase (after model is trained)
             if phase == "knn":
@@ -1058,7 +1056,6 @@ class DomainExpertCasesPipeline(MixedEmbeddingPipeline):
                 'train_size': len(train_data),
                 'test_size': len(test_data),
                 'predictions': fold_predictions,
-                'targets': [pred['actual'] for pred in fold_predictions],
                 'graph_info': {
                     'k_neighbors': best_k_neighbors,
                     'hidden_dim': best_hidden_dim,
@@ -1112,12 +1109,12 @@ class DomainExpertCasesPipeline(MixedEmbeddingPipeline):
             final_model = self._create_gnn_model_with_params(
                 model_type, best_hyperparams['hidden_dim'], num_targets=1
             )
-            final_model = super()._train_model_full_with_params(
+            final_model = self._train_model_full_with_params(
                 final_model, final_data_list, target_idx, best_hyperparams['hidden_dim']
             )
         else:
             final_model = self.create_gnn_model(model_type, num_targets=1)
-            final_model = super()._train_model_full_with_params(final_model, data_list, target_idx)
+            final_model = self._train_model_full(final_model, data_list, target_idx)
         
         return {
             'model': final_model,
@@ -1144,15 +1141,13 @@ class DomainExpertCasesPipeline(MixedEmbeddingPipeline):
         G = to_networkx(graph_data, to_undirected=True)
         
         # Save graph visualization
-        plt.figure(figsize=(14, 12))
-        # Use better layout with more spacing
-        pos = nx.spring_layout(G, k=3, iterations=100, seed=42)
+        plt.figure(figsize=(12, 10))
+        pos = nx.spring_layout(G, k=1, iterations=50, seed=42)
         
-        # Draw the graph with uniform styling
+        # Draw the graph
         nx.draw_networkx_nodes(G, pos, node_color='lightblue', 
-                              node_size=500, alpha=0.8)
-        # Uniform edge color without positive/negative symbolism
-        nx.draw_networkx_edges(G, pos, alpha=0.6, edge_color='darkgray', width=1.0)
+                              node_size=300, alpha=0.8)
+        nx.draw_networkx_edges(G, pos, alpha=0.5, edge_color='gray', width=0.8)
         
         # Add labels if there aren't too many nodes
         if len(G.nodes()) <= 50:
@@ -1481,7 +1476,7 @@ class DomainExpertCasesPipeline(MixedEmbeddingPipeline):
 
     def _train_model_full_with_params(self, model, train_data, target_idx, hidden_dim=None):
         """Train model with specific parameters"""
-        return super()._train_model_full_with_params(model, train_data, target_idx, hidden_dim)
+        return self._train_model_full(model, train_data, target_idx)
 
     def _train_and_evaluate_once_with_params(self, model, data_list, tr_idx, val_idx, target_idx, hidden_dim=None):
         """Train and evaluate model once with specific parameters"""
@@ -1489,7 +1484,7 @@ class DomainExpertCasesPipeline(MixedEmbeddingPipeline):
         val_data = [data_list[i] for i in val_idx]
         
         # Train the model
-        super()._train_model_full_with_params(model, train_data, target_idx)
+        self._train_model_full(model, train_data, target_idx)
         
         # Evaluate the model
         mse, r2 = self._evaluate_model(model, val_data, target_idx)
@@ -1535,20 +1530,9 @@ class DomainExpertCasesPipeline(MixedEmbeddingPipeline):
                 targets = target.cpu().numpy().flatten()
                 
                 for pred, actual in zip(predictions, targets):
-                    # Handle case where pred might be a tensor or complex type
-                    if hasattr(pred, 'item'):
-                        pred_val = pred.item()
-                    else:
-                        pred_val = pred
-                    
-                    if hasattr(actual, 'item'):
-                        actual_val = actual.item()
-                    else:
-                        actual_val = actual
-                    
                     fold_predictions.append({
-                        'predicted': float(pred_val),
-                        'actual': float(actual_val)
+                        'predicted': float(pred),
+                        'actual': float(actual)
                     })
         
         return fold_predictions
@@ -1963,18 +1947,16 @@ class DomainExpertCasesPipeline(MixedEmbeddingPipeline):
                 # ACE data
                 actual_ace = []
                 pred_ace = []
-                for fold_predictions in results_ace['fold_predictions']:
-                    for prediction in fold_predictions:
-                        actual_ace.append(prediction['actual'])
-                        pred_ace.append(prediction['predicted'])
+                for fold_data in results_ace['fold_predictions']:
+                    actual_ace.extend(fold_data['actual'])
+                    pred_ace.extend(fold_data['predicted'])
                 
                 # H2 data
                 actual_h2 = []
                 pred_h2 = []
-                for fold_predictions in results_h2['fold_predictions']:
-                    for prediction in fold_predictions:
-                        actual_h2.append(prediction['actual'])
-                        pred_h2.append(prediction['predicted'])
+                for fold_data in results_h2['fold_predictions']:
+                    actual_h2.extend(fold_data['actual'])
+                    pred_h2.extend(fold_data['predicted'])
                 
                 # Plot both targets
                 ax.scatter(actual_ace, pred_ace, c=colors[0], alpha=0.7, s=60, label=labels[0], edgecolors='black', linewidth=0.5)
@@ -2655,11 +2637,12 @@ class DomainExpertCasesPipeline(MixedEmbeddingPipeline):
         print(f"Summary: {len(summary_data)} model results across both subsets")
 
 
-def run_all_cases(data_path="../Data/New_data.csv"):
+def run_all_cases(data_path="Data/New_Data.csv"):
     """Run all domain expert cases"""
     print("Running all domain expert cases...")
     
-    cases = ['case1', 'case2', 'case3']
+    # cases = ['case1', 'case2', 'case3', 'case4', 'case5']
+    cases = ['case1']
     all_results = {}
     
     for case in cases:
@@ -2671,9 +2654,9 @@ def run_all_cases(data_path="../Data/New_data.csv"):
             pipeline = DomainExpertCasesPipeline(
                 data_path=data_path,
                 case_type=case,
-                k_neighbors=10,
-                hidden_dim=256,
-                num_epochs=100,
+                k_neighbors=15,
+                hidden_dim=512,
+                num_epochs=200,
                 num_folds=5,
                 save_dir="./domain_expert_results",
                 importance_threshold=0.2,
@@ -2702,7 +2685,7 @@ def run_all_cases(data_path="../Data/New_data.csv"):
     return all_results
 
 
-def test_single_case(data_path="../Data/New_data.csv", case_type='case1'):
+def test_single_case(data_path="Data/New_Data.csv", case_type='case1'):
     """Test a single case with reduced parameters for faster execution"""
     print(f"Testing {case_type} with reduced parameters...")
     
@@ -2711,8 +2694,8 @@ def test_single_case(data_path="../Data/New_data.csv", case_type='case1'):
             data_path=data_path,
             case_type=case_type,
             k_neighbors=10,
-            hidden_dim=32,  # Reduced for testing
-            num_epochs=5,   # Reduced for testing
+            hidden_dim=64,  # Reduced for testing
+            num_epochs=2,   # Reduced for testing
             num_folds=2,    # Reduced for testing
             save_dir=f"./domain_expert_results_test/{case_type}",
             importance_threshold=0.2,
@@ -2727,8 +2710,6 @@ def test_single_case(data_path="../Data/New_data.csv", case_type='case1'):
         
     except Exception as e:
         print(f"Error testing {case_type}: {e}")
-        import traceback
-        traceback.print_exc()
         return None
 
 
@@ -2749,21 +2730,18 @@ def validate_implementation():
     return True
 
 if __name__ == "__main__":
-    results = run_all_cases()
-
-# if __name__ == "__main__":
-#     # Validate implementation first
-#     if validate_implementation():
-#         # Test single case first
-#         print("\nTesting single case with nested CV...")
-#         test_results = test_single_case(case_type='case1')
+    # Validate implementation first
+    if validate_implementation():
+        # Test single case first
+        print("\nTesting single case with nested CV...")
+        test_results = test_single_case(case_type='case1')
         
-#         if test_results:
-#             print("Test successful! Running all cases...")
-#             # Run all cases
-#             results = run_all_cases()
-#             print("Domain expert cases pipeline completed!")
-#         else:
-#             print("Test failed! Check the error above.")
-#     else:
-#         print("Implementation validation failed!")
+        if test_results:
+            print("Test successful! Running all cases...")
+            # Run all cases
+            results = run_all_cases()
+            print("Domain expert cases pipeline completed!")
+        else:
+            print("Test failed! Check the error above.")
+    else:
+        print("Implementation validation failed!") 
