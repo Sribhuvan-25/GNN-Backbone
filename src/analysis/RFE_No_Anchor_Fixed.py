@@ -67,6 +67,11 @@ def create_directories():
     main_dir = 'results_rfe_nested_cv_fixed'
     os.makedirs(main_dir, exist_ok=True)
     
+    # Create main metrics directory for comprehensive results
+    main_metrics_dir = f'{main_dir}/metrics'
+    os.makedirs(main_metrics_dir, exist_ok=True)
+    print(f"Created directory: {main_metrics_dir}")
+    
     # Create case-specific directories
     for case in cases:
         for sub_dir in base_directories:
@@ -761,7 +766,7 @@ if __name__ == "__main__":
     # Create directories first
     create_directories()
     
-    data_path = "../Data/New_Data.csv"
+    data_path = "../../Data/New_Data.csv"
     
     # Define all available model types
     model_types = ['extratrees', 'linearsvr', 'randomforest', 'gradientboosting']
