@@ -135,18 +135,18 @@ def select_features_with_rfe(X_candidate, y, n_features=None, model_type='extrat
         if model_type == 'linearsvr':
             estimator = LinearSVR(random_state=42, max_iter=100000, tol=1e-4, dual=True)
         elif model_type == 'extratrees':
-            estimator = ExtraTreesRegressor(n_estimators=200, random_state=42, n_jobs=-1)
+            estimator = ExtraTreesRegressor(n_estimators=50, random_state=42, n_jobs=-1)
         elif model_type == 'randomforest':
-            estimator = RandomForestRegressor(n_estimators=200, random_state=42, n_jobs=-1, max_depth=10)
+            estimator = RandomForestRegressor(n_estimators=50, random_state=42, n_jobs=-1, max_depth=10)
         elif model_type == 'gradientboosting':
-            estimator = GradientBoostingRegressor(n_estimators=200, random_state=42, max_depth=6)
+            estimator = GradientBoostingRegressor(n_estimators=50, random_state=42, max_depth=6)
         elif model_type == 'xgboost' and XGBOOST_AVAILABLE:
-            estimator = xgb.XGBRegressor(n_estimators=200, max_depth=6, learning_rate=0.1, random_state=42, n_jobs=-1, verbosity=0)
+            estimator = xgb.XGBRegressor(n_estimators=50, max_depth=6, learning_rate=0.1, random_state=42, n_jobs=-1, verbosity=0)
         elif model_type == 'lightgbm' and LIGHTGBM_AVAILABLE:
-            estimator = lgb.LGBMRegressor(n_estimators=200, max_depth=6, learning_rate=0.1, random_state=42, n_jobs=-1, verbosity=-1)
+            estimator = lgb.LGBMRegressor(n_estimators=50, max_depth=6, learning_rate=0.1, random_state=42, n_jobs=-1, verbosity=-1)
         else:
             # Default fallback to ExtraTreesRegressor
-            estimator = ExtraTreesRegressor(n_estimators=200, random_state=42, n_jobs=-1)
+            estimator = ExtraTreesRegressor(n_estimators=50, random_state=42, n_jobs=-1)
             print(f"        RFE Debug: Unknown model_type '{model_type}', using ExtraTreesRegressor as fallback")
         
         # Create RFE object
@@ -220,10 +220,10 @@ def _train_and_evaluate_once(df, y, train_idx, val_idx, n_features, model_type, 
         X_train_scaled = scaler.fit_transform(X_train_selected)
         X_val_scaled = scaler.transform(X_val_selected)
         model = LinearSVR(random_state=42, max_iter=100000, tol=1e-4, dual=True)
-    elif model_type == 'extratrees':
-        # Tree-based models don't need scaling
-        X_train_scaled, X_val_scaled = X_train_selected, X_val_selected
-        model = ExtraTreesRegressor(n_estimators=200, random_state=42, n_jobs=-1)
+        elif model_type == 'extratrees':
+            # Tree-based models don't need scaling
+            X_train_scaled, X_val_scaled = X_train_selected, X_val_selected
+            model = ExtraTreesRegressor(n_estimators=100, random_state=42, n_jobs=-1)
     elif model_type == 'randomforest':
         # Tree-based models don't need scaling
         X_train_scaled, X_val_scaled = X_train_selected, X_val_selected
@@ -496,7 +496,7 @@ def run_model_nested_cv(data_path, target="ACE-km", model_type='extratrees', cas
         elif model_type == 'extratrees':
             # Tree-based models don't need scaling
             X_train_scaled, X_test_scaled = X_train_selected, X_test_selected
-            model = ExtraTreesRegressor(n_estimators=200, random_state=42, n_jobs=-1)
+            model = ExtraTreesRegressor(n_estimators=100, random_state=42, n_jobs=-1)
         elif model_type == 'randomforest':
             # Tree-based models don't need scaling
             X_train_scaled, X_test_scaled = X_train_selected, X_test_selected
