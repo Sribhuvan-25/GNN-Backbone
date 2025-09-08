@@ -63,7 +63,6 @@ class RegressionHead(nn.Module):
         x = self.dropout(x)
         
         # Direct linear mapping to regression targets
-        # NO ACTIVATION - this was the critical bug causing bounded outputs
         prediction = self.regressor(x)
         
         if self.estimate_uncertainty:
@@ -592,25 +591,6 @@ class EnhancedRegressionHead(nn.Module):
 
 
 class KnowledgeGuidedGraphTransformer(nn.Module):
-    """
-    OPTIMIZED Knowledge-Guided Graph Transformer (KG-GT) for Microbial Regression
-    
-    CRITICAL FIXES:
-    - Pipeline-compatible return type: (prediction, embeddings) 
-    - Input validation for robustness
-    - Better weight initialization 
-    - Memory-efficient layer processing
-    - Production-ready error handling
-    
-    State-of-the-art architecture that advances beyond RGGC with:
-    1. Multi-head attention mechanisms (vs simple gating) 
-    2. Edge feature utilization for biological pathways
-    3. Enhanced regression head with uncertainty estimation
-    4. Layer normalization for training stability
-    5. Multi-layer feature processing with residuals
-    
-    Designed for domain expert knowledge-guided cases (Case 1, 2, 3)
-    """
     def __init__(self, hidden_channels=256, output_dim=1, dropout_prob=0.1, 
                  input_channel=1, num_heads=8, num_layers=4, 
                  estimate_uncertainty=True, use_edge_features=True):

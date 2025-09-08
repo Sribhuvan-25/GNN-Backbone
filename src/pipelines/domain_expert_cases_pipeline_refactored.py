@@ -131,7 +131,7 @@ class DomainExpertCasesPipeline(MixedEmbeddingPipeline):
                  importance_threshold=0.2,
                  use_fast_correlation=False,
                  graph_mode='family', family_filter_mode='strict',
-                 use_nested_cv=True):
+                 use_nested_cv=True, use_node_pruning=False):
         """
         Initialize the Domain Expert Cases Pipeline.
         
@@ -154,6 +154,7 @@ class DomainExpertCasesPipeline(MixedEmbeddingPipeline):
             graph_mode (str): Graph construction mode ('family' or 'otu')
             family_filter_mode (str): Family filtering mode ('strict' or 'relaxed')
             use_nested_cv (bool): Enable nested cross-validation for hyperparameter tuning
+            use_node_pruning (bool): Use node-based pruning (True) or edge-only sparsification (False)
         """
         
         # Initialize case implementations to get feature groups and logic
@@ -200,6 +201,10 @@ class DomainExpertCasesPipeline(MixedEmbeddingPipeline):
             graph_mode=graph_mode,
             family_filter_mode=family_filter_mode
         )
+        
+        # Store pruning configuration
+        self.use_node_pruning = use_node_pruning
+        print(f"Explainer pruning mode: {'Node-based pruning' if use_node_pruning else 'Edge-only sparsification'}")
         
         # Define protected nodes for this domain expert case
         self.dataset.protected_nodes = self._get_protected_nodes_for_case(case_type)
@@ -661,7 +666,7 @@ class DomainExpertCasesPipeline(MixedEmbeddingPipeline):
                 # Generate explainer-sparsified graphs
                 print(f"DEBUG: About to call create_explainer_sparsified_graph with model {best_model_info['model_type']}")
                 print(f"DEBUG: Model is GAT: {best_model_info['model_type'] == 'gat'}")
-                print(f"DEBUG: Using UNIFIED pruning method (combines edge + attention for all models)")
+                print(f"DEBUG: Using {'NODE-BASED pruning' if self.use_node_pruning else 'EDGE-ONLY sparsification'}")
                 
                 try:
                     explainer_data = create_explainer_sparsified_graph(
@@ -669,7 +674,7 @@ class DomainExpertCasesPipeline(MixedEmbeddingPipeline):
                         model=model,
                         target_idx=target_idx,
                         importance_threshold=self.importance_threshold,
-                        use_node_pruning=True,  # Uses unified method that combines edge + attention
+                        use_node_pruning=self.use_node_pruning,  # Configurable: node pruning or edge-only sparsification
                         target_name=target_name
                     )
                 except Exception as explainer_error:
