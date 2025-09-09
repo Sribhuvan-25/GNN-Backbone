@@ -1494,24 +1494,21 @@ class DomainExpertCasesPipeline(MixedEmbeddingPipeline):
                 hidden_channels=hidden_dim,
                 output_dim=num_targets,
                 dropout_prob=self.dropout_rate,
-                input_channel=1,
-                estimate_uncertainty=False
+                input_channel=1
             ).to(device)
         elif model_type == 'rggc':
             model = simple_RGGC_plus_regression(
                 hidden_channels=hidden_dim,
                 output_dim=num_targets,
                 dropout_prob=self.dropout_rate,
-                input_channel=1,
-                estimate_uncertainty=False
+                input_channel=1
             ).to(device)
         elif model_type == 'gat':
             model = simple_GAT_regression(
                 hidden_channels=hidden_dim,
                 output_dim=num_targets,
                 dropout_prob=self.dropout_rate,
-                input_channel=1,
-                estimate_uncertainty=False
+                input_channel=1
             ).to(device)
         else:
             raise ValueError(f"Unknown model type: {model_type}")

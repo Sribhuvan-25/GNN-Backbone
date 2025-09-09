@@ -2220,7 +2220,16 @@ from pipeline_explainer import create_explainer_sparsified_graph
 
 # Import the plus models that return embeddings from src directory
 import sys
-sys.path.append('../src/models')
+import os
+src_models_path = os.path.abspath('../src/models')
+if src_models_path not in sys.path:
+    sys.path.insert(0, src_models_path)
+
+# Now import from src models using direct import
+import sys
+sys.path.insert(0, src_models_path)
+
+# Direct import from the src models module
 from GNNmodelsRegression import (
     simple_GCN_res_plus_regression,
     simple_RGGC_plus_regression,
@@ -2228,6 +2237,8 @@ from GNNmodelsRegression import (
     simple_GraphTransformer_regression,
     GaussianNLLLoss
 )
+
+# Classes are now imported directly above
 
 # Set device to CPU
 device = torch.device('cpu')

@@ -7,7 +7,7 @@ from tqdm import tqdm
 
 import torch.nn.functional as F
 from torch.nn import Sequential, Linear, ReLU, GRU, BatchNorm1d
-from torch_geometric.nn import EdgeConv, GCNConv, GraphConv, ResGatedGraphConv, GATConv, GraphTransformerConv
+from torch_geometric.nn import EdgeConv, GCNConv, GraphConv, ResGatedGraphConv, GATConv, TransformerConv
 from torch_geometric.nn import global_mean_pool, global_max_pool, global_add_pool
 from torch_geometric.utils import softmax, scatter
 from torch_geometric.data import InMemoryDataset, Data, DataLoader
@@ -43,8 +43,7 @@ class RegressionHead(nn.Module):
 
 
 class simple_GCN_res_regression(torch.nn.Module):
-    def __init__(self, hidden_channels, output_dim=1, dropout_prob=0.5, input_channel=1, 
-                 estimate_uncertainty=False, activation='identity'):
+    def __init__(self, hidden_channels, output_dim=1, dropout_prob=0.5, input_channel=1, activation='identity'):
         super(simple_GCN_res_regression, self).__init__()
 
         # Initialize GCN layers
@@ -66,9 +65,7 @@ class simple_GCN_res_regression(torch.nn.Module):
         self.regression_head = RegressionHead(
             hidden_dim=hidden_channels,
             output_dim=output_dim,
-            dropout_prob=dropout_prob,
-            estimate_uncertainty=estimate_uncertainty,
-            activation=activation
+            dropout_prob=dropout_prob
         )
 
     def forward(self, X, edge_index, batch):
@@ -97,8 +94,7 @@ class simple_GCN_res_regression(torch.nn.Module):
     
 
 class simple_GCN_res_plus_regression(torch.nn.Module):
-    def __init__(self, hidden_channels, output_dim=1, dropout_prob=0.5, input_channel=1,
-                 estimate_uncertainty=False, activation='identity'):
+    def __init__(self, hidden_channels, output_dim=1, dropout_prob=0.5, input_channel=1, activation='identity'):
         super(simple_GCN_res_plus_regression, self).__init__()
 
         # Initialize GCN layers
@@ -120,9 +116,7 @@ class simple_GCN_res_plus_regression(torch.nn.Module):
         self.regression_head = RegressionHead(
             hidden_dim=hidden_channels,
             output_dim=output_dim,
-            dropout_prob=dropout_prob,
-            estimate_uncertainty=estimate_uncertainty,
-            activation=activation
+            dropout_prob=dropout_prob
         )
 
     def forward(self, X, edge_index, batch):
@@ -155,7 +149,7 @@ class simple_GCN_res_plus_regression(torch.nn.Module):
 
 class simple_RGGC_regression(torch.nn.Module):
     def __init__(self, hidden_channels, output_dim=1, dropout_prob=0.5, input_channel=1,
-                 estimate_uncertainty=False, activation='identity'):
+                 activation='identity'):
         super(simple_RGGC_regression, self).__init__()
 
         self.conv1 = ResGatedGraphConv(input_channel, hidden_channels)
@@ -174,9 +168,7 @@ class simple_RGGC_regression(torch.nn.Module):
         self.regression_head = RegressionHead(
             hidden_dim=hidden_channels,
             output_dim=output_dim,
-            dropout_prob=dropout_prob,
-            estimate_uncertainty=estimate_uncertainty,
-            activation=activation
+            dropout_prob=dropout_prob
         )
 
     def forward(self, X, edge_index, batch):
@@ -203,8 +195,7 @@ class simple_RGGC_regression(torch.nn.Module):
         return x, x_mean  # FIXED: Standardized return signature
     
 class simple_RGGC_plus_regression(torch.nn.Module):
-    def __init__(self, hidden_channels, output_dim=1, dropout_prob=0.5, input_channel=1,
-                 estimate_uncertainty=False, activation='identity'):
+    def __init__(self, hidden_channels, output_dim=1, dropout_prob=0.5, input_channel=1, activation='identity'):
         super(simple_RGGC_plus_regression, self).__init__()
 
         self.conv1 = ResGatedGraphConv(input_channel, hidden_channels)
@@ -223,9 +214,7 @@ class simple_RGGC_plus_regression(torch.nn.Module):
         self.regression_head = RegressionHead(
             hidden_dim=hidden_channels,
             output_dim=output_dim,
-            dropout_prob=dropout_prob,
-            estimate_uncertainty=estimate_uncertainty,
-            activation=activation
+            dropout_prob=dropout_prob
         )
 
     def forward(self, X, edge_index, batch):
@@ -254,7 +243,7 @@ class simple_RGGC_plus_regression(torch.nn.Module):
     
 class simple_GAT_regression(torch.nn.Module): 
     def __init__(self, hidden_channels, output_dim=1, dropout_prob=0.5, input_channel=1, 
-                 num_heads=1, estimate_uncertainty=False, activation='identity'):
+                 num_heads=1, activation='identity'):
         super(simple_GAT_regression, self).__init__()
 
         self.conv1 = GATConv(input_channel, hidden_channels, heads=num_heads)
@@ -274,9 +263,7 @@ class simple_GAT_regression(torch.nn.Module):
         self.regression_head = RegressionHead(
             hidden_dim=hidden_channels * num_heads,
             output_dim=output_dim,
-            dropout_prob=dropout_prob,
-            estimate_uncertainty=estimate_uncertainty,
-            activation=activation
+            dropout_prob=dropout_prob
         )
 
     def forward(self, X, edge_index, batch):
@@ -306,31 +293,29 @@ class simple_GAT_regression(torch.nn.Module):
 
 class simple_GraphTransformer_regression(torch.nn.Module):
     def __init__(self, hidden_channels, output_dim=1, dropout_prob=0.5, input_channel=1,
-                 num_heads=8, num_layers=4, estimate_uncertainty=False, activation='identity'):
+                 num_heads=8, num_layers=4, activation='identity'):
         super(simple_GraphTransformer_regression, self).__init__()
 
-        # Graph Transformer layers - clean and simple like RGGC
-        self.conv1 = GraphTransformerConv(input_channel, hidden_channels, heads=num_heads, dropout=dropout_prob)
-        self.conv2 = GraphTransformerConv(hidden_channels, hidden_channels, heads=num_heads, dropout=dropout_prob)
-        self.conv3 = GraphTransformerConv(hidden_channels, hidden_channels, heads=num_heads, dropout=dropout_prob)
-        self.conv4 = GraphTransformerConv(hidden_channels, hidden_channels, heads=num_heads, dropout=dropout_prob)
-        self.conv5 = GraphTransformerConv(hidden_channels, hidden_channels, heads=num_heads, dropout=dropout_prob)
+        # Graph Transformer layers - handle multi-head attention correctly
+        self.conv1 = TransformerConv(input_channel, hidden_channels, heads=num_heads, dropout=dropout_prob)
+        self.conv2 = TransformerConv(hidden_channels * num_heads, hidden_channels, heads=num_heads, dropout=dropout_prob)
+        self.conv3 = TransformerConv(hidden_channels * num_heads, hidden_channels, heads=num_heads, dropout=dropout_prob)
+        self.conv4 = TransformerConv(hidden_channels * num_heads, hidden_channels, heads=num_heads, dropout=dropout_prob)
+        self.conv5 = TransformerConv(hidden_channels * num_heads, hidden_channels, heads=num_heads, dropout=dropout_prob)
         
-        # Batch normalization layers - same pattern as RGGC
-        self.bn1 = BatchNorm1d(hidden_channels)
-        self.bn2 = BatchNorm1d(hidden_channels)
-        self.bn3 = BatchNorm1d(hidden_channels)
-        self.bn4 = BatchNorm1d(hidden_channels)
-        self.bn5 = BatchNorm1d(hidden_channels)
+        # Batch normalization layers - account for multi-head attention output dimensions
+        self.bn1 = BatchNorm1d(hidden_channels * num_heads)
+        self.bn2 = BatchNorm1d(hidden_channels * num_heads)
+        self.bn3 = BatchNorm1d(hidden_channels * num_heads)
+        self.bn4 = BatchNorm1d(hidden_channels * num_heads)
+        self.bn5 = BatchNorm1d(hidden_channels * num_heads)
         self.dropout = torch.nn.Dropout(dropout_prob)
         
-        # Enhanced regression head - same as RGGC
+        # Enhanced regression head - account for multi-head attention output
         self.regression_head = RegressionHead(
-            hidden_dim=hidden_channels,
+            hidden_dim=hidden_channels * num_heads,
             output_dim=output_dim,
-            dropout_prob=dropout_prob,
-            estimate_uncertainty=estimate_uncertainty,
-            activation=activation
+            dropout_prob=dropout_prob
         )
 
     def forward(self, X, edge_index, batch):
@@ -362,7 +347,6 @@ class simple_GraphTransformer_regression(torch.nn.Module):
 def create_knowledge_guided_graph_transformer(hidden_channels=256, output_dim=1, 
                                             dropout_prob=0.1, input_channel=1,
                                             num_heads=8, num_layers=4,
-                                            estimate_uncertainty=True,
                                             use_edge_features=True):
     """
     Factory function to create clean Graph Transformer model.
@@ -374,7 +358,6 @@ def create_knowledge_guided_graph_transformer(hidden_channels=256, output_dim=1,
         input_channel: Input feature dimension
         num_heads: Number of attention heads
         num_layers: Number of transformer layers (currently fixed at 5 for consistency with RGGC)
-        estimate_uncertainty: Whether to estimate prediction uncertainty
         use_edge_features: Whether to use edge features (kept for compatibility)
         
     Returns:
@@ -386,15 +369,12 @@ def create_knowledge_guided_graph_transformer(hidden_channels=256, output_dim=1,
         dropout_prob=dropout_prob,
         input_channel=input_channel,
         num_heads=num_heads,
-        estimate_uncertainty=estimate_uncertainty
     )
 
 
-# Example loss function for regression with uncertainty
 class GaussianNLLLoss(nn.Module):
     """
     Negative log-likelihood loss for a Gaussian distribution with predicted mean and variance.
-    Useful when the model predicts both the mean and uncertainty of regression targets.
     """
     def __init__(self, eps=1e-6, reduction='mean'):
         super(GaussianNLLLoss, self).__init__()

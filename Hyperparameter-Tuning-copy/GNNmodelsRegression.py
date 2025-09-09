@@ -126,9 +126,7 @@ class simple_GCN_res_regression(torch.nn.Module):
         self.regression_head = RegressionHead(
             hidden_dim=hidden_channels,
             output_dim=output_dim,
-            dropout_prob=dropout_prob,
-            estimate_uncertainty=estimate_uncertainty,
-            activation=activation
+            dropout_prob=dropout_prob
         )
 
     def forward(self, X, edge_index, batch):
@@ -180,9 +178,7 @@ class simple_GCN_res_plus_regression(torch.nn.Module):
         self.regression_head = RegressionHead(
             hidden_dim=hidden_channels,
             output_dim=output_dim,
-            dropout_prob=dropout_prob,
-            estimate_uncertainty=estimate_uncertainty,
-            activation=activation
+            dropout_prob=dropout_prob
         )
 
     def forward(self, X, edge_index, batch):
@@ -234,9 +230,7 @@ class simple_RGGC_regression(torch.nn.Module):
         self.regression_head = RegressionHead(
             hidden_dim=hidden_channels,
             output_dim=output_dim,
-            dropout_prob=dropout_prob,
-            estimate_uncertainty=estimate_uncertainty,
-            activation=activation
+            dropout_prob=dropout_prob
         )
 
     def forward(self, X, edge_index, batch):
@@ -283,9 +277,7 @@ class simple_RGGC_plus_regression(torch.nn.Module):
         self.regression_head = RegressionHead(
             hidden_dim=hidden_channels,
             output_dim=output_dim,
-            dropout_prob=dropout_prob,
-            estimate_uncertainty=estimate_uncertainty,
-            activation=activation
+            dropout_prob=dropout_prob
         )
 
     def forward(self, X, edge_index, batch):
@@ -334,9 +326,7 @@ class simple_GAT_regression(torch.nn.Module):
         self.regression_head = RegressionHead(
             hidden_dim=hidden_channels * num_heads,
             output_dim=output_dim,
-            dropout_prob=dropout_prob,
-            estimate_uncertainty=estimate_uncertainty,
-            activation=activation
+            dropout_prob=dropout_prob
         )
 
     def forward(self, X, edge_index, batch):

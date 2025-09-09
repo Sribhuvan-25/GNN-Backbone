@@ -28,7 +28,16 @@ from dataset_regression import MicrobialGNNDataset
 
 # Import GNN models from src directory
 import sys
-sys.path.append('../src/models')
+import os
+src_models_path = os.path.abspath('../src/models')
+if src_models_path not in sys.path:
+    sys.path.insert(0, src_models_path)
+
+# Now import from src models using direct import
+import sys
+sys.path.insert(0, src_models_path)
+
+# Direct import from the src models module
 from GNNmodelsRegression import (
     simple_GCN_res_plus_regression,
     simple_RGGC_plus_regression,
@@ -1461,32 +1470,28 @@ class DomainExpertCasesPipeline(MixedEmbeddingPipeline):
                 hidden_channels=hidden_dim,
                 output_dim=num_targets,
                 dropout_prob=self.dropout_rate,
-                input_channel=1,
-                estimate_uncertainty=False
+                input_channel=1
             ).to(device)
         elif model_type == 'rggc':
             model = simple_RGGC_plus_regression(
                 hidden_channels=hidden_dim,
                 output_dim=num_targets,
                 dropout_prob=self.dropout_rate,
-                input_channel=1,
-                estimate_uncertainty=False
+                input_channel=1
             ).to(device)
         elif model_type == 'gat':
             model = simple_GAT_regression(
                 hidden_channels=hidden_dim,
                 output_dim=num_targets,
                 dropout_prob=self.dropout_rate,
-                input_channel=1,
-                estimate_uncertainty=False
+                input_channel=1
             ).to(device)
         elif model_type == 'graphtransformer':
             model = simple_GraphTransformer_regression(
                 hidden_channels=hidden_dim,
                 output_dim=num_targets,
                 dropout_prob=self.dropout_rate,
-                input_channel=1,
-                estimate_uncertainty=False
+                input_channel=1
             ).to(device)
         else:
             raise ValueError(f"Unknown model type: {model_type}")
@@ -2763,7 +2768,7 @@ def validate_implementation():
     return True
 
 if __name__ == "__main__":
-    results = run_all_cases()
+    test_results = test_single_case(case_type='case1')
 
 # if __name__ == "__main__":
 #     # Validate implementation first

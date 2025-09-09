@@ -1,6 +1,4 @@
 import os
-# Force CPU usage to avoid MPS device issues
-os.environ['CUDA_VISIBLE_DEVICES'] = ''
 import torch
 import numpy as np
 import pandas as pd
@@ -9,7 +7,7 @@ from matplotlib.patches import Patch
 from torch import nn
 from torch.optim import Adam, lr_scheduler
 from torch_geometric.loader import DataLoader
-from sklearn.model_selection import KFold, GridSearchCV
+from sklearn.model_selection import KFold, GridSearchCV, ParameterGrid
 from sklearn.metrics import mean_squared_error, r2_score, mean_absolute_error
 from sklearn.svm import LinearSVR
 from sklearn.ensemble import ExtraTreesRegressor
@@ -26,6 +24,9 @@ warnings.filterwarnings('ignore')
 from embeddings_pipeline import MixedEmbeddingPipeline
 from dataset_regression import MicrobialGNNDataset
 
+# Import the actual GNNExplainer function
+from pipeline_explainer import create_explainer_sparsified_graph
+
 # Import GNN models
 from GNNmodelsRegression import (
     simple_GCN_res_plus_regression,
@@ -34,8 +35,8 @@ from GNNmodelsRegression import (
     GaussianNLLLoss
 )
 
-# Set device to CPU
-device = torch.device('cpu')
+# Set device - prefer CUDA if available, fallback to CPU
+device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 print(f"Using device: {device}")
 
 # Reproducibility
@@ -304,6 +305,27 @@ class DomainExpertCasesPipeline(MixedEmbeddingPipeline):
         print(f"Number of features: {len(self.dataset.node_feature_names)}")
         print(f"Feature names: {self.dataset.node_feature_names}")
         
+        # CRITICAL FIX: Override the hyperparameter grid to use fixed values
+        # PRODUCTION: Full hyperparameter grid for comprehensive search
+        hidden_dim_options = [512, 128, 64]  # PRODUCTION: Full grid
+        k_neighbors_options = [8, 10, 12]    # PRODUCTION: Full grid
+        
+        # Override the parent's hyperparameter grids
+        self.gnn_hyperparams = {
+            'hidden_dim': hidden_dim_options,
+            'k_neighbors': k_neighbors_options
+        }
+        self.param_grid = list(ParameterGrid(self.gnn_hyperparams))
+        
+        # For explainer phase, only tune hidden_dim
+        self.explainer_hyperparams = {
+            'hidden_dim': hidden_dim_options
+        }
+        
+        print(f"Hyperparameter grid: {len(self.param_grid)} combinations")
+        print(f"GNN hyperparams: {self.gnn_hyperparams}")
+        print(f"Explainer hyperparams: {self.explainer_hyperparams}")
+        
         # Print nested CV status
         if self.use_nested_cv:
             print(f"\nNested CV Hyperparameter Tuning: ENABLED")
@@ -330,42 +352,80 @@ class DomainExpertCasesPipeline(MixedEmbeddingPipeline):
             return self._run_case5()
     
     def _run_case1(self):
-        """Case 1: Use only hydrogenotrophic features for the H2 dataset"""
-        print("Case 1: Using only hydrogenotrophic features for H2 dataset")
-        print("Target: H2-km only")
-        print(f"Anchored features: {self.anchored_features}")
+        """Case 1: Use only hydrogenotrophic features for both ACE-km and H2-km targets"""
+        print("Case 1: Using only hydrogenotrophic features")
+        print("Targets: ACE-km and H2-km")
+        print(f"Anchored features: {len(self.anchored_features)} features")
         
-        # Filter to only H2-km target
-        h2_target_idx = None
-        for i, target in enumerate(self.target_names):
-            if 'H2' in target:
-                h2_target_idx = i
-                break
-        
-        if h2_target_idx is None:
-            raise ValueError("H2-km target not found in dataset")
-        
-        # Run pipeline for H2 target only using parent class methods
-        return self._run_single_target_pipeline(h2_target_idx, "H2-km")
-    
-    def _run_case2(self):
-        """Case 2: Use only acetoclastic features for ACE dataset"""
-        print("Case 2: Using only acetoclastic features for ACE dataset")
-        print("Target: ACE-km only")
-        print(f"Anchored features: {self.anchored_features}")
-        
-        # Filter to only ACE-km target
+        # Find both target indices
         ace_target_idx = None
+        h2_target_idx = None
         for i, target in enumerate(self.target_names):
             if 'ACE' in target:
                 ace_target_idx = i
-                break
+            elif 'H2' in target:
+                h2_target_idx = i
         
         if ace_target_idx is None:
             raise ValueError("ACE-km target not found in dataset")
+        if h2_target_idx is None:
+            raise ValueError("H2-km target not found in dataset")
         
-        # Run pipeline for ACE target only using parent class methods
-        return self._run_single_target_pipeline(ace_target_idx, "ACE-km")
+        # Run pipeline for both targets
+        results = {}
+        
+        print(f"\n{'='*60}")
+        print("CASE 1a: ACE-km with hydrogenotrophic features only")
+        print(f"{'='*60}")
+        results['ace_km'] = self._run_single_target_pipeline(ace_target_idx, "ACE-km")
+        
+        print(f"\n{'='*60}")
+        print("CASE 1b: H2-km with hydrogenotrophic features only")
+        print(f"{'='*60}")
+        results['h2_km'] = self._run_single_target_pipeline(h2_target_idx, "H2-km")
+        
+        # Save combined case 1 results
+        self._save_case1_combined_results(results)
+        
+        return results
+    
+    def _run_case2(self):
+        """Case 2: Use only acetoclastic features for both ACE-km and H2-km targets"""
+        print("Case 2: Using only acetoclastic features")
+        print("Targets: ACE-km and H2-km")
+        print(f"Anchored features: {len(self.anchored_features)} features")
+        
+        # Find both target indices
+        ace_target_idx = None
+        h2_target_idx = None
+        for i, target in enumerate(self.target_names):
+            if 'ACE' in target:
+                ace_target_idx = i
+            elif 'H2' in target:
+                h2_target_idx = i
+        
+        if ace_target_idx is None:
+            raise ValueError("ACE-km target not found in dataset")
+        if h2_target_idx is None:
+            raise ValueError("H2-km target not found in dataset")
+        
+        # Run pipeline for both targets
+        results = {}
+        
+        print(f"\n{'='*60}")
+        print("CASE 2a: ACE-km with acetoclastic features only")
+        print(f"{'='*60}")
+        results['ace_km'] = self._run_single_target_pipeline(ace_target_idx, "ACE-km")
+        
+        print(f"\n{'='*60}")
+        print("CASE 2b: H2-km with acetoclastic features only")
+        print(f"{'='*60}")
+        results['h2_km'] = self._run_single_target_pipeline(h2_target_idx, "H2-km")
+        
+        # Save combined case 2 results
+        self._save_case2_combined_results(results)
+        
+        return results
     
     def _run_case3(self):
         """Case 3: Use all feature groups for both ACE-km and H2-km datasets"""
@@ -1839,6 +1899,106 @@ class DomainExpertCasesPipeline(MixedEmbeddingPipeline):
 
         print(f"    Graph statistics summary saved: {summary_dir}/graph_statistics_summary.csv")
 
+    def _save_case1_combined_results(self, combined_results):
+        """Save combined Case 1 results for both targets"""
+        # Save combined results
+        with open(f"{self.save_dir}/case1_combined_results.pkl", 'wb') as f:
+            pickle.dump(combined_results, f)
+        
+        # Create combined summary
+        summary_data = []
+        
+        for target_name, target_results in combined_results.items():
+            # Add GNN results
+            for phase in ['knn', 'explainer']:
+                if phase in target_results:
+                    for model_type, result in target_results[phase].items():
+                        summary_data.append({
+                            'case': 'case1',
+                            'target': target_name.upper(),
+                            'phase': phase,
+                            'model_type': model_type,
+                            'model_category': 'GNN',
+                            'mse': result['avg_metrics']['mse'],
+                            'rmse': result['avg_metrics']['rmse'],
+                            'r2': result['avg_metrics']['r2'],
+                            'mae': result['avg_metrics']['mae'],
+                            'features_count': len(self.dataset.node_feature_names)
+                        })
+            
+            # Add ML results
+            if 'ml_models' in target_results:
+                for model_type, result in target_results['ml_models'].items():
+                    summary_data.append({
+                        'case': 'case1',
+                        'target': target_name.upper(),
+                        'phase': 'embeddings',
+                        'model_type': model_type,
+                        'model_category': 'ML',
+                        'mse': result['avg_metrics']['mse'],
+                        'rmse': result['avg_metrics']['rmse'],
+                        'r2': result['avg_metrics']['r2'],
+                        'mae': result['avg_metrics']['mae'],
+                        'features_count': len(self.dataset.node_feature_names)
+                    })
+        
+        # Save summary
+        summary_df = pd.DataFrame(summary_data)
+        summary_df.to_csv(f"{self.save_dir}/case1_combined_summary.csv", index=False)
+        
+        print(f"\nCase 1 combined results saved to {self.save_dir}")
+        print(f"Summary: {len(summary_data)} model results across both targets")
+
+    def _save_case2_combined_results(self, combined_results):
+        """Save combined Case 2 results for both targets"""
+        # Save combined results
+        with open(f"{self.save_dir}/case2_combined_results.pkl", 'wb') as f:
+            pickle.dump(combined_results, f)
+        
+        # Create combined summary
+        summary_data = []
+        
+        for target_name, target_results in combined_results.items():
+            # Add GNN results
+            for phase in ['knn', 'explainer']:
+                if phase in target_results:
+                    for model_type, result in target_results[phase].items():
+                        summary_data.append({
+                            'case': 'case2',
+                            'target': target_name.upper(),
+                            'phase': phase,
+                            'model_type': model_type,
+                            'model_category': 'GNN',
+                            'mse': result['avg_metrics']['mse'],
+                            'rmse': result['avg_metrics']['rmse'],
+                            'r2': result['avg_metrics']['r2'],
+                            'mae': result['avg_metrics']['mae'],
+                            'features_count': len(self.dataset.node_feature_names)
+                        })
+            
+            # Add ML results
+            if 'ml_models' in target_results:
+                for model_type, result in target_results['ml_models'].items():
+                    summary_data.append({
+                        'case': 'case2',
+                        'target': target_name.upper(),
+                        'phase': 'embeddings',
+                        'model_type': model_type,
+                        'model_category': 'ML',
+                        'mse': result['avg_metrics']['mse'],
+                        'rmse': result['avg_metrics']['rmse'],
+                        'r2': result['avg_metrics']['r2'],
+                        'mae': result['avg_metrics']['mae'],
+                        'features_count': len(self.dataset.node_feature_names)
+                    })
+        
+        # Save summary
+        summary_df = pd.DataFrame(summary_data)
+        summary_df.to_csv(f"{self.save_dir}/case2_combined_summary.csv", index=False)
+        
+        print(f"\nCase 2 combined results saved to {self.save_dir}")
+        print(f"Summary: {len(summary_data)} model results across both targets")
+
     def _save_case3_combined_results(self, combined_results):
         """Save combined Case 3 results for both targets"""
         # Save combined results
@@ -2654,11 +2814,124 @@ class DomainExpertCasesPipeline(MixedEmbeddingPipeline):
         print(f"\nCase 5 combined results saved to {self.save_dir}")
         print(f"Summary: {len(summary_data)} model results across both subsets")
 
+    def _generate_fold_knn_graph_visualization(self, fold_num, k_neighbors, hidden_dim, fold_dir, target_name):
+        """Generate and save k-NN graph visualization for a specific fold with professional styling"""
+        try:
+            import matplotlib.pyplot as plt
+            import networkx as nx
+            import numpy as np
+            
+            print(f"      Generating REAL k-NN graph visualization (k={k_neighbors}, h={hidden_dim}) for fold {fold_num}...")
+            
+            # Get family names
+            family_names = self.dataset.node_feature_names
+            
+            # Get the ACTUAL KNN graph structure from the dataset
+            sample_data = self.dataset.data_list[0]  # All samples should have same graph structure
+            actual_edge_index = sample_data.edge_index.cpu().numpy()
+            
+            print(f"        Using ACTUAL KNN graph with {actual_edge_index.shape[1]} edges from dataset")
+            
+            # Create NetworkX graph from ACTUAL edge structure
+            G = nx.Graph()
+            for i, family in enumerate(family_names):
+                G.add_node(i, name=family)
+            
+            # Add edges from the ACTUAL KNN graph
+            edge_weights = sample_data.edge_weight.cpu().numpy() if hasattr(sample_data, 'edge_weight') and sample_data.edge_weight is not None else None
+            
+            edge_labels = {}  # Dictionary to store edge labels (weights)
+            
+            for i in range(actual_edge_index.shape[1]):
+                src, dst = actual_edge_index[0, i], actual_edge_index[1, i]
+                if src != dst:  # Skip self-loops for visualization
+                    weight = edge_weights[i] if edge_weights is not None else 1.0
+                    G.add_edge(src, dst, weight=weight)
+                    # Store edge weight as label (rounded to 2 decimal places)
+                    edge_labels[(src, dst)] = f'{weight:.2f}'
+            
+            # Dynamic color assignment with muted colors
+            colors = []
+            vibrant_colors = [
+                '#8B4513', '#2F4F4F', '#556B2F', '#800080', '#B8860B', 
+                '#4682B4', '#D2691E', '#8FBC8F', '#708090', '#CD853F',
+                '#5F9EA0', '#BC8F8F', '#9ACD32', '#6495ED', '#DEB887',
+                '#F4A460', '#696969', '#778899', '#BDB76B', '#87CEEB'
+            ]
+            
+            for i, family in enumerate(family_names):
+                color_idx = i % len(vibrant_colors)
+                colors.append(vibrant_colors[color_idx])
+            
+            # Create the visualization
+            fig, ax = plt.subplots(1, 1, figsize=(24, 18))
+            
+            # Use spring layout for uniform node spacing with better separation
+            pos = nx.spring_layout(G, k=5, iterations=200, seed=42)
+            
+            # Draw nodes with CONSISTENT size throughout
+            nx.draw_networkx_nodes(G, pos, 
+                                  node_color=colors,
+                                  node_size=1500,  # Consistent size for all nodes
+                                  alpha=0.8,
+                                  edgecolors='black',  # Add border for better definition
+                                  linewidths=1,
+                                  ax=ax)
+            
+            # Draw ALL edges with uniform style (no positive/negative separation)
+            nx.draw_networkx_edges(G, pos, 
+                                 edge_color='gray',  # Uniform gray color for all edges
+                                 alpha=0.6,
+                                 width=1.5,
+                                 ax=ax)
+            
+            # Draw node labels with better visibility
+            labels = {i: name.split('_')[-1][:12] for i, name in enumerate(family_names)}  # Longer labels for clarity
+            nx.draw_networkx_labels(G, pos, labels, font_size=10, font_weight='bold', ax=ax)
+            
+            # Draw edge labels (weights) - THIS IS THE KEY FEATURE YOU REQUESTED
+            nx.draw_networkx_edge_labels(G, pos, edge_labels, 
+                                       font_size=8, 
+                                       font_color='red',
+                                       ax=ax)
+            
+            # Add title with cleaner format
+            ax.set_title(f'k-NN Graph (k={k_neighbors})\\n'
+                        f'{len(G.nodes())} nodes, {len(G.edges())} edges\\n'
+                        f'Fold {fold_num} - Hidden Dim: {hidden_dim}', 
+                        fontsize=18, fontweight='bold', pad=20)
+            ax.axis('off')
+            
+            plt.tight_layout()
+            
+            # Save with hyperparameter info in filename
+            plt.savefig(f"{fold_dir}/knn_graph_k{k_neighbors}_h{hidden_dim}_fold{fold_num}.png", 
+                       dpi=300, bbox_inches='tight')
+            plt.close()
+            
+            print(f"        k-NN graph saved: {len(G.nodes())} nodes, {len(G.edges())} edges with edge weights displayed, k={k_neighbors}, h={hidden_dim}")
+                  
+        except Exception as e:
+            print(f"        Error generating k-NN visualization for fold {fold_num}: {str(e)}")
 
-def run_all_cases(data_path="../Data/New_data.csv"):
+    def _adjust_color_brightness(self, hex_color, factor):
+        """Adjust the brightness of a hex color"""
+        # Convert hex to RGB
+        hex_color = hex_color.lstrip('#')
+        rgb = tuple(int(hex_color[i:i+2], 16) for i in (0, 2, 4))
+        
+        # Adjust brightness
+        rgb = tuple(min(255, max(0, int(c * factor))) for c in rgb)
+        
+        # Convert back to hex
+        return f"#{rgb[0]:02x}{rgb[1]:02x}{rgb[2]:02x}"
+
+
+def run_all_cases(data_path="Data/New_Data.csv"):
     """Run all domain expert cases"""
     print("Running all domain expert cases...")
     
+    # cases = ['case1', 'case2', 'case3', 'case4', 'case5']
     cases = ['case1', 'case2', 'case3']
     all_results = {}
     
@@ -2671,15 +2944,15 @@ def run_all_cases(data_path="../Data/New_data.csv"):
             pipeline = DomainExpertCasesPipeline(
                 data_path=data_path,
                 case_type=case,
-                k_neighbors=10,
-                hidden_dim=256,
-                num_epochs=100,
-                num_folds=5,
+                k_neighbors=10,        # ORIGINAL: 15 neighbors
+                hidden_dim=64,         # ORIGINAL: 64 (overridden by grid search)
+                num_epochs=200,        # ORIGINAL: 200 epochs
+                num_folds=5,           # ORIGINAL: 5 folds
                 save_dir="./domain_expert_results",
                 importance_threshold=0.2,
                 use_fast_correlation=False,
                 family_filter_mode='strict',
-                use_nested_cv=True  # Enable nested CV
+                use_nested_cv=True
             )
             
             case_results = pipeline.run_case_specific_pipeline()
@@ -2749,21 +3022,16 @@ def validate_implementation():
     return True
 
 if __name__ == "__main__":
-    results = run_all_cases()
-
-# if __name__ == "__main__":
-#     # Validate implementation first
-#     if validate_implementation():
-#         # Test single case first
-#         print("\nTesting single case with nested CV...")
-#         test_results = test_single_case(case_type='case1')
-        
-#         if test_results:
-#             print("Test successful! Running all cases...")
-#             # Run all cases
-#             results = run_all_cases()
-#             print("Domain expert cases pipeline completed!")
-#         else:
-#             print("Test failed! Check the error above.")
-#     else:
-#         print("Implementation validation failed!")
+    print("Starting Domain Expert Cases Pipeline...")
+    print("=" * 60)
+    
+    # Run all domain expert cases
+    try:
+        results = run_all_cases()
+        print("\n" + "=" * 60)
+        print("Domain Expert Cases Pipeline completed successfully!")
+        print("=" * 60)
+    except Exception as e:
+        print(f"\nError running domain expert cases: {e}")
+        import traceback
+        traceback.print_exc()
