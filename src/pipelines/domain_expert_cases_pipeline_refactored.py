@@ -942,7 +942,6 @@ class DomainExpertCasesPipeline(MixedEmbeddingPipeline):
                                         input_channel=1,
                                         num_heads=8,
                                         num_layers=4,
-                                        estimate_uncertainty=True,
                                         use_edge_features=True
                                     )
                                 else:

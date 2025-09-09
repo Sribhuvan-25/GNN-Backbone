@@ -43,19 +43,19 @@ def run_all_cases(data_path="./Data/New_data.csv", save_dir="./domain_expert_res
         print(f"{'='*60}")
         
         try:
-            # Initialize pipeline with enhanced parameters
+            # Initialize pipeline with optimized parameters for faster execution
             pipeline = DomainExpertCasesPipeline(
                 data_path=data_path,
                 case_type=case,
-                k_neighbors=12,           # Balanced connectivity for attention mechanisms
-                hidden_dim=256,           # Sufficient for GAT attention layers
-                num_epochs=200,           # Sufficient training epochs
+                k_neighbors=8,            # Reduced for faster graph construction
+                hidden_dim=64,            # Reduced for faster training
+                num_epochs=50,            # Reduced for faster training
                 num_folds=5,              # 5-fold cross-validation
                 save_dir=f"{save_dir}/{case}_results",
-                importance_threshold=0.2, # Node pruning threshold
-                use_fast_correlation=False,    # Use full Mantel test for biological relevance
-                family_filter_mode='strict',   # Strict filtering for quality features
-                use_nested_cv=True        # Enable hyperparameter tuning
+                importance_threshold=0.3, # Node pruning threshold
+                use_fast_correlation=True,     # Use fast correlation for speed
+                family_filter_mode='relaxed',  # Relaxed filtering for speed
+                use_nested_cv=False       # Disable nested CV for speed
             )
             
             # Ensure GAT is included for attention-based pruning
@@ -141,14 +141,14 @@ def main():
             pipeline = DomainExpertCasesPipeline(
                 data_path=args.data_path,
                 case_type=args.case,
-                k_neighbors=5,
-                hidden_dim=32,
-                num_epochs=2,
-                num_folds=2,
+                k_neighbors=10,
+                hidden_dim=256,
+                num_epochs=100,
+                num_folds=5,
                 save_dir=f"{args.save_dir}/{args.case}_results",
-                importance_threshold=0.2,
+                importance_threshold=0.3,
                 use_fast_correlation=False,
-                family_filter_mode='strict'
+                family_filter_mode='relaxed'
             )
             
             results = pipeline.run_case_specific_pipeline()

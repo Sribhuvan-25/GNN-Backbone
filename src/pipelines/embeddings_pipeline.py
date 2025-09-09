@@ -199,16 +199,14 @@ class MixedEmbeddingPipeline:
                 hidden_channels=self.hidden_dim,
                 output_dim=num_targets,
                 dropout_prob=self.dropout_rate,
-                input_channel=1,
-                estimate_uncertainty=False
+                input_channel=1
             ).to(device)
         elif model_type == 'rggc':
             model = simple_RGGC_plus_regression(
                 hidden_channels=self.hidden_dim,
                 output_dim=num_targets,
                 dropout_prob=self.dropout_rate,
-                input_channel=1,
-                estimate_uncertainty=False
+                input_channel=1
             ).to(device)
         elif model_type == 'gat':
             # Enhanced GAT with more heads and better architecture
@@ -217,8 +215,7 @@ class MixedEmbeddingPipeline:
                 output_dim=num_targets,
                 dropout_prob=self.dropout_rate,
                 input_channel=1,
-                num_heads=8,  # Increased from 4 to 8 attention heads
-                estimate_uncertainty=False
+                num_heads=8  # Increased from 4 to 8 attention heads
             ).to(device)
         elif model_type == 'kg_gt' or model_type == 'kggt':
             from models.GNNmodelsRegression import create_knowledge_guided_graph_transformer
@@ -229,7 +226,6 @@ class MixedEmbeddingPipeline:
                 input_channel=1,
                 num_heads=8,
                 num_layers=4,
-                estimate_uncertainty=False,  # Match other models for consistency
                 use_edge_features=True
             ).to(device)
         # Add DGCNN option for dynamic graph construction
@@ -242,8 +238,7 @@ class MixedEmbeddingPipeline:
                     dropout_prob=self.dropout_rate,
                     input_channel=1,
                     k=min(self.k_neighbors, 10),  # Adaptive k-neighbors
-                    num_layers=4,
-                    estimate_uncertainty=False
+                    num_layers=4
                 ).to(device)
             except ImportError:
                 print("Enhanced DGCNN not available, falling back to GAT")
@@ -252,8 +247,7 @@ class MixedEmbeddingPipeline:
                     output_dim=num_targets,
                     dropout_prob=self.dropout_rate,
                     input_channel=1,
-                    num_heads=8,
-                    estimate_uncertainty=False
+                    num_heads=8
                 ).to(device)
         else:
             raise ValueError(f"Unknown model type: {model_type}")
@@ -2495,16 +2489,14 @@ class MixedEmbeddingPipeline:
                 hidden_channels=hidden_dim,
                 output_dim=num_targets,
                 dropout_prob=self.dropout_rate,
-                input_channel=1,
-                estimate_uncertainty=False
+                input_channel=1
             ).to(device)
         elif model_type == 'rggc':
             model = simple_RGGC_plus_regression(
                 hidden_channels=hidden_dim,
                 output_dim=num_targets,
                 dropout_prob=self.dropout_rate,
-                input_channel=1,
-                estimate_uncertainty=False
+                input_channel=1
             ).to(device)
         elif model_type == 'gat':
             model = simple_GAT_regression(
@@ -2512,8 +2504,7 @@ class MixedEmbeddingPipeline:
                 output_dim=num_targets,
                 dropout_prob=self.dropout_rate,
                 input_channel=1,
-                num_heads=8,
-                estimate_uncertainty=False
+                num_heads=8
             ).to(device)
         elif model_type == 'kg_gt' or model_type == 'kggt':
             from models.GNNmodelsRegression import create_knowledge_guided_graph_transformer
@@ -2524,7 +2515,6 @@ class MixedEmbeddingPipeline:
                 input_channel=1,
                 num_heads=8,
                 num_layers=4,
-                estimate_uncertainty=False,
                 use_edge_features=True
             ).to(device)
         else:
@@ -2541,6 +2531,12 @@ class MixedEmbeddingPipeline:
         # Ensure model is on the correct device and in clean state
         model = model.to(device)
         model.train()
+        
+        # Critical: Reinitialize model to avoid state loading issues
+        # This prevents dimension mismatches from previous model states
+        for layer in model.modules():
+            if hasattr(layer, 'reset_parameters'):
+                layer.reset_parameters()
         
         # Critical: Ensure no leftover gradients from previous runs
         for param in model.parameters():
