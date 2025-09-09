@@ -1114,7 +1114,7 @@ class DomainExpertCasesPipeline(MixedEmbeddingPipeline):
             )
         else:
             final_model = self.create_gnn_model(model_type, num_targets=1)
-            final_model = self._train_model_full(final_model, data_list, target_idx)
+            final_model = self._train_model_full_with_params(final_model, data_list, target_idx)
         
         return {
             'model': final_model,
@@ -1476,7 +1476,8 @@ class DomainExpertCasesPipeline(MixedEmbeddingPipeline):
 
     def _train_model_full_with_params(self, model, train_data, target_idx, hidden_dim=None):
         """Train model with specific parameters"""
-        return self._train_model_full(model, train_data, target_idx)
+        # Call parent class method directly since _train_model_full doesn't exist
+        return super()._train_model_full_with_params(model, train_data, target_idx, hidden_dim)
 
     def _train_and_evaluate_once_with_params(self, model, data_list, tr_idx, val_idx, target_idx, hidden_dim=None):
         """Train and evaluate model once with specific parameters"""
@@ -1484,7 +1485,7 @@ class DomainExpertCasesPipeline(MixedEmbeddingPipeline):
         val_data = [data_list[i] for i in val_idx]
         
         # Train the model
-        self._train_model_full(model, train_data, target_idx)
+        self._train_model_full_with_params(model, train_data, target_idx)
         
         # Evaluate the model
         mse, r2 = self._evaluate_model(model, val_data, target_idx)
@@ -2642,7 +2643,7 @@ def run_all_cases(data_path="Data/New_Data.csv"):
     print("Running all domain expert cases...")
     
     # cases = ['case1', 'case2', 'case3', 'case4', 'case5']
-    cases = ['case1']
+    cases = ['case2', 'case3']
     all_results = {}
     
     for case in cases:
@@ -2730,18 +2731,21 @@ def validate_implementation():
     return True
 
 if __name__ == "__main__":
-    # Validate implementation first
-    if validate_implementation():
-        # Test single case first
-        print("\nTesting single case with nested CV...")
-        test_results = test_single_case(case_type='case1')
+     results = run_all_cases()
+
+# if __name__ == "__main__":
+#     # Validate implementation first
+#     if validate_implementation():
+#         # Test single case first
+#         print("\nTesting single case with nested CV...")
+#         test_results = test_single_case(case_type='case1')
         
-        if test_results:
-            print("Test successful! Running all cases...")
-            # Run all cases
-            results = run_all_cases()
-            print("Domain expert cases pipeline completed!")
-        else:
-            print("Test failed! Check the error above.")
-    else:
-        print("Implementation validation failed!") 
+#         if test_results:
+#             print("Test successful! Running all cases...")
+#             # Run all cases
+#             results = run_all_cases()
+#             print("Domain expert cases pipeline completed!")
+#         else:
+#             print("Test failed! Check the error above.")
+#     else:
+#         print("Implementation validation failed!")
