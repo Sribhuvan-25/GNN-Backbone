@@ -308,7 +308,7 @@ class DomainExpertCasesPipeline(MixedEmbeddingPipeline):
         # CRITICAL FIX: Override the hyperparameter grid to use fixed values
         # PRODUCTION: Full hyperparameter grid for comprehensive search
         hidden_dim_options = [512, 128, 64]  # PRODUCTION: Full grid
-        k_neighbors_options = [8, 10, 12]    # PRODUCTION: Full grid
+        k_neighbors_options = [8, 10, 12, 15]    # PRODUCTION: Full grid including 15
         
         # Override the parent's hyperparameter grids
         self.gnn_hyperparams = {
@@ -2864,35 +2864,43 @@ class DomainExpertCasesPipeline(MixedEmbeddingPipeline):
                 colors.append(vibrant_colors[color_idx])
             
             # Create the visualization
-            fig, ax = plt.subplots(1, 1, figsize=(24, 18))
+            fig, ax = plt.subplots(1, 1, figsize=(30, 24))  # Much larger figure
             
-            # Use spring layout for uniform node spacing with better separation
-            pos = nx.spring_layout(G, k=5, iterations=200, seed=42)
+            # Use circular layout for better spacing and avoid overlaps
+            pos = nx.circular_layout(G, scale=2)  # Circular layout with larger scale
             
-            # Draw nodes with CONSISTENT size throughout
+            # Alternative: try spring layout with much more spacing
+            # pos = nx.spring_layout(G, k=8, iterations=300, seed=42)  # More spacing
+            
+            # Draw nodes with smaller, consistent size
             nx.draw_networkx_nodes(G, pos, 
                                   node_color=colors,
-                                  node_size=1500,  # Consistent size for all nodes
-                                  alpha=0.8,
-                                  edgecolors='black',  # Add border for better definition
-                                  linewidths=1,
+                                  node_size=800,  # Smaller nodes to reduce overlap
+                                  alpha=0.9,
+                                  edgecolors='black',
+                                  linewidths=2,
                                   ax=ax)
             
-            # Draw ALL edges with uniform style (no positive/negative separation)
+            # Draw edges with lighter, thinner style
             nx.draw_networkx_edges(G, pos, 
-                                 edge_color='gray',  # Uniform gray color for all edges
-                                 alpha=0.6,
-                                 width=1.5,
+                                 edge_color='lightgray',  # Lighter gray to reduce visual clutter
+                                 alpha=0.4,
+                                 width=1,  # Thinner edges
                                  ax=ax)
             
-            # Draw node labels with better visibility
-            labels = {i: name.split('_')[-1][:12] for i, name in enumerate(family_names)}  # Longer labels for clarity
-            nx.draw_networkx_labels(G, pos, labels, font_size=10, font_weight='bold', ax=ax)
+            # Draw node labels with better positioning (slightly offset)
+            labels = {i: name.split('_')[-1][:8] for i, name in enumerate(family_names)}  # Shorter labels
+            # Offset label positions to avoid node overlap
+            label_pos = {node: (pos[node][0], pos[node][1] + 0.15) for node in pos}
+            nx.draw_networkx_labels(G, label_pos, labels, font_size=9, font_weight='bold', ax=ax)
             
-            # Draw edge labels (weights) - THIS IS THE KEY FEATURE YOU REQUESTED
-            nx.draw_networkx_edge_labels(G, pos, edge_labels, 
-                                       font_size=8, 
-                                       font_color='red',
+            # Draw edge labels with strategic positioning to minimize overlap
+            # Only show edge labels for edges with weights > threshold to reduce clutter
+            filtered_edge_labels = {k: v for k, v in edge_labels.items() if float(v) > 0.5}
+            nx.draw_networkx_edge_labels(G, pos, filtered_edge_labels, 
+                                       font_size=6,  # Smaller font
+                                       font_color='darkred',
+                                       bbox=dict(boxstyle='round,pad=0.1', facecolor='white', alpha=0.7),
                                        ax=ax)
             
             # Add title with cleaner format
@@ -2931,8 +2939,7 @@ def run_all_cases(data_path="Data/New_Data.csv"):
     """Run all domain expert cases"""
     print("Running all domain expert cases...")
     
-    # cases = ['case1', 'case2', 'case3', 'case4', 'case5']
-    cases = ['case1', 'case2', 'case3']
+    cases = ['case1', 'case2', 'case3']  # Run cases 1, 2, 3 with both targets
     all_results = {}
     
     for case in cases:
@@ -2944,7 +2951,7 @@ def run_all_cases(data_path="Data/New_Data.csv"):
             pipeline = DomainExpertCasesPipeline(
                 data_path=data_path,
                 case_type=case,
-                k_neighbors=10,        # ORIGINAL: 15 neighbors
+                k_neighbors=15,        # ORIGINAL: 15 neighbors
                 hidden_dim=64,         # ORIGINAL: 64 (overridden by grid search)
                 num_epochs=200,        # ORIGINAL: 200 epochs
                 num_folds=5,           # ORIGINAL: 5 folds

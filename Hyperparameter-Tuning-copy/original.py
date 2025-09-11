@@ -328,42 +328,74 @@ class DomainExpertCasesPipeline(MixedEmbeddingPipeline):
             return self._run_case5()
     
     def _run_case1(self):
-        """Case 1: Use only hydrogenotrophic features for the H2 dataset"""
-        print("Case 1: Using only hydrogenotrophic features for H2 dataset")
-        print("Target: H2-km only")
-        print(f"Anchored features: {self.anchored_features}")
+        """Case 1: Use only hydrogenotrophic features for both ACE-km and H2-km targets"""
+        print("Case 1: Using only hydrogenotrophic features")
+        print("Targets: ACE-km and H2-km")
+        print(f"Anchored features: {len(self.anchored_features)} features")
         
-        # Filter to only H2-km target
-        h2_target_idx = None
-        for i, target in enumerate(self.target_names):
-            if 'H2' in target:
-                h2_target_idx = i
-                break
-        
-        if h2_target_idx is None:
-            raise ValueError("H2-km target not found in dataset")
-        
-        # Run pipeline for H2 target only using parent class methods
-        return self._run_single_target_pipeline(h2_target_idx, "H2-km")
-    
-    def _run_case2(self):
-        """Case 2: Use only acetoclastic features for ACE dataset"""
-        print("Case 2: Using only acetoclastic features for ACE dataset")
-        print("Target: ACE-km only")
-        print(f"Anchored features: {self.anchored_features}")
-        
-        # Filter to only ACE-km target
+        # Find both target indices
         ace_target_idx = None
+        h2_target_idx = None
         for i, target in enumerate(self.target_names):
             if 'ACE' in target:
                 ace_target_idx = i
-                break
+            elif 'H2' in target:
+                h2_target_idx = i
         
         if ace_target_idx is None:
             raise ValueError("ACE-km target not found in dataset")
+        if h2_target_idx is None:
+            raise ValueError("H2-km target not found in dataset")
         
-        # Run pipeline for ACE target only using parent class methods
-        return self._run_single_target_pipeline(ace_target_idx, "ACE-km")
+        # Run pipeline for both targets
+        results = {}
+        
+        print(f"\n{'='*60}")
+        print("CASE 1a: ACE-km with hydrogenotrophic features only")
+        print(f"{'='*60}")
+        results['ace_km'] = self._run_single_target_pipeline(ace_target_idx, "ACE-km")
+        
+        print(f"\n{'='*60}")
+        print("CASE 1b: H2-km with hydrogenotrophic features only")
+        print(f"{'='*60}")
+        results['h2_km'] = self._run_single_target_pipeline(h2_target_idx, "H2-km")
+        
+        return results
+    
+    def _run_case2(self):
+        """Case 2: Use only acetoclastic features for both ACE-km and H2-km targets"""
+        print("Case 2: Using only acetoclastic features")
+        print("Targets: ACE-km and H2-km")
+        print(f"Anchored features: {len(self.anchored_features)} features")
+        
+        # Find both target indices
+        ace_target_idx = None
+        h2_target_idx = None
+        for i, target in enumerate(self.target_names):
+            if 'ACE' in target:
+                ace_target_idx = i
+            elif 'H2' in target:
+                h2_target_idx = i
+        
+        if ace_target_idx is None:
+            raise ValueError("ACE-km target not found in dataset")
+        if h2_target_idx is None:
+            raise ValueError("H2-km target not found in dataset")
+        
+        # Run pipeline for both targets
+        results = {}
+        
+        print(f"\n{'='*60}")
+        print("CASE 2a: ACE-km with acetoclastic features only")
+        print(f"{'='*60}")
+        results['ace_km'] = self._run_single_target_pipeline(ace_target_idx, "ACE-km")
+        
+        print(f"\n{'='*60}")
+        print("CASE 2b: H2-km with acetoclastic features only")
+        print(f"{'='*60}")
+        results['h2_km'] = self._run_single_target_pipeline(h2_target_idx, "H2-km")
+        
+        return results
     
     def _run_case3(self):
         """Case 3: Use all feature groups for both ACE-km and H2-km datasets"""
@@ -2643,7 +2675,7 @@ def run_all_cases(data_path="Data/New_Data.csv"):
     print("Running all domain expert cases...")
     
     # cases = ['case1', 'case2', 'case3', 'case4', 'case5']
-    cases = ['case2', 'case3']
+    cases = ['case3']
     all_results = {}
     
     for case in cases:
