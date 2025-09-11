@@ -328,42 +328,74 @@ class DomainExpertCasesPipeline(MixedEmbeddingPipeline):
             return self._run_case5()
     
     def _run_case1(self):
-        """Case 1: Use only hydrogenotrophic features for the H2 dataset"""
-        print("Case 1: Using only hydrogenotrophic features for H2 dataset")
-        print("Target: H2-km only")
-        print(f"Anchored features: {self.anchored_features}")
+        """Case 1: Use only hydrogenotrophic features for both ACE-km and H2-km targets"""
+        print("Case 1: Using only hydrogenotrophic features")
+        print("Targets: ACE-km and H2-km")
+        print(f"Anchored features: {len(self.anchored_features)} features")
         
-        # Filter to only H2-km target
-        h2_target_idx = None
-        for i, target in enumerate(self.target_names):
-            if 'H2' in target:
-                h2_target_idx = i
-                break
-        
-        if h2_target_idx is None:
-            raise ValueError("H2-km target not found in dataset")
-        
-        # Run pipeline for H2 target only using parent class methods
-        return self._run_single_target_pipeline(h2_target_idx, "H2-km")
-    
-    def _run_case2(self):
-        """Case 2: Use only acetoclastic features for ACE dataset"""
-        print("Case 2: Using only acetoclastic features for ACE dataset")
-        print("Target: ACE-km only")
-        print(f"Anchored features: {self.anchored_features}")
-        
-        # Filter to only ACE-km target
+        # Find both target indices
         ace_target_idx = None
+        h2_target_idx = None
         for i, target in enumerate(self.target_names):
             if 'ACE' in target:
                 ace_target_idx = i
-                break
+            elif 'H2' in target:
+                h2_target_idx = i
         
         if ace_target_idx is None:
             raise ValueError("ACE-km target not found in dataset")
+        if h2_target_idx is None:
+            raise ValueError("H2-km target not found in dataset")
         
-        # Run pipeline for ACE target only using parent class methods
-        return self._run_single_target_pipeline(ace_target_idx, "ACE-km")
+        # Run pipeline for both targets
+        results = {}
+        
+        print(f"\n{'='*60}")
+        print("CASE 1a: ACE-km with hydrogenotrophic features only")
+        print(f"{'='*60}")
+        results['ace_km'] = self._run_single_target_pipeline(ace_target_idx, "ACE-km")
+        
+        print(f"\n{'='*60}")
+        print("CASE 1b: H2-km with hydrogenotrophic features only")
+        print(f"{'='*60}")
+        results['h2_km'] = self._run_single_target_pipeline(h2_target_idx, "H2-km")
+        
+        return results
+    
+    def _run_case2(self):
+        """Case 2: Use only acetoclastic features for both ACE-km and H2-km targets"""
+        print("Case 2: Using only acetoclastic features")
+        print("Targets: ACE-km and H2-km")
+        print(f"Anchored features: {len(self.anchored_features)} features")
+        
+        # Find both target indices
+        ace_target_idx = None
+        h2_target_idx = None
+        for i, target in enumerate(self.target_names):
+            if 'ACE' in target:
+                ace_target_idx = i
+            elif 'H2' in target:
+                h2_target_idx = i
+        
+        if ace_target_idx is None:
+            raise ValueError("ACE-km target not found in dataset")
+        if h2_target_idx is None:
+            raise ValueError("H2-km target not found in dataset")
+        
+        # Run pipeline for both targets
+        results = {}
+        
+        print(f"\n{'='*60}")
+        print("CASE 2a: ACE-km with acetoclastic features only")
+        print(f"{'='*60}")
+        results['ace_km'] = self._run_single_target_pipeline(ace_target_idx, "ACE-km")
+        
+        print(f"\n{'='*60}")
+        print("CASE 2b: H2-km with acetoclastic features only")
+        print(f"{'='*60}")
+        results['h2_km'] = self._run_single_target_pipeline(h2_target_idx, "H2-km")
+        
+        return results
     
     def _run_case3(self):
         """Case 3: Use all feature groups for both ACE-km and H2-km datasets"""
@@ -1114,7 +1146,7 @@ class DomainExpertCasesPipeline(MixedEmbeddingPipeline):
             )
         else:
             final_model = self.create_gnn_model(model_type, num_targets=1)
-            final_model = self._train_model_full(final_model, data_list, target_idx)
+            final_model = self._train_model_full_with_params(final_model, data_list, target_idx)
         
         return {
             'model': final_model,
@@ -1476,7 +1508,8 @@ class DomainExpertCasesPipeline(MixedEmbeddingPipeline):
 
     def _train_model_full_with_params(self, model, train_data, target_idx, hidden_dim=None):
         """Train model with specific parameters"""
-        return self._train_model_full(model, train_data, target_idx)
+        # Call parent class method directly since _train_model_full doesn't exist
+        return super()._train_model_full_with_params(model, train_data, target_idx, hidden_dim)
 
     def _train_and_evaluate_once_with_params(self, model, data_list, tr_idx, val_idx, target_idx, hidden_dim=None):
         """Train and evaluate model once with specific parameters"""
@@ -1484,7 +1517,7 @@ class DomainExpertCasesPipeline(MixedEmbeddingPipeline):
         val_data = [data_list[i] for i in val_idx]
         
         # Train the model
-        self._train_model_full(model, train_data, target_idx)
+        self._train_model_full_with_params(model, train_data, target_idx)
         
         # Evaluate the model
         mse, r2 = self._evaluate_model(model, val_data, target_idx)
@@ -2642,7 +2675,7 @@ def run_all_cases(data_path="Data/New_Data.csv"):
     print("Running all domain expert cases...")
     
     # cases = ['case1', 'case2', 'case3', 'case4', 'case5']
-    cases = ['case1']
+    cases = ['case3']
     all_results = {}
     
     for case in cases:
@@ -2730,18 +2763,21 @@ def validate_implementation():
     return True
 
 if __name__ == "__main__":
-    # Validate implementation first
-    if validate_implementation():
-        # Test single case first
-        print("\nTesting single case with nested CV...")
-        test_results = test_single_case(case_type='case1')
+     results = run_all_cases()
+
+# if __name__ == "__main__":
+#     # Validate implementation first
+#     if validate_implementation():
+#         # Test single case first
+#         print("\nTesting single case with nested CV...")
+#         test_results = test_single_case(case_type='case1')
         
-        if test_results:
-            print("Test successful! Running all cases...")
-            # Run all cases
-            results = run_all_cases()
-            print("Domain expert cases pipeline completed!")
-        else:
-            print("Test failed! Check the error above.")
-    else:
-        print("Implementation validation failed!") 
+#         if test_results:
+#             print("Test successful! Running all cases...")
+#             # Run all cases
+#             results = run_all_cases()
+#             print("Domain expert cases pipeline completed!")
+#         else:
+#             print("Test failed! Check the error above.")
+#     else:
+#         print("Implementation validation failed!")
