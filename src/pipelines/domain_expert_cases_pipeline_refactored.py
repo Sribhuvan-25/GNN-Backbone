@@ -933,9 +933,9 @@ class DomainExpertCasesPipeline(MixedEmbeddingPipeline):
                                         input_channel=1
                                     )
                                 elif model_type == 'kg_gt' or model_type == 'kggt':
-                                    from models.GNNmodelsRegression import create_knowledge_guided_graph_transformer
-                                    print(f"DEBUG: Creating Knowledge-Guided Graph Transformer with hidden_dim={self.hidden_dim}")
-                                    model = create_knowledge_guided_graph_transformer(
+                                    from models.GNNmodelsRegression import simple_GraphTransformer_regression
+                                    print(f"DEBUG: Creating Graph Transformer with hidden_dim={self.hidden_dim}")
+                                    model = simple_GraphTransformer_regression(
                                         hidden_channels=self.hidden_dim,
                                         output_dim=1,
                                         dropout_prob=self.dropout_rate,

@@ -218,8 +218,8 @@ class MixedEmbeddingPipeline:
                 num_heads=8  # Increased from 4 to 8 attention heads
             ).to(device)
         elif model_type == 'kg_gt' or model_type == 'kggt':
-            from models.GNNmodelsRegression import create_knowledge_guided_graph_transformer
-            model = create_knowledge_guided_graph_transformer(
+            from models.GNNmodelsRegression import simple_GraphTransformer_regression
+            model = simple_GraphTransformer_regression(
                 hidden_channels=self.hidden_dim,
                 output_dim=num_targets,
                 dropout_prob=self.dropout_rate,
@@ -2507,15 +2507,15 @@ class MixedEmbeddingPipeline:
                 num_heads=8
             ).to(device)
         elif model_type == 'kg_gt' or model_type == 'kggt':
-            from models.GNNmodelsRegression import create_knowledge_guided_graph_transformer
-            model = create_knowledge_guided_graph_transformer(
+            from models.GNNmodelsRegression import simple_GraphTransformer_regression
+            model = simple_GraphTransformer_regression(
                 hidden_channels=hidden_dim,
                 output_dim=num_targets,
                 dropout_prob=self.dropout_rate,
                 input_channel=1,
                 num_heads=8,
                 num_layers=4,
-                use_edge_features=True
+                activation='identity'
             ).to(device)
         else:
             raise ValueError(f"Unknown model type: {model_type}")

@@ -334,114 +334,25 @@ class simple_GraphTransformer_regression(torch.nn.Module):
         X_5 = self.dropout(X_5)
         X_5 = self.bn5(X_5) + X_4  
 
-
-class KnowledgeGuidedGraphTransformer(nn.Module):
-    def __init__(self, hidden_channels=256, output_dim=1, dropout_prob=0.1, 
-                 input_channel=1, num_heads=8, num_layers=4, 
-                 estimate_uncertainty=True, use_edge_features=True):
-        super(KnowledgeGuidedGraphTransformer, self).__init__()
-        
-        # Store configuration
-        self.hidden_channels = hidden_channels
-        self.output_dim = output_dim
-        self.num_layers = num_layers
-        self.dropout_prob = dropout_prob
-        self.use_edge_features = use_edge_features
-        self.estimate_uncertainty = estimate_uncertainty
-        
-        # Input validation
-        assert hidden_channels > 0, f"hidden_channels must be positive, got {hidden_channels}"
-        assert output_dim > 0, f"output_dim must be positive, got {output_dim}"
-        assert input_channel > 0, f"input_channel must be positive, got {input_channel}"
-        assert num_heads > 0, f"num_heads must be positive, got {num_heads}"
-        assert num_layers > 0, f"num_layers must be positive, got {num_layers}"
-        assert 0 <= dropout_prob <= 1, f"dropout_prob must be in [0,1], got {dropout_prob}"
-        assert hidden_channels % num_heads == 0, f"hidden_channels must be divisible by num_heads"
-        
-        # Input projection with layer norm
-        self.input_projection = nn.Sequential(
-            nn.Linear(input_channel, hidden_channels),
-            nn.LayerNorm(hidden_channels),
-            nn.GELU(),
-            nn.Dropout(dropout_prob)
-        )
-        
-        # Graph Transformer layers (key innovation vs RGGC)
-        self.transformer_layers = nn.ModuleList([
-            GraphTransformerLayer(
-                hidden_channels, 
-                num_heads=num_heads, 
-                dropout_prob=dropout_prob,
-                use_edge_features=use_edge_features
-            )
-            for _ in range(num_layers)
-        ])
-        
-        # Enhanced regression head
-        self.regression_head = EnhancedRegressionHead(
-            hidden_channels, 
-            output_dim, 
-            dropout_prob, 
-            estimate_uncertainty
-        )
-        
-        # Initialize weights properly
-        self._init_weights()
-    
-    def _init_weights(self):
-        """Proper weight initialization for transformers"""
-        for m in self.modules():
-            if isinstance(m, nn.Linear):
-                nn.init.xavier_normal_(m.weight)
-                if m.bias is not None:
-                    nn.init.zeros_(m.bias)
-            elif isinstance(m, nn.LayerNorm):
-                nn.init.ones_(m.weight)
-                nn.init.zeros_(m.bias)
-    
-    def _validate_inputs(self, x, edge_index, batch, edge_attr=None):
-        """Validate all inputs to prevent runtime errors"""
-        if x.dim() != 2:
-            raise ValueError(f"Expected x to be 2D, got {x.dim()}D")
-        if edge_index.dim() != 2 or edge_index.size(0) != 2:
-            raise ValueError(f"Expected edge_index shape [2, num_edges], got {edge_index.shape}")
-        if batch is None:
-            raise ValueError("Batch tensor cannot be None")
-        if batch.dim() != 1:
-            raise ValueError(f"Expected batch to be 1D, got {batch.dim()}D")
-        if x.size(0) != batch.size(0):
-            raise ValueError(f"x and batch size mismatch: {x.size(0)} vs {batch.size(0)}")
-        if edge_attr is not None:
-            if edge_attr.size(0) != edge_index.size(1):
-                raise ValueError(f"edge_attr size {edge_attr.size(0)} != num_edges {edge_index.size(1)}")
-    
-    def forward(self, x, edge_index, batch, edge_attr=None):
-        # Input validation
-        self._validate_inputs(x, edge_index, batch, edge_attr)
-        
-        # Input projection
-        x = self.input_projection(x)
-        
-        # Apply transformer layers with proper residual connections
-        for transformer_layer in self.transformer_layers:
-            x = transformer_layer(x, edge_index, edge_attr)
-        
         # Global pooling for graph-level representation
         x_mean = global_mean_pool(X_5, batch)
         
         # Pass through regression head
         x = self.regression_head(x_mean)
         
-        return x, x_mean  
+        return x, x_mean
+
+
+# Note: The KnowledgeGuidedGraphTransformer was removed due to missing dependencies
+# Use simple_GraphTransformer_regression instead for Graph Transformer functionality
 
 
 # Factory function for creating Graph Transformer models
-def create_knowledge_guided_graph_transformer(hidden_channels=256, output_dim=1, 
-                                            dropout_prob=0.1, input_channel=1,
-                                            num_heads=8, num_layers=4,
-                                            use_edge_features=True):
+def create_simple_graph_transformer(hidden_channels=256, output_dim=1, 
+                                   dropout_prob=0.1, input_channel=1,
+                                   num_heads=8, num_layers=4):
     """
-    Factory function to create clean Graph Transformer model.
+    Factory function to create simple Graph Transformer model.
     
     Args:
         hidden_channels: Hidden dimension size
@@ -449,8 +360,7 @@ def create_knowledge_guided_graph_transformer(hidden_channels=256, output_dim=1,
         dropout_prob: Dropout probability
         input_channel: Input feature dimension
         num_heads: Number of attention heads
-        num_layers: Number of transformer layers (currently fixed at 5 for consistency with RGGC)
-        use_edge_features: Whether to use edge features (kept for compatibility)
+        num_layers: Number of transformer layers (currently fixed at 5 for consistency)
         
     Returns:
         simple_GraphTransformer_regression model
@@ -461,6 +371,7 @@ def create_knowledge_guided_graph_transformer(hidden_channels=256, output_dim=1,
         dropout_prob=dropout_prob,
         input_channel=input_channel,
         num_heads=num_heads,
+        num_layers=num_layers
     )
 
 

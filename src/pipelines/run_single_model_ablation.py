@@ -50,7 +50,7 @@ class SingleModelAblationPipeline(MixedEmbeddingPipeline):
         self.case_type = case_type
         
         # Validate model type
-        valid_models = ['gcn', 'gat', 'rggc']
+        valid_models = ['gcn', 'gat', 'rggc', 'kg_gt']
         if self.model_type not in valid_models:
             raise ValueError(f"model_type must be one of {valid_models}, got {self.model_type}")
         
@@ -392,7 +392,7 @@ def main():
     parser.add_argument(
         "--model", 
         type=str, 
-        choices=['gcn', 'gat', 'rggc'],
+        choices=['gcn', 'gat', 'rggc', 'kg_gt'],
         required=True,
         help="GNN model to use for ablation study"
     )
