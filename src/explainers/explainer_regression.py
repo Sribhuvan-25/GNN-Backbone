@@ -489,39 +489,83 @@ class GNNExplainerRegression:
             return self._extract_gradient_attention_scores(model, data, node_names)
     
     def _extract_gat_attention_scores(self, model, data, node_names=None):
-        """Extract attention scores from GAT models (explicit attention weights)"""
+        """Extract attention scores from GAT models using built-in return_attention_weights"""
         try:
             model.eval()
             with torch.no_grad():
-                # Forward pass to get attention weights
                 x, edge_index = data.x, data.edge_index
                 
-                # Get attention from first layer (most interpretable)
-                if hasattr(model, 'conv1') and hasattr(model.conv1, '__call__'):
-                    # Extract attention weights during forward pass
-                    alpha = None
-                    def hook_fn(module, input, output):
-                        nonlocal alpha
-                        if hasattr(module, 'alpha'):
-                            alpha = module.alpha
-                    
-                    handle = model.conv1.register_forward_hook(hook_fn)
-                    _ = model.conv1(x, edge_index)
-                    handle.remove()
-                    
-                    if alpha is not None:
-                        # Aggregate attention scores per node (sum of incoming attention)
-                        num_nodes = x.size(0)
-                        node_attention = torch.zeros(num_nodes, device=self.device)
-                        edge_index_np = edge_index.cpu().numpy()
+                # Method 1: Use built-in return_attention_weights if available
+                if hasattr(model, 'conv1') and hasattr(model.conv1, 'forward'):
+                    try:
+                        # Try to get attention weights directly from GAT layer
+                        output, (edge_index_att, alpha) = model.conv1(x, edge_index, return_attention_weights=True)
                         
-                        for i in range(alpha.size(0)):
-                            target_node = edge_index_np[1, i]  # Target node
-                            node_attention[target_node] += alpha[i].item()
-                        
-                        return node_attention.cpu().numpy()
+                        if alpha is not None:
+                            print(f"Successfully extracted GAT attention weights: {alpha.shape}")
+                            # Aggregate attention scores per node (sum of incoming attention)
+                            num_nodes = x.size(0)
+                            node_attention = torch.zeros(num_nodes, device=self.device)
+                            
+                            # Sum attention weights for each target node
+                            for i in range(edge_index_att.size(1)):
+                                target_node = edge_index_att[1, i]  # Target node
+                                # Handle multi-head attention by averaging across heads
+                                if alpha.dim() > 1:
+                                    att_score = alpha[i].mean().item()  # Average across heads
+                                else:
+                                    att_score = alpha[i].item()
+                                node_attention[target_node] += att_score
+                            
+                            # Normalize attention scores
+                            if node_attention.sum() > 0:
+                                node_attention = node_attention / node_attention.sum()
+                            
+                            return node_attention.cpu().numpy()
+                    
+                    except TypeError:
+                        # return_attention_weights not supported, try hook method
+                        print("GAT layer doesn't support return_attention_weights, trying hook method...")
+                        pass
+                
+                # Method 2: Hook method as fallback
+                alpha = None
+                def hook_fn(module, input, output):
+                    nonlocal alpha
+                    # Check for different possible attention attribute names
+                    if hasattr(module, '_alpha'):
+                        alpha = module._alpha
+                    elif hasattr(module, 'alpha'):
+                        alpha = module.alpha
+                    elif hasattr(module, 'att'):
+                        alpha = module.att
+                
+                handle = model.conv1.register_forward_hook(hook_fn)
+                _ = model.conv1(x, edge_index)
+                handle.remove()
+                
+                if alpha is not None:
+                    print(f"Extracted GAT attention via hook: {alpha.shape}")
+                    # Aggregate attention scores per node
+                    num_nodes = x.size(0)
+                    node_attention = torch.zeros(num_nodes, device=self.device)
+                    
+                    for i in range(min(alpha.size(0), edge_index.size(1))):
+                        if i < edge_index.size(1):
+                            target_node = edge_index[1, i]  # Target node
+                            if alpha.dim() > 1:
+                                att_score = alpha[i].mean().item()  # Average across heads
+                            else:
+                                att_score = alpha[i].item()
+                            node_attention[target_node] += att_score
+                    
+                    # Normalize
+                    if node_attention.sum() > 0:
+                        node_attention = node_attention / node_attention.sum()
+                    
+                    return node_attention.cpu().numpy()
             
-            print("Warning: Could not extract GAT attention weights, falling back to gradients")
+            print("Warning: Could not extract GAT attention weights using any method, falling back to gradients")
             return self._extract_gradient_attention_scores(model, data, node_names)
             
         except Exception as e:
@@ -649,58 +693,96 @@ class GNNExplainerRegression:
             return np.ones(data.x.size(0))
     
     def _extract_kg_gt_attention_scores(self, model, data, node_names=None):
-        """Extract attention scores from KG-GT transformer layers"""
+        """Extract attention scores from Graph Transformer using TransformerConv layers"""
         try:
             model.eval()
-            
-            # Get batch tensor
-            batch = torch.zeros(data.x.size(0), dtype=torch.long, device=self.device)
-            
-            # Storage for attention weights
-            attention_weights_list = []
-            
-            # Hook function to capture attention weights
-            def attention_hook(module, input, output):
-                # GraphTransformerLayer should store attention weights
-                if hasattr(module, '_last_attention_weights'):
-                    attention_weights_list.append(module._last_attention_weights.detach())
-                elif hasattr(module, 'attention_weights'):
-                    attention_weights_list.append(module.attention_weights.detach())
-            
-            # Register hooks on transformer layers
-            hooks = []
-            for name, module in model.named_modules():
-                if 'transformer' in name.lower() or 'attention' in name.lower():
-                    hooks.append(module.register_forward_hook(attention_hook))
-            
-            # Forward pass to capture attention
             with torch.no_grad():
-                _ = model(data.x, data.edge_index, batch)
-            
-            # Remove hooks
-            for hook in hooks:
-                hook.remove()
-            
-            if len(attention_weights_list) > 0:
-                # Aggregate attention weights across layers and heads
-                final_attention = attention_weights_list[-1]  # Use last layer
+                x, edge_index = data.x, data.edge_index
                 
-                # Convert edge-wise attention to node-wise attention
-                node_attention = torch.zeros(data.x.size(0), device=self.device)
-                edge_index = data.edge_index
+                # Method 1: Use TransformerConv's built-in return_attention_weights
+                if hasattr(model, 'conv1') and hasattr(model.conv1, 'forward'):
+                    try:
+                        # Get attention weights from first transformer layer (most interpretable)
+                        output, (edge_index_att, alpha) = model.conv1(x, edge_index, return_attention_weights=True)
+                        
+                        if alpha is not None:
+                            print(f"Successfully extracted TransformerConv attention weights: {alpha.shape}")
+                            # Aggregate attention scores per node
+                            num_nodes = x.size(0)
+                            node_attention = torch.zeros(num_nodes, device=self.device)
+                            
+                            # Sum attention weights for each target node
+                            for i in range(edge_index_att.size(1)):
+                                target_node = edge_index_att[1, i]  # Target node
+                                # Handle multi-head attention by averaging across heads
+                                if alpha.dim() > 1:
+                                    # For multi-head attention: [num_edges, num_heads]
+                                    att_score = alpha[i].mean().item()  # Average across heads
+                                else:
+                                    att_score = alpha[i].item()
+                                node_attention[target_node] += att_score
+                            
+                            # Normalize attention scores
+                            if node_attention.sum() > 0:
+                                node_attention = node_attention / node_attention.sum()
+                            
+                            print(f"Graph Transformer node attention range: {node_attention.min():.6f} - {node_attention.max():.6f}")
+                            return node_attention.cpu().numpy()
+                    
+                    except (TypeError, ValueError) as e:
+                        print(f"TransformerConv return_attention_weights failed: {e}")
+                        print("Trying hook method as fallback...")
                 
-                # Aggregate incoming attention for each node
-                for i in range(edge_index.size(1)):
-                    target_node = edge_index[1, i]
-                    if i < final_attention.size(0):
-                        node_attention[target_node] += final_attention[i].mean()  # Average across heads
+                # Method 2: Hook method as fallback for older PyG versions
+                attention_weights_list = []
                 
-                # Normalize
-                node_attention = node_attention / (node_attention.sum() + 1e-8)
-                return node_attention.cpu().numpy()
-            else:
-                print("No attention weights captured from KG-GT model")
-                return None
+                def attention_hook(module, input, output):
+                    # Try to capture attention weights from TransformerConv
+                    if hasattr(module, '_alpha') and module._alpha is not None:
+                        attention_weights_list.append(module._alpha.detach())
+                    elif hasattr(module, 'alpha') and module.alpha is not None:
+                        attention_weights_list.append(module.alpha.detach())
+                
+                # Register hooks on TransformerConv layers
+                hooks = []
+                for name, module in model.named_modules():
+                    if hasattr(module, '__class__') and 'TransformerConv' in str(module.__class__):
+                        hooks.append(module.register_forward_hook(attention_hook))
+                
+                # Forward pass to capture attention
+                _ = model.conv1(x, edge_index)
+                
+                # Remove hooks
+                for hook in hooks:
+                    hook.remove()
+                
+                if len(attention_weights_list) > 0:
+                    print(f"Captured {len(attention_weights_list)} attention weight tensors via hooks")
+                    # Use the first (most interpretable) attention weights
+                    alpha = attention_weights_list[0]
+                    
+                    # Convert edge-wise attention to node-wise attention
+                    num_nodes = x.size(0)
+                    node_attention = torch.zeros(num_nodes, device=self.device)
+                    
+                    # Aggregate incoming attention for each node
+                    for i in range(min(alpha.size(0), edge_index.size(1))):
+                        if i < edge_index.size(1):
+                            target_node = edge_index[1, i]
+                            if alpha.dim() > 1:
+                                att_score = alpha[i].mean().item()  # Average across heads
+                            else:
+                                att_score = alpha[i].item()
+                            node_attention[target_node] += att_score
+                    
+                    # Normalize
+                    if node_attention.sum() > 0:
+                        node_attention = node_attention / node_attention.sum()
+                    
+                    return node_attention.cpu().numpy()
+                else:
+                    print("No attention weights captured from KG-GT model")
+                    return None
                 
         except Exception as e:
             print(f"KG-GT attention extraction failed: {e}")
@@ -970,68 +1052,6 @@ class GNNExplainerRegression:
         
         return pruned_data, important_nodes, pruned_node_names, attention_scores
     
-    def _extract_gat_attention_scores(self, data, model):
-        """
-        Extract attention scores from GAT model for node importance
-        
-        Args:
-            data: PyG Data object
-            model: Trained GAT model
-            
-        Returns:
-            node_attention_scores: Array of attention importance for each node
-        """
-        try:
-            # Set model to evaluation mode
-            model.eval()
-            
-            # Move data to same device as model
-            data = data.to(next(model.parameters()).device)
-            
-            # Forward pass through model to get attention weights
-            with torch.no_grad():
-                # Check if model has GAT layers with attention
-                attention_weights_list = []
-                
-                # Hook to capture attention weights from GAT layers
-                def attention_hook(module, input, output):
-                    if hasattr(module, '_alpha'):
-                        # GAT layer stores attention weights in _alpha
-                        attention_weights_list.append(module._alpha.detach())
-                
-                # Register hooks for all GAT layers
-                hooks = []
-                for name, module in model.named_modules():
-                    if 'conv' in name and hasattr(module, '_alpha'):
-                        hooks.append(module.register_forward_hook(attention_hook))
-                
-                # Forward pass
-                # Create batch tensor if it doesn't exist (for single graph)
-                batch = data.batch if data.batch is not None else torch.zeros(data.x.size(0), dtype=torch.long, device=self.device)
-                _ = model(data.x, data.edge_index, batch)
-                
-                # Remove hooks
-                for hook in hooks:
-                    hook.remove()
-                
-                if len(attention_weights_list) == 0:
-                    print("No GAT attention weights found in model")
-                    return None
-                
-                # Aggregate attention weights across layers
-                # Use the last layer's attention as it's most relevant for final prediction
-                final_attention = attention_weights_list[-1]
-                
-                # Convert edge attention weights to node attention scores
-                node_attention_scores = self._edge_attention_to_node_scores(
-                    data.edge_index, final_attention, data.x.shape[0]
-                )
-                
-                return node_attention_scores.cpu().numpy()
-                
-        except Exception as e:
-            print(f"Error extracting GAT attention scores: {e}")
-            return None
     
     def _edge_attention_to_node_scores(self, edge_index, edge_attention, num_nodes):
         """
