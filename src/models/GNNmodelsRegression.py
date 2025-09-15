@@ -18,6 +18,18 @@ import scipy.sparse as sp
 import csv
 from torch_geometric.explain import Explainer, GNNExplainer, PGExplainer, DummyExplainer
 from torch_geometric.explain.metric import fidelity, unfaithfulness
+
+# Import enhanced Graph Transformer
+try:
+    from .enhanced_graph_transformer import create_enhanced_graph_transformer
+    HAS_ENHANCED_GT = True
+except ImportError:
+    try:
+        from enhanced_graph_transformer import create_enhanced_graph_transformer
+        HAS_ENHANCED_GT = True
+    except ImportError:
+        HAS_ENHANCED_GT = False
+        print("Enhanced Graph Transformer not available")
 from torch_geometric.utils import to_networkx
 from sklearn.model_selection import KFold
 
@@ -396,4 +408,132 @@ class GaussianNLLLoss(nn.Module):
         elif self.reduction == 'sum':
             return loss.sum()
         else:
-            return loss 
+            return loss
+
+
+class enhanced_GraphTransformer_regression(torch.nn.Module):
+    """
+    Enhanced Graph Transformer for regression with proper architecture
+    
+    Key improvements over simple_GraphTransformer_regression:
+    1. Proper positional encoding (Laplacian-based for biological graphs)
+    2. LayerNorm instead of BatchNorm (standard for Transformers) 
+    3. Residual connections and proper normalization
+    4. Attention visualization capabilities
+    5. Flexible pooling strategies
+    
+    This model should be used instead of simple_GraphTransformer_regression
+    for research publication purposes.
+    """
+    
+    def __init__(self, hidden_channels, output_dim=1, dropout_prob=0.1, input_channel=1,
+                 num_heads=8, num_layers=4, activation='relu'):
+        super(enhanced_GraphTransformer_regression, self).__init__()
+        
+        # Store parameters
+        self.hidden_channels = hidden_channels
+        self.output_dim = output_dim
+        self.dropout_prob = dropout_prob
+        self.input_channel = input_channel
+        self.num_heads = num_heads
+        self.num_layers = num_layers
+        
+        if HAS_ENHANCED_GT:
+            # Use the enhanced implementation
+            self.enhanced_gt = create_enhanced_graph_transformer(
+                input_dim=input_channel,
+                hidden_dim=hidden_channels,
+                output_dim=output_dim,
+                num_layers=num_layers,
+                num_heads=num_heads,
+                dropout=dropout_prob,
+                positional_encoding='laplacian',  # Best for biological networks
+                pooling='mean',
+                activation=activation,
+                use_skip_connections=True
+            )
+        else:
+            # Fallback to simple implementation with LayerNorm fixes
+            print("Using fallback Graph Transformer implementation")
+            self.conv1 = TransformerConv(input_channel, hidden_channels, heads=num_heads, dropout=dropout_prob)
+            self.conv2 = TransformerConv(hidden_channels * num_heads, hidden_channels, heads=num_heads, dropout=dropout_prob)
+            self.conv3 = TransformerConv(hidden_channels * num_heads, hidden_channels, heads=num_heads, dropout=dropout_prob)
+            self.conv4 = TransformerConv(hidden_channels * num_heads, hidden_channels, heads=num_heads, dropout=dropout_prob)
+            
+            # Use LayerNorm instead of BatchNorm (proper for Transformers)
+            self.ln1 = torch.nn.LayerNorm(hidden_channels * num_heads)
+            self.ln2 = torch.nn.LayerNorm(hidden_channels * num_heads)  
+            self.ln3 = torch.nn.LayerNorm(hidden_channels * num_heads)
+            self.ln4 = torch.nn.LayerNorm(hidden_channels * num_heads)
+            
+            self.dropout = torch.nn.Dropout(dropout_prob)
+            
+            # Regression head
+            self.regression_head = torch.nn.Sequential(
+                torch.nn.Linear(hidden_channels * num_heads, hidden_channels),
+                torch.nn.ReLU(),
+                torch.nn.Dropout(dropout_prob),
+                torch.nn.Linear(hidden_channels, output_dim)
+            )
+            
+    def forward(self, X, edge_index, batch, return_attention=False):
+        """
+        Forward pass of Enhanced Graph Transformer
+        
+        Args:
+            X: Node features [num_nodes, input_channel]
+            edge_index: Graph connectivity [2, num_edges] 
+            batch: Batch assignment [num_nodes]
+            return_attention: Whether to return attention weights
+            
+        Returns:
+            output: Predictions [batch_size, output_dim]
+            graph_repr: Graph representations [batch_size, hidden_channels] (optional)
+            attention_weights: Attention weights (optional)
+        """
+        
+        if HAS_ENHANCED_GT:
+            # Use enhanced implementation
+            if return_attention:
+                output, graph_repr, attention_weights = self.enhanced_gt(
+                    X, edge_index, batch, return_attention=True
+                )
+                return output, graph_repr, attention_weights
+            else:
+                output, graph_repr = self.enhanced_gt(
+                    X, edge_index, batch, return_attention=False
+                )
+                return output
+        else:
+            # Fallback implementation with LayerNorm fixes
+            # Layer 1
+            X_1 = F.relu(self.conv1(X, edge_index))
+            X_1 = self.ln1(X_1)
+            X_1 = self.dropout(X_1)
+            
+            # Layer 2 with residual connection
+            X_2 = F.relu(self.conv2(X_1, edge_index))
+            X_2 = self.ln2(X_2 + X_1)  # Residual connection
+            X_2 = self.dropout(X_2)
+            
+            # Layer 3 with residual connection  
+            X_3 = F.relu(self.conv3(X_2, edge_index))
+            X_3 = self.ln3(X_3 + X_2)  # Residual connection
+            X_3 = self.dropout(X_3)
+            
+            # Layer 4 with residual connection
+            X_4 = F.relu(self.conv4(X_3, edge_index))
+            X_4 = self.ln4(X_4 + X_3)  # Residual connection
+            X_4 = self.dropout(X_4)
+            
+            # Global pooling
+            graph_repr = global_mean_pool(X_4, batch)
+            
+            # Regression prediction
+            output = self.regression_head(graph_repr)
+            
+            if return_attention:
+                # For fallback, no attention weights available
+                return output, graph_repr, None
+            else:
+                return output 
