@@ -87,6 +87,19 @@ from utils import (
     format_statistics_with_std
 )
 
+# Import comprehensive validation framework
+try:
+    from validation.statistical_validator import StatisticalValidator
+    from validation.baseline_comparator import BaselineComparator
+    from validation.ablation_study import AblationStudy
+    from validation.biological_validator import BiologicalValidator
+    VALIDATION_FRAMEWORK_AVAILABLE = True
+    print("✅ Comprehensive validation framework loaded successfully")
+except ImportError as e:
+    VALIDATION_FRAMEWORK_AVAILABLE = False
+    print(f"⚠️ Validation framework not available: {e}")
+    print("Some advanced validation features will be disabled")
+
 # Set device
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 print(f"Using device: {device}")
@@ -455,6 +468,15 @@ class DomainExpertCasesPipeline(MixedEmbeddingPipeline):
         
         self._create_final_graph_visualizations(target_name)
         
+        # Stage 8: Comprehensive Validation Framework
+        print(f"\n{'='*50}")
+        print("STAGE 8: Comprehensive Validation")
+        print(f"{'='*50}")
+        
+        validation_results = self.run_comprehensive_validation(results, target_name, None)
+        if validation_results:
+            results['comprehensive_validation'] = validation_results
+        
         return results
     
     def _create_case_level_graph_visualizations(self):
@@ -734,6 +756,139 @@ class DomainExpertCasesPipeline(MixedEmbeddingPipeline):
             explainer_graphs = {}
         
         return explainer_graphs
+    
+    def run_comprehensive_validation(self, results, target_name, model_results):
+        """
+        Run comprehensive validation framework on node pruning results
+        
+        Args:
+            results: Pipeline results containing explainer graphs
+            target_name: Name of the target variable
+            model_results: Performance results from different models
+            
+        Returns:
+            dict: Comprehensive validation results
+        """
+        if not VALIDATION_FRAMEWORK_AVAILABLE:
+            print("⚠️ Validation framework not available, skipping comprehensive validation")
+            return {}
+        
+        print(f"\n{'='*80}")
+        print(f"COMPREHENSIVE VALIDATION FRAMEWORK - {target_name}")
+        print(f"{'='*80}")
+        
+        validation_results = {}
+        
+        try:
+            # Extract performance metrics for validation
+            original_scores = []
+            pruned_scores = []
+            node_names = []
+            
+            # Get original k-NN performance
+            if 'knn_training' in results:
+                for model_key, model_data in results['knn_training'].items():
+                    if 'test_metrics' in model_data:
+                        original_scores.append(model_data['test_metrics'].get('r2_score', 0))
+            
+            # Get explainer-enhanced performance
+            if 'explainer_training' in results:
+                for model_key, model_data in results['explainer_training'].items():
+                    if 'test_metrics' in model_data:
+                        pruned_scores.append(model_data['test_metrics'].get('r2_score', 0))
+            
+            # Get node names from dataset
+            if hasattr(self.dataset, 'node_feature_names'):
+                node_names = self.dataset.node_feature_names
+            elif hasattr(self.dataset, 'family_names'):
+                node_names = self.dataset.family_names
+            else:
+                node_names = [f"Feature_{i}" for i in range(50)]  # Fallback
+            
+            # Get retained nodes from explainer results
+            retained_nodes = node_names  # Default to all if no pruning info
+            if 'explainer_graphs' in results and results['explainer_graphs']:
+                try:
+                    explainer_data = results['explainer_graphs'].get('fold_0', [])
+                    if explainer_data and len(explainer_data) > 0:
+                        first_sample = explainer_data[0]
+                        if hasattr(first_sample, 'x') and hasattr(first_sample, 'num_nodes'):
+                            num_retained = first_sample.x.shape[0]
+                            retained_nodes = node_names[:num_retained]  # Approximate
+                except Exception as e:
+                    print(f"Could not extract retained nodes: {e}")
+            
+            print(f"Found {len(original_scores)} original scores and {len(pruned_scores)} pruned scores")
+            print(f"Dataset has {len(node_names)} total features")
+            print(f"Estimated {len(retained_nodes)} retained features")
+            
+            # 1. Statistical Validation
+            if original_scores and pruned_scores:
+                print(f"\n1. Statistical Validation:")
+                stat_validator = StatisticalValidator()
+                
+                # Pad shorter list to same length for comparison
+                min_len = min(len(original_scores), len(pruned_scores))
+                if min_len > 0:
+                    stat_results = stat_validator.validate_pruning_effectiveness(
+                        original_performance=original_scores[:min_len],
+                        pruned_performance=pruned_scores[:min_len],
+                        method_name=f"Attention_Pruning_{target_name}"
+                    )
+                    validation_results['statistical_validation'] = stat_results
+                    
+                    print(f"   Performance improvement: {stat_results['mean_improvement']:.4f}")
+                    print(f"   Statistical significance: p = {stat_results['p_value']:.4f}")
+                    print(f"   Effect size (Cohen's d): {stat_results['effect_size']:.3f}")
+                    
+                    if stat_results['significant']:
+                        print(f"   ✅ Statistically significant improvement!")
+                    else:
+                        print(f"   ⚠️ No significant improvement detected")
+            
+            # 2. Biological Validation (if target is ACE-km or H2-km)
+            if target_name in ['ACE-km', 'H2-km'] and len(retained_nodes) > 0:
+                print(f"\n2. Biological Validation:")
+                bio_validator = BiologicalValidator()
+                
+                # Map target to pathway
+                target_pathway = 'Acetoclastic_Methanogenesis' if target_name == 'ACE-km' else 'Hydrogenotrophic_Methanogenesis'
+                
+                bio_results = bio_validator.validate_pruning_results(
+                    retained_families=retained_nodes,
+                    all_families=node_names,
+                    target_pathway=target_pathway
+                )
+                validation_results['biological_validation'] = bio_results
+                
+                overall_score = bio_results['overall_biological_validity']['overall_score']
+                print(f"   Overall biological validity: {overall_score:.3f}")
+                print(f"   Recommendation: {bio_results['overall_biological_validity']['recommendation']}")
+                
+                if overall_score >= 0.6:
+                    print(f"   ✅ Good biological validity!")
+                else:
+                    print(f"   ⚠️ Low biological validity - review results")
+            
+            # 3. Save comprehensive results
+            if validation_results:
+                output_dir = f"results/validation_{target_name.lower()}"
+                os.makedirs(output_dir, exist_ok=True)
+                
+                # Save validation results
+                import json
+                with open(f"{output_dir}/comprehensive_validation.json", 'w') as f:
+                    json.dump(validation_results, f, indent=2, default=str)
+                
+                print(f"\n✅ Validation results saved to: {output_dir}/comprehensive_validation.json")
+            
+            return validation_results
+            
+        except Exception as e:
+            print(f"❌ Comprehensive validation failed: {e}")
+            import traceback
+            traceback.print_exc()
+            return {}
     
     def _create_enhanced_graph_comparison(self, graphs_dir, target_name):
         """Create enhanced graph comparison using visualization utilities."""
