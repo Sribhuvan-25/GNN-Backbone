@@ -305,7 +305,7 @@ class simple_GAT_regression(torch.nn.Module):
 
 class simple_GraphTransformer_regression(torch.nn.Module):
     def __init__(self, hidden_channels, output_dim=1, dropout_prob=0.5, input_channel=1,
-                 num_heads=8, num_layers=4, activation='identity'):
+                 num_heads=8, num_layers=4, activation='identity', use_edge_features=False):
         super(simple_GraphTransformer_regression, self).__init__()
 
         # Graph Transformer layers - handle multi-head attention correctly
@@ -427,7 +427,7 @@ class enhanced_GraphTransformer_regression(torch.nn.Module):
     """
     
     def __init__(self, hidden_channels, output_dim=1, dropout_prob=0.1, input_channel=1,
-                 num_heads=8, num_layers=4, activation='relu'):
+                 num_heads=8, num_layers=4, activation='relu', use_edge_features=False):
         super(enhanced_GraphTransformer_regression, self).__init__()
         
         # Store parameters

@@ -41,6 +41,9 @@ def main():
                         help='Quick test run with minimal configuration')
     parser.add_argument('--data_path', default='../Data/New_Data.csv',
                         help='Path to the dataset (default: ../Data/New_Data.csv)')
+    parser.add_argument('--graph_method', default='paper_correlation',
+                        choices=['original', 'paper_correlation', 'hybrid'],
+                        help='Graph construction method (default: paper_correlation)')
     
     args = parser.parse_args()
     
@@ -94,8 +97,8 @@ Key Features Enabled:
             'batch_size': 8,
             'learning_rate': 0.001,
             'patience': 20 if not args.quick else 5,
-            'use_mixed_models': True,  # Enable enhanced models
-            'graph_mode': 'family'
+            'graph_mode': 'family',
+            'graph_construction_method': args.graph_method  # User-selected graph construction method
         }
         
         print("Initializing enhanced pipeline...")
