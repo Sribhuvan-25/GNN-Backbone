@@ -46,7 +46,7 @@ class AnchoredMicrobialGNNDataset(MicrobialGNNDataset):
     def __init__(self, data_path, anchored_features=None, case_type=None,
                  k_neighbors=5, mantel_threshold=0.05, use_fast_correlation=False,
                  graph_mode='family', family_filter_mode='relaxed',
-                 graph_construction_method='original'):
+                 graph_construction_method='original', save_dir=None):
         """
         Initialize the anchored microbial GNN dataset.
         
@@ -60,10 +60,11 @@ class AnchoredMicrobialGNNDataset(MicrobialGNNDataset):
             graph_mode (str): Mode for graph construction ('otu' or 'family')
             family_filter_mode (str): Mode for family filtering ('strict', 'relaxed', 'permissive')
         """
-        # Store anchored features and case type
+        # Store anchored features, case type, and save directory
         self.anchored_features = anchored_features or []
         self.case_type = case_type
-        
+        self.save_dir = save_dir
+
         # Initialize base class
         super().__init__(
             data_path=data_path,
