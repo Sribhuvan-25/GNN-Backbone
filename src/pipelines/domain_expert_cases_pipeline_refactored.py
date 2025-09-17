@@ -203,7 +203,8 @@ class DomainExpertCasesPipeline(MixedEmbeddingPipeline):
             use_fast_correlation=use_fast_correlation,
             graph_mode=graph_mode,
             family_filter_mode=family_filter_mode,
-            use_nested_cv=use_nested_cv
+            use_nested_cv=use_nested_cv,
+            graph_construction_method=graph_construction_method
         )
         
         # Replace the dataset with our anchored version
@@ -1724,7 +1725,7 @@ def run_all_cases(data_path="../Data/New_Data.csv", save_dir="./refactored_domai
     print("✓ Comprehensive graph visualizations")
     print("="*80)
 
-    cases = ['case1', 'case2', 'case3']
+    cases = ['case1']
     all_results = {}
 
     # Base configuration for all cases
