@@ -1711,18 +1711,25 @@ class DomainExpertCasesPipeline(MixedEmbeddingPipeline):
         pass
 
 
-def main():
-    """
-    Example usage of the refactored Domain Expert Cases Pipeline.
-    
-    This demonstrates how to use the refactored pipeline with the same
-    interface as the original implementation.
-    """
-    
-    # Example configuration for production use
-    config = {
-        'data_path': '../Data/New_Data.csv',
-        'case_type': 'case3',  # All feature groups for both targets
+def run_all_cases(data_path="../Data/New_Data.csv", save_dir="./refactored_domain_expert_results"):
+    """Run all domain expert cases (1, 2, 3) with the refactored pipeline"""
+    print("="*80)
+    print("RUNNING ALL DOMAIN EXPERT CASES (REFACTORED PIPELINE)")
+    print("="*80)
+    print("Enhanced features implemented:")
+    print("✓ Spearman correlation graph initialization")
+    print("✓ Attention-based node pruning with feature importance tracking")
+    print("✓ Protected anchored features during pruning")
+    print("✓ Working transformer models")
+    print("✓ Comprehensive graph visualizations")
+    print("="*80)
+
+    cases = ['case1', 'case2', 'case3']
+    all_results = {}
+
+    # Base configuration for all cases
+    base_config = {
+        'data_path': data_path,
         'k_neighbors': 10,
         'mantel_threshold': 0.05,
         'hidden_dim': 128,
@@ -1730,25 +1737,70 @@ def main():
         'batch_size': 4,
         'learning_rate': 0.01,
         'weight_decay': 1e-4,
-        'num_epochs': 300,
+        'num_epochs': 200,  # Reduced from 300 for reasonable runtime
         'patience': 30,
         'num_folds': 5,
-        'save_dir': './refactored_domain_expert_results',
         'importance_threshold': 0.2,
         'use_fast_correlation': False,
         'graph_mode': 'family',
         'family_filter_mode': 'strict',
-        'use_nested_cv': True
+        'use_nested_cv': True,
+        'graph_construction_method': 'paper_correlation'  # Use enhanced correlation method
     }
-    
-    # Initialize and run pipeline
-    pipeline = DomainExpertCasesPipeline(**config)
-    results = pipeline.run_case_specific_pipeline()
-    
-    print("\nRefactored pipeline execution completed!")
-    print(f"Results saved to: {pipeline.save_dir}")
-    
-    return results
+
+    for case in cases:
+        print(f"\n{'='*60}")
+        print(f"RUNNING {case.upper()}")
+        print(f"{'='*60}")
+
+        # Update config for this specific case
+        case_config = base_config.copy()
+        case_config['case_type'] = case
+        case_config['save_dir'] = f"{save_dir}/{case}_results"
+
+        try:
+            # Initialize and run pipeline for this case
+            pipeline = DomainExpertCasesPipeline(**case_config)
+            results = pipeline.run_case_specific_pipeline()
+            all_results[case] = results
+
+            print(f"✅ {case.upper()} completed successfully!")
+            print(f"Results saved to: {pipeline.save_dir}")
+
+        except Exception as e:
+            print(f"❌ {case.upper()} failed: {e}")
+            import traceback
+            traceback.print_exc()
+            all_results[case] = None
+
+    # Summary
+    print(f"\n{'='*80}")
+    print("EXECUTION SUMMARY")
+    print(f"{'='*80}")
+
+    successful_cases = [case for case, result in all_results.items() if result is not None]
+    failed_cases = [case for case, result in all_results.items() if result is None]
+
+    if successful_cases:
+        print(f"✅ Successfully completed cases: {', '.join(successful_cases)}")
+
+    if failed_cases:
+        print(f"❌ Failed cases: {', '.join(failed_cases)}")
+
+    print(f"📁 Results saved to: {save_dir}")
+    print(f"🔬 Total cases processed: {len(cases)}")
+    print(f"✅ Success rate: {len(successful_cases)}/{len(cases)} ({len(successful_cases)/len(cases)*100:.1f}%)")
+
+    return all_results
+
+def main():
+    """
+    Run all domain expert cases with the refactored pipeline.
+
+    This restores the original functionality of running multiple cases
+    in sequence like the original implementation.
+    """
+    return run_all_cases()
 
 
 if __name__ == "__main__":
