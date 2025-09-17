@@ -8,13 +8,22 @@ from scipy.stats import pearsonr
 from torch_geometric.data import Data
 import networkx as nx
 
+# Import paper-style correlation graph builder
+try:
+    from datasets.correlation_graph_builder import PaperStyleCorrelationGraph
+    CORRELATION_BUILDER_AVAILABLE = True
+except ImportError:
+    CORRELATION_BUILDER_AVAILABLE = False
+    print("Warning: Paper-style correlation graph builder not available")
+
 class MicrobialGNNDataset:
     """Dataset class for GNN-based regression on microbial data"""
     
-    def __init__(self, data_path, k_neighbors=5, mantel_threshold=0.05, use_fast_correlation=True, graph_mode='otu', family_filter_mode='relaxed'):
+    def __init__(self, data_path, k_neighbors=5, mantel_threshold=0.05, use_fast_correlation=True,
+                 graph_mode='otu', family_filter_mode='relaxed', graph_construction_method='original'):
         """
         Initialize the microbial GNN dataset
-        
+
         Args:
             data_path: Path to the CSV file containing microbial abundance data
             k_neighbors: Number of neighbors for KNN graph construction
@@ -22,6 +31,7 @@ class MicrobialGNNDataset:
             use_fast_correlation: If True, use fast correlation-based graph construction
             graph_mode: Mode for graph construction ('otu' or 'family')
             family_filter_mode: Mode for family filtering ('relaxed' or 'strict')
+            graph_construction_method: 'original', 'paper_correlation', or 'hybrid'
         """
         self.data_path = data_path
         self.k_neighbors = k_neighbors
@@ -29,6 +39,7 @@ class MicrobialGNNDataset:
         self.use_fast_correlation = use_fast_correlation
         self.graph_mode = graph_mode
         self.family_filter_mode = family_filter_mode
+        self.graph_construction_method = graph_construction_method
         
         # Initialize data containers
         self.feature_df = None
@@ -351,7 +362,11 @@ class MicrobialGNNDataset:
     
     def _create_graph_structure(self):
         """Create graph structure based on correlation or distance metrics"""
-        if self.use_fast_correlation:
+        if self.graph_construction_method == 'paper_correlation':
+            return self._create_graph_structure_paper_style()
+        elif self.graph_construction_method == 'hybrid':
+            return self._create_graph_structure_hybrid()
+        elif self.use_fast_correlation:
             return self._create_graph_structure_fast()
         else:
             return self._create_graph_structure_mantel()
@@ -484,7 +499,194 @@ class MicrobialGNNDataset:
         edge_type = torch.tensor(edge_types, dtype=torch.long)
         
         return edge_index, edge_weight, edge_type
-    
+
+    def _create_graph_structure_paper_style(self):
+        """Create graph structure using exact paper methodology (Thapa et al. 2023)"""
+        if not CORRELATION_BUILDER_AVAILABLE:
+            print("Warning: Paper-style correlation builder not available, falling back to fast correlation")
+            return self._create_graph_structure_fast()
+
+        print("Constructing graph using paper-style correlation method (Thapa et al. 2023)...")
+
+        # Prepare abundance data (transpose so it's samples × features like the paper)
+        abundance_data = self.feature_matrix.T  # Shape: (n_samples, n_features)
+
+        print(f"Abundance data shape: {abundance_data.shape} (samples × features)")
+        print(f"Feature names: {len(self.node_feature_names)} families")
+
+        # Initialize paper-style correlation graph builder
+        correlation_threshold = 0.6 if len(self.node_feature_names) <= 50 else 0.5
+        builder = PaperStyleCorrelationGraph(
+            correlation_threshold=correlation_threshold,
+            significance_threshold=0.05,
+            min_edges=max(10, len(self.node_feature_names)),
+            max_edges=None
+        )
+
+        # Build correlation graph exactly like the paper
+        edge_index, edge_weight, edge_type, metadata = builder.build_correlation_graph(
+            abundance_data, self.node_feature_names
+        )
+
+        # Print paper-style statistics
+        print(f"Paper-style graph statistics:")
+        print(f"  Nodes: {metadata['n_nodes']}")
+        print(f"  Edges: {metadata['n_edges']} (density: {metadata['density']:.3f})")
+        print(f"  Mean correlation: {metadata['correlation_stats']['mean']:.3f}")
+        print(f"  Significant pairs: {metadata['significance_stats']['proportion_significant']:.1%}")
+        print(f"  Positive correlations: {metadata['positive_correlations']}")
+        print(f"  Negative correlations: {metadata['negative_correlations']}")
+
+        # Store metadata for later analysis
+        self.graph_metadata = metadata
+
+        # Create simple visualization of correlation graph
+        self._visualize_correlation_graph(edge_index, edge_weight, metadata)
+
+        return edge_index, edge_weight, edge_type
+
+    def _create_graph_structure_hybrid(self):
+        """Create hybrid graph: Paper correlation + k-NN sparsification if needed"""
+        if not CORRELATION_BUILDER_AVAILABLE:
+            print("Warning: Paper-style correlation builder not available, falling back to fast correlation")
+            return self._create_graph_structure_fast()
+
+        print("Constructing hybrid graph: Paper correlation + intelligent sparsification...")
+
+        # Step 1: Create paper-style correlation graph (biologically validated)
+        correlation_edge_index, correlation_edge_weight, correlation_edge_type = self._create_graph_structure_paper_style()
+
+        n_edges = correlation_edge_index.shape[1] // 2
+        n_nodes = len(self.node_feature_names)
+        density = n_edges / (n_nodes * (n_nodes - 1) // 2)
+
+        print(f"Step 1 - Paper correlation: {n_edges} edges (density: {density:.3f})")
+
+        # Step 2: Apply k-NN sparsification if graph is too dense
+        density_threshold = 0.15  # Threshold for sparsification
+
+        if density > density_threshold:
+            print(f"Graph density {density:.3f} > {density_threshold}, applying k-NN sparsification...")
+
+            # Store the correlation graph as "full" graph for k-NN processing
+            self.full_edge_index = correlation_edge_index
+            self.full_edge_weight = correlation_edge_weight
+            self.full_edge_type = correlation_edge_type
+
+            # Apply k-NN sparsification to keep strongest correlations
+            sparsified_edge_index, sparsified_edge_weight, sparsified_edge_type = self._apply_knn_sparsification()
+
+            print(f"Step 2 - After k-NN sparsification: {sparsified_edge_index.shape[1]//2} edges")
+            return sparsified_edge_index, sparsified_edge_weight, sparsified_edge_type
+        else:
+            print(f"Graph density {density:.3f} ≤ {density_threshold}, no sparsification needed")
+            return correlation_edge_index, correlation_edge_weight, correlation_edge_type
+
+    def _apply_knn_sparsification(self):
+        """Apply k-NN sparsification to the current full graph"""
+        # Use the existing k-NN method that expects full_edge_index to be set
+        k = self.k_neighbors
+        print(f"Applying k-NN sparsification with k={k} to keep strongest correlations...")
+
+        # Create adjacency matrix from full edge_index
+        num_nodes = len(self.node_feature_names)
+        adj_matrix = torch.zeros((num_nodes, num_nodes))
+        for i in range(self.full_edge_index.shape[1]):
+            u, v = self.full_edge_index[0, i], self.full_edge_index[1, i]
+            adj_matrix[u, v] = self.full_edge_weight[i]
+
+        # KNN sparsification: keep k strongest connections per node
+        adj_matrix_np = adj_matrix.numpy()
+
+        for i in range(num_nodes):
+            neighbors = adj_matrix_np[i]
+            nonzero_mask = neighbors != 0
+            if np.sum(nonzero_mask) > k:
+                abs_neighbors = np.abs(neighbors)
+                threshold = np.sort(abs_neighbors[nonzero_mask])[-k]
+                keep_mask = abs_neighbors >= threshold
+                adj_matrix_np[i, ~keep_mask] = 0
+
+        # Make matrix symmetric (undirected graph)
+        adj_matrix_np = np.maximum(adj_matrix_np, adj_matrix_np.T)
+
+        # Convert back to edge format
+        new_edge_index = []
+        new_edge_weight = []
+        new_edge_type = []
+
+        for i in range(num_nodes):
+            for j in range(num_nodes):
+                if adj_matrix_np[i, j] != 0:
+                    new_edge_index.append([i, j])
+                    new_edge_weight.append(adj_matrix_np[i, j])
+                    new_edge_type.append(1 if adj_matrix_np[i, j] > 0 else 0)
+
+        # Convert to tensors
+        edge_index = torch.tensor(new_edge_index, dtype=torch.long).T
+        edge_weight = torch.tensor(new_edge_weight, dtype=torch.float32)
+        edge_type = torch.tensor(new_edge_type, dtype=torch.long)
+
+        return edge_index, edge_weight, edge_type
+
+    def _combine_graphs(self,
+                       corr_edge_index, corr_edge_weight, corr_edge_type,
+                       knn_edge_index, knn_edge_weight, knn_edge_type):
+        """Intelligently combine correlation and k-NN graphs"""
+
+        n_features = len(self.node_feature_names)
+
+        # Create adjacency matrices for easier manipulation
+        corr_adj = torch.zeros((n_features, n_features))
+        knn_adj = torch.zeros((n_features, n_features))
+
+        # Fill correlation adjacency matrix
+        for i in range(corr_edge_index.shape[1]):
+            src, dst = corr_edge_index[0, i].item(), corr_edge_index[1, i].item()
+            corr_adj[src, dst] = corr_edge_weight[i]
+
+        # Fill k-NN adjacency matrix
+        for i in range(knn_edge_index.shape[1]):
+            src, dst = knn_edge_index[0, i].item(), knn_edge_index[1, i].item()
+            knn_adj[src, dst] = knn_edge_weight[i]
+
+        # Combine with priority to correlation edges
+        combined_adj = torch.zeros((n_features, n_features))
+        combined_types = torch.zeros((n_features, n_features), dtype=torch.long)
+
+        # Priority 1: Keep all correlation edges (biologically validated)
+        combined_adj = corr_adj.clone()
+
+        # Add correlation edge types
+        for i in range(corr_edge_index.shape[1]):
+            src, dst = corr_edge_index[0, i].item(), corr_edge_index[1, i].item()
+            combined_types[src, dst] = corr_edge_type[i]
+
+        # Priority 2: Add k-NN edges where no correlation edge exists
+        for i in range(n_features):
+            for j in range(n_features):
+                if combined_adj[i, j] == 0 and knn_adj[i, j] > 0:
+                    combined_adj[i, j] = knn_adj[i, j] * 0.5  # Lower weight for k-NN edges
+                    combined_types[i, j] = 1  # Default to positive type
+
+        # Convert back to edge format
+        edge_i, edge_j, edge_weights, edge_types = [], [], [], []
+
+        for i in range(n_features):
+            for j in range(n_features):
+                if combined_adj[i, j] > 0:
+                    edge_i.append(i)
+                    edge_j.append(j)
+                    edge_weights.append(combined_adj[i, j].item())
+                    edge_types.append(combined_types[i, j].item())
+
+        # Convert to tensors
+        combined_edge_index = torch.tensor([edge_i, edge_j], dtype=torch.long)
+        combined_edge_weight = torch.tensor(edge_weights, dtype=torch.float32)
+        combined_edge_type = torch.tensor(edge_types, dtype=torch.long)
+
+        return combined_edge_index, combined_edge_weight, combined_edge_type
+
     def _create_knn_graph(self, k=None):
         """Create a k-nearest neighbor sparsified version of the graph"""
         if k is None:
@@ -641,7 +843,66 @@ class MicrobialGNNDataset:
         print(f"Created {len(data_list)} graph data objects with {len(self.node_feature_names)} nodes each")
         
         return data_list
-    
+
+    def _visualize_correlation_graph(self, edge_index, edge_weight, metadata, save_dir='graph_visualizations_debug'):
+        """Create simple visualization of correlation graph after it's built"""
+        try:
+            os.makedirs(save_dir, exist_ok=True)
+
+            # Create NetworkX graph from edge_index and edge_weight
+            G = nx.Graph()
+
+            # Add nodes with family names
+            for i, name in enumerate(self.node_feature_names):
+                G.add_node(i, name=name)
+
+            # Add edges (process every other edge since graph is undirected)
+            for i in range(0, edge_index.shape[1], 2):
+                u, v = edge_index[0, i].item(), edge_index[1, i].item()
+                weight = edge_weight[i].item() if edge_weight is not None else 1.0
+                G.add_edge(u, v, weight=weight)
+
+            # Create visualization
+            plt.figure(figsize=(15, 15))
+
+            # Simple spring layout
+            try:
+                pos = nx.spring_layout(G, k=1.5, iterations=50, seed=42)
+            except:
+                pos = nx.circular_layout(G)
+
+            # Node labels (shortened family names)
+            node_labels = {}
+            for node in G.nodes():
+                if node < len(self.node_feature_names):
+                    full_name = self.node_feature_names[node]
+                    # Keep only the family name part (remove prefixes)
+                    short_name = full_name.split('.')[-1] if '.' in full_name else full_name
+                    node_labels[node] = short_name
+                else:
+                    node_labels[node] = f"Node_{node}"
+
+            # Draw the graph
+            nx.draw_networkx_nodes(G, pos, node_size=800, node_color='lightblue', alpha=0.8)
+            nx.draw_networkx_edges(G, pos, width=1.0, alpha=0.6, edge_color='gray')
+            nx.draw_networkx_labels(G, pos, labels=node_labels, font_size=8, font_weight='bold')
+
+            plt.title(f'Spearman Correlation Graph - Initial Creation ({len(G.nodes())} nodes, {len(G.edges())} edges)',
+                     fontsize=16, fontweight='bold', pad=20)
+            plt.axis('off')
+
+            # Save the graph
+            filename = f"{save_dir}/spearman_correlation_graph_IMMEDIATE.png"
+            plt.savefig(filename, dpi=300, bbox_inches='tight', facecolor='white')
+            plt.close()
+
+            print(f"📊 Spearman correlation graph visualization saved to: {filename}")
+            print(f"    Graph properties: {metadata['n_nodes']} nodes, {metadata['n_edges']} edges")
+            print(f"    Density: {metadata['density']:.3f}, Mean correlation: {metadata['correlation_stats']['mean']:.3f}")
+
+        except Exception as e:
+            print(f"Warning: Correlation graph visualization failed: {e}")
+
     def visualize_graphs(self, save_dir='graph_visualizations'):
         """Visualize both original and sparsified graphs for comparison"""
         os.makedirs(save_dir, exist_ok=True)

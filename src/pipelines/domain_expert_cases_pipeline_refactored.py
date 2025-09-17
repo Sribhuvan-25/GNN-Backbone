@@ -135,7 +135,7 @@ class DomainExpertCasesPipeline(MixedEmbeddingPipeline):
     - Case 5: Conditional H2-km (feature selection based on target values)
     """
     
-    def __init__(self, data_path, case_type='case1', 
+    def __init__(self, data_path, case_type='case1',
                  k_neighbors=5, mantel_threshold=0.05,
                  hidden_dim=64, dropout_rate=0.3, batch_size=8,
                  learning_rate=0.001, weight_decay=1e-4,
@@ -144,7 +144,8 @@ class DomainExpertCasesPipeline(MixedEmbeddingPipeline):
                  importance_threshold=0.2,
                  use_fast_correlation=False,
                  graph_mode='family', family_filter_mode='strict',
-                 use_nested_cv=True, use_node_pruning=False):
+                 use_nested_cv=True, use_node_pruning=False,
+                 graph_construction_method='original'):
         """
         Initialize the Domain Expert Cases Pipeline.
         
@@ -181,6 +182,9 @@ class DomainExpertCasesPipeline(MixedEmbeddingPipeline):
         # Set case-specific save directory
         case_save_dir = self._get_case_save_directory(case_type, save_dir)
         
+        # Store the graph construction method
+        self.graph_construction_method = graph_construction_method
+
         # Initialize parent class with case-specific save directory
         super().__init__(
             data_path=data_path,
@@ -212,7 +216,8 @@ class DomainExpertCasesPipeline(MixedEmbeddingPipeline):
             mantel_threshold=mantel_threshold,
             use_fast_correlation=use_fast_correlation,
             graph_mode=graph_mode,
-            family_filter_mode=family_filter_mode
+            family_filter_mode=family_filter_mode,
+            graph_construction_method=graph_construction_method
         )
         
         # Store pruning configuration

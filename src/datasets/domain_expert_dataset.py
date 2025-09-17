@@ -43,9 +43,10 @@ class AnchoredMicrobialGNNDataset(MicrobialGNNDataset):
         case_type (str): Type of case study (e.g., 'case1', 'case2', etc.)
     """
     
-    def __init__(self, data_path, anchored_features=None, case_type=None, 
-                 k_neighbors=5, mantel_threshold=0.05, use_fast_correlation=False, 
-                 graph_mode='family', family_filter_mode='relaxed'):
+    def __init__(self, data_path, anchored_features=None, case_type=None,
+                 k_neighbors=5, mantel_threshold=0.05, use_fast_correlation=False,
+                 graph_mode='family', family_filter_mode='relaxed',
+                 graph_construction_method='original'):
         """
         Initialize the anchored microbial GNN dataset.
         
@@ -70,7 +71,8 @@ class AnchoredMicrobialGNNDataset(MicrobialGNNDataset):
             mantel_threshold=mantel_threshold,
             use_fast_correlation=use_fast_correlation,
             graph_mode=graph_mode,
-            family_filter_mode=family_filter_mode
+            family_filter_mode=family_filter_mode,
+            graph_construction_method=graph_construction_method
         )
     
     def _process_families(self):

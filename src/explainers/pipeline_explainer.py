@@ -466,6 +466,26 @@ def create_unified_pruned_graph_pipeline(pipeline, explainer, model, importance_
     print(f"Combined importance range: {combined_importance.min():.4f} - {combined_importance.max():.4f}")
     print(f"Original threshold: {importance_threshold:.4f}")
     print(f"Adaptive threshold (55% retention): {adaptive_threshold:.4f}")
+
+    # Save combined importance scores for analysis
+    import pandas as pd
+    import os
+    if target_name:
+        combined_importance_filename = f"combined_importance_scores_{target_name.replace('-', '_')}.csv"
+    else:
+        combined_importance_filename = "combined_importance_scores.csv"
+    combined_importance_path = os.path.join(pipeline.save_dir, combined_importance_filename)
+
+    combined_df = pd.DataFrame({
+        'node_name': pipeline.dataset.node_feature_names,
+        'edge_importance': edge_node_importance,
+        'attention_score': attention_scores,
+        'combined_importance': combined_importance,
+        'above_adaptive_threshold': combined_importance > adaptive_threshold
+    })
+    combined_df = combined_df.sort_values('combined_importance', ascending=False)
+    combined_df.to_csv(combined_importance_path, index=False)
+    print(f"💾 Combined importance scores saved to: {combined_importance_path}")
     
     # Use the more aggressive threshold
     final_threshold = max(adaptive_threshold, importance_threshold)
