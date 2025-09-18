@@ -91,7 +91,8 @@ class MixedEmbeddingPipeline:
                  use_nested_cv=True,  # New parameter for nested CV hyperparameter tuning
                  use_node_sparsification=False,  # New parameter for node sparsification
                  node_importance_threshold=0.1,  # Threshold for node importance
-                 min_nodes_to_keep=10):  # Minimum number of nodes to keep after sparsification
+                 min_nodes_to_keep=10,  # Minimum number of nodes to keep after sparsification
+                 graph_construction_method='original'):  # Graph construction method
         """
         Initialize the mixed embedding pipeline
         
@@ -135,6 +136,7 @@ class MixedEmbeddingPipeline:
         self.use_fast_correlation = use_fast_correlation
         self.graph_mode = graph_mode
         self.family_filter_mode = family_filter_mode
+        self.graph_construction_method = graph_construction_method
         self.use_enhanced_training = use_enhanced_training
         self.adaptive_hyperparameters = adaptive_hyperparameters
         self.use_nested_cv = use_nested_cv
@@ -185,7 +187,8 @@ class MixedEmbeddingPipeline:
             mantel_threshold=mantel_threshold,
             use_fast_correlation=use_fast_correlation,
             graph_mode=graph_mode,
-            family_filter_mode=family_filter_mode
+            family_filter_mode=family_filter_mode,
+            graph_construction_method=graph_construction_method
         )
         
         # Get target names for reference
@@ -421,7 +424,8 @@ class MixedEmbeddingPipeline:
                     mantel_threshold=self.mantel_threshold,
                     use_fast_correlation=self.use_fast_correlation,
                     graph_mode=self.graph_mode,
-                    family_filter_mode=self.family_filter_mode
+                    family_filter_mode=self.family_filter_mode,
+                    graph_construction_method=getattr(self, 'graph_construction_method', 'original')
                 )
                 temp_data_list = self._move_data_to_device(temp_dataset.data_list)
             
@@ -640,7 +644,8 @@ class MixedEmbeddingPipeline:
                     mantel_threshold=self.mantel_threshold,
                     use_fast_correlation=self.use_fast_correlation,
                     graph_mode=self.graph_mode,
-                    family_filter_mode=self.family_filter_mode
+                    family_filter_mode=self.family_filter_mode,
+                    graph_construction_method=getattr(self, 'graph_construction_method', 'original')
                 )
                 # Move all data to the correct device
                 best_dataset_data_list = self._move_data_to_device(best_dataset.data_list)

@@ -577,6 +577,16 @@ class MicrobialGNNDataset:
             sparsified_edge_index, sparsified_edge_weight, sparsified_edge_type = self._apply_knn_sparsification()
 
             print(f"Step 2 - After k-NN sparsification: {sparsified_edge_index.shape[1]//2} edges")
+
+            # Visualize k-NN sparsified graph
+            knn_metadata = {
+                'num_nodes': len(self.node_feature_names),
+                'num_edges': sparsified_edge_index.shape[1] // 2,
+                'method': f'k-NN sparsified (k={self.k_neighbors})',
+                'density': sparsified_edge_index.shape[1] // 2 / (len(self.node_feature_names) * (len(self.node_feature_names) - 1) / 2)
+            }
+            self._visualize_knn_graph(sparsified_edge_index, sparsified_edge_weight, knn_metadata)
+
             return sparsified_edge_index, sparsified_edge_weight, sparsified_edge_type
         else:
             print(f"Graph density {density:.3f} ≤ {density_threshold}, no sparsification needed")
@@ -844,9 +854,17 @@ class MicrobialGNNDataset:
         
         return data_list
 
-    def _visualize_correlation_graph(self, edge_index, edge_weight, metadata, save_dir='graph_visualizations_debug'):
+    def _visualize_correlation_graph(self, edge_index, edge_weight, metadata, save_dir=None):
         """Create simple visualization of correlation graph after it's built"""
         try:
+            # Use case-specific directory if available, otherwise use default
+            if save_dir is None:
+                save_dir = getattr(self, 'save_dir', 'graph_visualizations_debug')
+                if hasattr(self, 'case_type') and self.case_type:
+                    save_dir = f"graph_visualizations_{self.case_type}"
+                else:
+                    save_dir = 'graph_visualizations_debug'
+
             os.makedirs(save_dir, exist_ok=True)
 
             # Create NetworkX graph from edge_index and edge_weight
@@ -882,8 +900,10 @@ class MicrobialGNNDataset:
                 else:
                     node_labels[node] = f"Node_{node}"
 
-            # Draw the graph
-            nx.draw_networkx_nodes(G, pos, node_size=800, node_color='lightblue', alpha=0.8)
+            # Draw the graph with colorful nodes like k-NN graph
+            nx.draw_networkx_nodes(G, pos, node_size=800, alpha=0.9,
+                                 node_color=range(len(G.nodes())), cmap=plt.cm.tab20,
+                                 edgecolors='black', linewidths=0.5)
             nx.draw_networkx_edges(G, pos, width=1.0, alpha=0.6, edge_color='gray')
             nx.draw_networkx_labels(G, pos, labels=node_labels, font_size=8, font_weight='bold')
 
@@ -902,6 +922,74 @@ class MicrobialGNNDataset:
 
         except Exception as e:
             print(f"Warning: Correlation graph visualization failed: {e}")
+
+    def _visualize_knn_graph(self, edge_index, edge_weight, metadata, save_dir=None):
+        """Create visualization of k-NN sparsified graph"""
+        try:
+            # Use case-specific directory if available, otherwise use default
+            if save_dir is None:
+                save_dir = getattr(self, 'save_dir', 'graph_visualizations_debug')
+                if hasattr(self, 'case_type') and self.case_type:
+                    save_dir = f"graph_visualizations_{self.case_type}"
+                else:
+                    save_dir = 'graph_visualizations_debug'
+
+            os.makedirs(save_dir, exist_ok=True)
+
+            # Create NetworkX graph from edge_index and edge_weight
+            G = nx.Graph()
+
+            # Add nodes with family names
+            for i, name in enumerate(self.node_feature_names):
+                G.add_node(i, name=name)
+
+            # Add edges (process every other edge since graph is undirected)
+            for i in range(0, edge_index.shape[1], 2):
+                u, v = edge_index[0, i].item(), edge_index[1, i].item()
+                weight = edge_weight[i].item() if edge_weight is not None else 1.0
+                G.add_edge(u, v, weight=weight)
+
+            # Create visualization
+            plt.figure(figsize=(15, 15))
+
+            # Spring layout
+            try:
+                pos = nx.spring_layout(G, k=1.5, iterations=50, seed=42)
+            except:
+                pos = nx.circular_layout(G)
+
+            # Node labels (shortened family names)
+            node_labels = {}
+            for node in G.nodes():
+                if node < len(self.node_feature_names):
+                    full_name = self.node_feature_names[node]
+                    short_name = full_name.split('.')[-1] if '.' in full_name else full_name
+                    node_labels[node] = short_name
+                else:
+                    node_labels[node] = f"Node_{node}"
+
+            # Draw the graph with colorful nodes like other graphs
+            nx.draw_networkx_nodes(G, pos, node_size=800, alpha=0.9,
+                                 node_color=range(len(G.nodes())), cmap=plt.cm.tab20,
+                                 edgecolors='black', linewidths=0.5)
+            nx.draw_networkx_edges(G, pos, width=1.0, alpha=0.6, edge_color='gray')
+            nx.draw_networkx_labels(G, pos, labels=node_labels, font_size=8, font_weight='bold')
+
+            plt.title(f'k-NN Sparsified Graph ({len(G.nodes())} nodes, {len(G.edges())} edges)',
+                     fontsize=16, fontweight='bold', pad=20)
+            plt.axis('off')
+
+            # Save the graph
+            filename = f"{save_dir}/knn_sparsified_graph_IMMEDIATE.png"
+            plt.savefig(filename, dpi=300, bbox_inches='tight', facecolor='white')
+            plt.close()
+
+            print(f"📊 k-NN sparsified graph visualization saved to: {filename}")
+            print(f"    Graph properties: {metadata['num_nodes']} nodes, {metadata['num_edges']} edges")
+            print(f"    Density: {metadata['density']:.3f}, Method: {metadata['method']}")
+
+        except Exception as e:
+            print(f"Warning: k-NN graph visualization failed: {e}")
 
     def visualize_graphs(self, save_dir='graph_visualizations'):
         """Visualize both original and sparsified graphs for comparison"""

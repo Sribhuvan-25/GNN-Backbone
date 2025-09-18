@@ -33,8 +33,8 @@ from pathlib import Path
 
 def main():
     parser = argparse.ArgumentParser(description='Run Enhanced Node Pruning Pipeline')
-    parser.add_argument('--case', default='case1', choices=['case1', 'case2', 'case3', 'case4', 'case5'],
-                        help='Domain expert case to run (default: case1)')
+    parser.add_argument('--case', default='case1', choices=['case1', 'case2', 'case3', 'case4', 'case5', 'all'],
+                        help='Domain expert case to run (default: case1, use "all" to run all cases)')
     parser.add_argument('--epochs', type=int, default=100,
                         help='Number of training epochs (default: 100)')
     parser.add_argument('--quick', action='store_true',
@@ -46,7 +46,11 @@ def main():
                         help='Graph construction method (default: paper_correlation)')
     
     args = parser.parse_args()
-    
+
+    # Handle "all" cases option
+    if args.case == 'all':
+        return run_all_cases(args)
+
     # Adjust parameters for quick run
     if args.quick:
         epochs = 5
@@ -184,6 +188,112 @@ Key Features Enabled:
         import traceback
         traceback.print_exc()
         sys.exit(1)
+
+
+def run_all_cases(args):
+    """Run all domain expert cases (case1, case2, case3) with enhanced pipeline"""
+    print("="*80)
+    print("RUNNING ALL DOMAIN EXPERT CASES WITH ENHANCED PIPELINE")
+    print("="*80)
+    print("Features enabled:")
+    print("✓ Spearman correlation graph initialization")
+    print("✓ Attention-based node pruning with feature importance tracking")
+    print("✓ Protected anchored features during pruning")
+    print("✓ Working transformer models")
+    print("✓ Comprehensive graph visualizations")
+    print("="*80)
+
+    cases = ['case1', 'case2', 'case3']
+    all_results = {}
+    total_start_time = time.time()
+
+    for i, case in enumerate(cases, 1):
+        print(f"\n{'='*60}")
+        print(f"RUNNING {case.upper()} ({i}/{len(cases)})")
+        print(f"{'='*60}")
+
+        # Create a copy of args for this case
+        case_args = argparse.Namespace(**vars(args))
+        case_args.case = case
+
+        try:
+            # Adjust parameters for quick run
+            if args.quick:
+                epochs = 5
+                folds = 2
+                nested_cv = False
+                print("🚀 QUICK TEST MODE: Running with minimal configuration")
+            else:
+                epochs = args.epochs
+                folds = 5
+                nested_cv = True
+                print("🔬 FULL RESEARCH MODE: Running with complete validation")
+
+            print(f"Case: {case}")
+            print(f"Epochs: {epochs}")
+            print(f"Graph Method: {args.graph_method}")
+
+            # Import and configure pipeline
+            from pipelines.domain_expert_cases_pipeline_refactored import DomainExpertCasesPipeline
+
+            config = {
+                'data_path': args.data_path,
+                'case_type': case,
+                'num_epochs': epochs,
+                'num_folds': folds,
+                'use_nested_cv': nested_cv,
+                'save_dir': f'enhanced_results_{case}',
+                'k_neighbors': 10,
+                'hidden_dim': 64,
+                'dropout_rate': 0.3,
+                'batch_size': 8,
+                'learning_rate': 0.001,
+                'patience': 20 if not args.quick else 5,
+                'graph_mode': 'family',
+                'graph_construction_method': args.graph_method
+            }
+
+            start_time = time.time()
+            pipeline = DomainExpertCasesPipeline(**config)
+            results = pipeline.run_case_specific_pipeline()
+            end_time = time.time()
+
+            all_results[case] = results
+            runtime = end_time - start_time
+
+            print(f"\n✅ {case.upper()} completed successfully!")
+            print(f"Runtime: {runtime/60:.2f} minutes")
+            print(f"Results saved to: {pipeline.save_dir}")
+
+        except Exception as e:
+            print(f"❌ {case.upper()} failed: {e}")
+            import traceback
+            traceback.print_exc()
+            all_results[case] = None
+
+    # Summary
+    total_runtime = time.time() - total_start_time
+    print(f"\n{'='*80}")
+    print("ALL CASES EXECUTION SUMMARY")
+    print(f"{'='*80}")
+
+    successful_cases = [case for case, result in all_results.items() if result is not None]
+    failed_cases = [case for case, result in all_results.items() if result is None]
+
+    if successful_cases:
+        print(f"✅ Successfully completed: {', '.join(successful_cases)}")
+
+    if failed_cases:
+        print(f"❌ Failed cases: {', '.join(failed_cases)}")
+
+    print(f"🕐 Total runtime: {total_runtime/60:.2f} minutes")
+    print(f"📁 Results saved to enhanced_results_case1/, enhanced_results_case2/, enhanced_results_case3/")
+    print(f"🔬 Success rate: {len(successful_cases)}/{len(cases)} ({len(successful_cases)/len(cases)*100:.1f}%)")
+
+    if args.quick:
+        print(f"\n💡 For full research results, run without --quick flag")
+
+    return all_results
 
 
 if __name__ == "__main__":
