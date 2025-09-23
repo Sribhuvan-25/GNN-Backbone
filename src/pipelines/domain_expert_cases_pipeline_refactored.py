@@ -255,12 +255,25 @@ class DomainExpertCasesPipeline(MixedEmbeddingPipeline):
                 'Methanosaetaceae'        # d__Archaea;p__Halobacterota;c__Methanosarcinia;o__Methanosarciniales;f__Methanosaetaceae;g__Methanosaeta
             ]
         elif case_type == 'case3' or case_type == 'case3_mixed_pathway':
-            # Key families for both pathways that should be preserved
+            # Complete families for mixed pathways (hydrogenotrophic + acetoclastic + syntrophic)
             return [
-                'Methanoregulaceae',      # Hydrogenotrophic
-                'Methanobacteriaceae',    # Hydrogenotrophic  
-                'Methanospirillaceae',    # Hydrogenotrophic
-                'Methanosaetaceae'        # Acetoclastic
+                # Hydrogenotrophic methanogens
+                'Methanoregulaceae',      # d__Archaea;p__Halobacterota;c__Methanomicrobia;o__Methanomicrobiales;f__Methanoregulaceae;g__Methanolinea
+                'Methanobacteriaceae',    # d__Archaea;p__Euryarchaeota;c__Methanobacteria;o__Methanobacteriales;f__Methanobacteriaceae;g__Methanobacterium
+                'Methanospirillaceae',    # d__Archaea;p__Halobacterota;c__Methanomicrobia;o__Methanomicrobiales;f__Methanospirillaceae;g__Methanospirillum
+                # Acetoclastic methanogens
+                'Methanosaetaceae',       # d__Archaea;p__Halobacterota;c__Methanosarcinia;o__Methanosarciniales;f__Methanosaetaceae;g__Methanosaeta
+                # Syntrophic bacteria
+                'Smithellaceae',          # d__Bacteria;p__Desulfobacterota;c__Syntrophia;o__Syntrophales;f__Smithellaceae;g__Smithella
+                'Syntrophorhabdaceae',    # d__Bacteria;p__Desulfobacterota;c__Syntrophorhabdia;o__Syntrophorhabdales;f__Syntrophorhabdaceae;g__Syntrophorhabdus
+                'Syntrophobacteraceae',   # d__Bacteria;p__Desulfobacterota;c__Syntrophobacteria;o__Syntrophobacterales;f__Syntrophobacteraceae;g__Syntrophobacter
+                'Synergistaceae',         # d__Bacteria;p__Synergistota;c__Synergistia;o__Synergistales;f__Synergistaceae;g__Syner-01
+                'uncultured',             # d__Bacteria;p__Desulfobacterota;c__Syntrophia;o__Syntrophales;f__uncultured;g__uncultured
+                'Rikenellaceae',          # d__Bacteria;p__Bacteroidota;c__Bacteroidia;o__Bacteroidales;f__Rikenellaceae;g__DMER64
+                'Syntrophomonadaceae',    # d__Bacteria;p__Firmicutes;c__Syntrophomonadia;o__Syntrophomonadales;f__Syntrophomonadaceae;g__Syntrophomonas
+                'Syntrophaceae',          # d__Bacteria;p__Desulfobacterota;c__Syntrophia;o__Syntrophales;f__Syntrophaceae;g__Syntrophus
+                'Geobacteraceae',         # d__Bacteria;p__Desulfobacterota;c__Desulfuromonadia;o__Geobacterales;f__Geobacteraceae;__
+                'Desulfotomaculales'      # d__Bacteria;p__Firmicutes;c__Desulfotomaculia;o__Desulfotomaculales;f__Desulfotomaculales;g__Pelotomaculum
             ]
         else:
             # No protected nodes for other cases
@@ -914,6 +927,13 @@ class DomainExpertCasesPipeline(MixedEmbeddingPipeline):
             if hasattr(self.dataset, 'explainer_sparsified_graph_data') and self.dataset.explainer_sparsified_graph_data:
                 explainer_graph_data = self.dataset.explainer_sparsified_graph_data
             
+            # Get abundance data for node sizing
+            abundance_data = {}
+            if hasattr(self.dataset, 'df_family_filtered'):
+                for family_name in self.dataset.node_feature_names:
+                    if family_name in self.dataset.df_family_filtered.columns:
+                        abundance_data[family_name] = self.dataset.df_family_filtered[family_name].mean()
+
             # Create enhanced comparison
             if knn_graph_data:
                 create_enhanced_graph_comparison(
@@ -921,7 +941,9 @@ class DomainExpertCasesPipeline(MixedEmbeddingPipeline):
                     explainer_graph_data=explainer_graph_data,
                     node_features=self.dataset.node_feature_names,
                     output_dir=graphs_dir,
-                    functional_groups=functional_groups
+                    functional_groups=functional_groups,
+                    protected_nodes=self.dataset.protected_nodes,
+                    abundance_data=abundance_data
                 )
                 print(f"Enhanced graph comparison created for {target_name}")
             else:

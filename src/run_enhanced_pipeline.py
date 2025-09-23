@@ -102,7 +102,8 @@ Key Features Enabled:
             'learning_rate': 0.001,
             'patience': 20 if not args.quick else 5,
             'graph_mode': 'family',
-            'graph_construction_method': args.graph_method  # User-selected graph construction method
+            'graph_construction_method': args.graph_method,  # User-selected graph construction method
+            'use_node_pruning': True  # ✅ ENABLE ATTENTION-BASED NODE PRUNING
         }
         
         print("Initializing enhanced pipeline...")
