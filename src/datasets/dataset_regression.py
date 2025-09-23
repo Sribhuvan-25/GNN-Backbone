@@ -812,13 +812,9 @@ class MicrobialGNNDataset:
                      fontsize=16, fontweight='bold', pad=20)
             plt.axis('off')
             
-            # Save the graph with unique filename
-            filename = f"{viz_dir}/knn_graph_IMMEDIATE_CREATION.png"
-            plt.savefig(filename, dpi=300, bbox_inches='tight', facecolor='white')
+            # Immediate visualization disabled - only enhanced comparison is generated
             plt.close()
-            
-            print(f"IMMEDIATE k-NN graph visualization saved to: {filename}")
-            print(f"DEBUG: Graph had {len(G.nodes())} nodes with names: {list(node_labels.values())[:5]}...")
+            print(f"IMMEDIATE k-NN graph visualization skipped - using enhanced comparison instead")
             
         except Exception as e:
             print(f"Warning: Immediate k-NN visualization failed: {e}")
@@ -909,8 +905,10 @@ class MicrobialGNNDataset:
                     family_name = self.node_feature_names[node]
                     if hasattr(self, 'df_family_filtered') and family_name in self.df_family_filtered.columns:
                         mean_abundance = self.df_family_filtered[family_name].mean()
-                        # Scale node size with dramatic range for clear visibility: min=100, max=3000
-                        node_size = 100 + (mean_abundance * 30000)
+                        # Scale node size with better sensitivity: min=400, max=1600
+                        # Use power scaling for better visual differentiation
+                        normalized_abundance = min(1.0, max(0.0, (mean_abundance - 0.01) / (0.07 - 0.01)))
+                        node_size = 400 + (normalized_abundance ** 0.7 * 1200)
                         if node < 5:  # Debug first 5 nodes
                             print(f"🔍 Node {node} ({family_name}): abundance={mean_abundance:.6f}, size={node_size:.0f}")
                     else:
@@ -925,7 +923,10 @@ class MicrobialGNNDataset:
             edge_widths = []
             for i, (u, v, data) in enumerate(G.edges(data=True)):
                 weight = abs(data.get('weight', 0.5))  # absolute correlation strength
-                edge_width = 0.2 + (weight * 12)  # Scale to 0.2-12.2 range for visibility
+                # Use more sensitive edge scaling with normalization
+                # Typical correlation range is 0.6-0.8, so normalize within that range
+                normalized_weight = min(1.0, max(0.0, (weight - 0.6) / (0.8 - 0.6)))
+                edge_width = 0.8 + (normalized_weight ** 1.5 * 3.0)  # Range: 0.8-3.8
                 edge_widths.append(edge_width)
                 if i < 5:  # Debug first 5 edges
                     print(f"🔍 Edge {i} ({u}-{v}): weight={weight:.4f}, width={edge_width:.2f}")
@@ -944,12 +945,10 @@ class MicrobialGNNDataset:
                      fontsize=16, fontweight='bold', pad=20)
             plt.axis('off')
 
-            # Save the graph
-            filename = f"{save_dir}/spearman_correlation_graph_IMMEDIATE.png"
-            plt.savefig(filename, dpi=300, bbox_inches='tight', facecolor='white')
+            # Immediate visualization disabled - only enhanced comparison is generated
             plt.close()
 
-            print(f"📊 Spearman correlation graph visualization saved to: {filename}")
+            print(f"📊 Spearman correlation graph visualization skipped - using enhanced comparison instead")
             print(f"    Graph properties: {metadata['n_nodes']} nodes, {metadata['n_edges']} edges")
             print(f"    Density: {metadata['density']:.3f}, Mean correlation: {metadata['correlation_stats']['mean']:.3f}")
 
@@ -1009,8 +1008,10 @@ class MicrobialGNNDataset:
                     family_name = self.node_feature_names[node]
                     if hasattr(self, 'df_family_filtered') and family_name in self.df_family_filtered.columns:
                         mean_abundance = self.df_family_filtered[family_name].mean()
-                        # Scale node size with dramatic range for clear visibility: min=100, max=3000
-                        node_size = 100 + (mean_abundance * 30000)
+                        # Scale node size with better sensitivity: min=400, max=1600
+                        # Use power scaling for better visual differentiation
+                        normalized_abundance = min(1.0, max(0.0, (mean_abundance - 0.01) / (0.07 - 0.01)))
+                        node_size = 400 + (normalized_abundance ** 0.7 * 1200)
                     else:
                         node_size = 600  # default size
                 else:
@@ -1021,8 +1022,10 @@ class MicrobialGNNDataset:
             edge_widths = []
             for u, v, data in G.edges(data=True):
                 weight = abs(data.get('weight', 0.5))  # absolute weight strength
-                # Scale edge width for dramatic visibility: min=0.2, max=12.2
-                edge_width = 0.2 + (weight * 12)
+                # Use more sensitive edge scaling for k-NN weights
+                # k-NN weights are typically distance-based, normalize for better visibility
+                normalized_weight = min(1.0, max(0.0, weight))  # Ensure 0-1 range
+                edge_width = 0.8 + (normalized_weight ** 1.5 * 3.0)  # Range: 0.8-3.8
                 edge_widths.append(edge_width)
 
             print(f"🔍 K-NN GRAPH - Node sizes: min={min(node_sizes):.1f}, max={max(node_sizes):.1f}, range={max(node_sizes)-min(node_sizes):.1f}")
@@ -1039,12 +1042,10 @@ class MicrobialGNNDataset:
                      fontsize=16, fontweight='bold', pad=20)
             plt.axis('off')
 
-            # Save the graph
-            filename = f"{save_dir}/knn_sparsified_graph_IMMEDIATE.png"
-            plt.savefig(filename, dpi=300, bbox_inches='tight', facecolor='white')
+            # Immediate visualization disabled - only enhanced comparison is generated
             plt.close()
 
-            print(f"📊 k-NN sparsified graph visualization saved to: {filename}")
+            print(f"📊 k-NN sparsified graph visualization skipped - using enhanced comparison instead")
             print(f"    Graph properties: {metadata['num_nodes']} nodes, {metadata['num_edges']} edges")
             print(f"    Density: {metadata['density']:.3f}, Method: {metadata['method']}")
 
@@ -1052,76 +1053,14 @@ class MicrobialGNNDataset:
             print(f"Warning: k-NN graph visualization failed: {e}")
 
     def visualize_graphs(self, save_dir='graph_visualizations'):
-        """Visualize both original and sparsified graphs for comparison"""
-        os.makedirs(save_dir, exist_ok=True)
-        
-        # Create a figure with two subplots side by side
-        fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(20, 10))
-        
-        # Get original and current number of nodes
-        original_nodes = self.original_node_count if self.original_node_count is not None else len(self.node_feature_names)
-        current_nodes = len(self.node_feature_names)
-        
-        # Visualize original graph
-        self._visualize_single_graph(
-            self.original_graph_data['edge_index'],
-            self.original_graph_data['edge_weight'],
-            self.original_graph_data['edge_type'],
-            ax1,
-            title=f"KNN Graph ({original_nodes} nodes, {self.original_graph_data['edge_index'].shape[1]//2} edges)",
-            graph_type='original'
-        )
-        
-        # Check if explainer-sparsified graph exists
-        if self.explainer_sparsified_graph_data is not None:
-            # Visualize explainer-sparsified graph
-            self._visualize_single_graph(
-                self.explainer_sparsified_graph_data['edge_index'],
-                self.explainer_sparsified_graph_data['edge_weight'],
-                self.explainer_sparsified_graph_data['edge_type'],
-                ax2,
-                title=f"GNNExplainer Graph ({current_nodes} nodes, {self.explainer_sparsified_graph_data['edge_index'].shape[1]//2} edges)",
-                graph_type='explainer'
-            )
-        else:
-            ax2.text(0.5, 0.5, "GNNExplainer graph not created yet.",
-                     horizontalalignment='center', verticalalignment='center', fontsize=14)
-            ax2.set_title("GNNExplainer Graph (Not Available)")
-            ax2.axis('off')
-        
-        plt.tight_layout()
-        plt.savefig(f"{save_dir}/graph_comparison_OLD_METHOD.png", dpi=300, bbox_inches='tight')
-        plt.close()
-        
-        print(f"OLD METHOD graph visualization saved to {save_dir}/graph_comparison_OLD_METHOD.png")
-        
-        # Also create individual high-resolution visualizations
-        plt.figure(figsize=(15, 15))
-        self._visualize_single_graph(
-            self.original_graph_data['edge_index'],
-            self.original_graph_data['edge_weight'],
-            self.original_graph_data['edge_type'],
-            plt.gca(),
-            title=f"KNN Graph ({original_nodes} nodes, {self.original_graph_data['edge_index'].shape[1]//2} edges)",
-            graph_type='original'
-        )
-        plt.tight_layout()
-        plt.savefig(f"{save_dir}/knn_graph_OLD_SINGLE.png", dpi=300, bbox_inches='tight')
-        plt.close()
-        
-        if self.explainer_sparsified_graph_data is not None:
-            plt.figure(figsize=(15, 15))
-            self._visualize_single_graph(
-                self.explainer_sparsified_graph_data['edge_index'],
-                self.explainer_sparsified_graph_data['edge_weight'],
-                self.explainer_sparsified_graph_data['edge_type'],
-                plt.gca(),
-                title=f"GNNExplainer Graph ({current_nodes} nodes, {self.explainer_sparsified_graph_data['edge_index'].shape[1]//2} edges)",
-                graph_type='explainer'
-            )
-            plt.tight_layout()
-            plt.savefig(f"{save_dir}/explainer_graph_OLD_SINGLE.png", dpi=300, bbox_inches='tight')
-            plt.close()
+        """Disabled - only enhanced graph comparison is generated now.
+
+        This method used to create extra graph files but has been disabled to only generate
+        the 4 required files: 3 individual stage graphs + 1 comprehensive comparison.
+        The enhanced visualization is handled by create_enhanced_graph_comparison().
+        """
+        print(f"Graph visualization skipped - using enhanced comparison instead in {save_dir}")
+        # No-op to prevent extra file generation
     
     def _get_node_labels(self, G, graph_type):
         """Get appropriate node labels for visualization based on graph type."""

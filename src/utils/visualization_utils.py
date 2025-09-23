@@ -256,87 +256,22 @@ def create_enhanced_graph_comparison(knn_graph_data, explainer_graph_data, node_
                                    output_dir, functional_groups=None, protected_nodes=None, abundance_data=None):
     """
     Create side-by-side comparison of k-NN and explainer graphs with enhanced edge weight visualization.
-    
+    Only generates the 4 required files: 3 individual stage graphs + 1 comprehensive comparison.
+
     Args:
         knn_graph_data: Dictionary with k-NN graph data (edge_index, edge_weight, etc.)
         explainer_graph_data: Dictionary with explainer graph data
         node_features: List of node feature names
         output_dir: Directory to save visualizations
         functional_groups: Dictionary with functional group features for coloring
+        protected_nodes: List of protected node names
+        abundance_data: Dictionary with abundance data for node sizing
     """
     import os
     os.makedirs(output_dir, exist_ok=True)
-    
-    # Set up functional group colors if provided
-    if functional_groups:
-        node_colors = get_functional_group_colors(
-            node_features,
-            functional_groups.get('acetoclastic', []),
-            functional_groups.get('hydrogenotrophic', []), 
-            functional_groups.get('syntrophic', [])
-        )
-        legend_elements = create_legend_for_functional_groups(
-            functional_groups.get('acetoclastic', []),
-            functional_groups.get('hydrogenotrophic', []),
-            functional_groups.get('syntrophic', [])
-        )
-    else:
-        # Use default colors
-        node_colors = {i: '#4ECDC4' for i in range(len(node_features))}
-        legend_elements = None
-    
-    # Create k-NN graph visualization
-    if knn_graph_data and 'edge_index' in knn_graph_data:
-        knn_G = create_networkx_graph_from_edge_data(
-            knn_graph_data['edge_index'],
-            knn_graph_data.get('edge_weight', None),
-            node_features
-        )
-        
-        save_graph_visualization(
-            knn_G, node_colors, 
-            os.path.join(output_dir, 'knn_graph_enhanced.png'),
-            title="k-NN Graph (Original)", 
-            legend_elements=legend_elements,
-            show_edge_weights=True
-        )
-    
-    # Create explainer graph visualization  
-    if explainer_graph_data and 'edge_index' in explainer_graph_data:
-        explainer_G = create_networkx_graph_from_edge_data(
-            explainer_graph_data['edge_index'],
-            explainer_graph_data.get('edge_weight', None),
-            explainer_graph_data.get('pruned_node_names', node_features)
-        )
-        
-        # Adjust node colors for pruned graph
-        if 'kept_nodes' in explainer_graph_data:
-            kept_indices = explainer_graph_data['kept_nodes']
-            # Create pruned node colors safely, checking if indices exist
-            pruned_node_colors = {}
-            for i in range(len(kept_indices)):
-                original_idx = kept_indices[i]
-                if original_idx in node_colors:
-                    pruned_node_colors[i] = node_colors[original_idx]
-                else:
-                    # Fallback color if index not found
-                    pruned_node_colors[i] = '#4ECDC4'
-                    print(f"Warning: Node color not found for original index {original_idx}, using fallback")
-        else:
-            pruned_node_colors = node_colors
-        
-        pruning_type = explainer_graph_data.get('pruning_type', 'unknown')
-        title_suffix = "Attention-Pruned" if pruning_type == 'attention_based' else "Explainer-Pruned"
-        
-        save_graph_visualization(
-            explainer_G, pruned_node_colors,
-            os.path.join(output_dir, f'{pruning_type}_graph_enhanced.png'),
-            title=f"Graph ({title_suffix})",
-            legend_elements=legend_elements,
-            show_edge_weights=True
-        )
-    
-    # Create combined comparison plot
+
+    # Only create the three-panel comparison with individual saves
+    # This generates exactly 4 files: 3 individual + 1 comprehensive
     create_side_by_side_comparison(
         knn_graph_data, explainer_graph_data, node_features,
         output_dir, functional_groups, protected_nodes, abundance_data
@@ -357,24 +292,54 @@ def create_side_by_side_comparison(knn_graph_data, explainer_graph_data, node_fe
                 colors.append('#808080')  # Gray for others
         return colors
 
-    # Function to calculate node sizes based on abundance
+    # Function to calculate node sizes based on abundance with better scaling
     def get_node_sizes_from_abundance(node_list, abundance_dict=None):
-        if abundance_dict:
+        if abundance_dict and len(abundance_dict) > 0:
             sizes = []
+            # Get abundance range for better scaling
+            abundances = [abundance_dict.get(node, 0.01) for node in node_list]
+            min_abundance = min(abundances)
+            max_abundance = max(abundances)
+
             for node in node_list:
-                abundance = abundance_dict.get(node, 0.01)  # Default small abundance
-                size = 300 + (abundance * 25000)  # Dramatic size variation
+                abundance = abundance_dict.get(node, 0.01)
+                # Normalize abundance to 0-1 range, then scale more sensitively
+                if max_abundance > min_abundance:
+                    normalized = (abundance - min_abundance) / (max_abundance - min_abundance)
+                    # Use square root to make differences more visible
+                    size = 400 + (normalized ** 0.7 * 1200)  # Range: 400-1600
+                else:
+                    size = 800  # All same abundance
                 sizes.append(size)
             return sizes
         else:
             return [800] * len(node_list)  # Default size
 
-    # Function to calculate edge widths based on correlation strength
+    # Function to calculate edge widths with better sensitivity
     def get_edge_widths_from_correlations(graph):
         if not graph.edges():
             return []
-        edge_weights = [graph[u][v].get('weight', 0.5) for u, v in graph.edges()]
-        edge_widths = [0.5 + (abs(weight) * 15) for weight in edge_weights]  # Dramatic width variation
+
+        edge_weights = [abs(graph[u][v].get('weight', 0.5)) for u, v in graph.edges()]
+
+        if len(edge_weights) == 0:
+            return []
+
+        # Get weight range for better scaling
+        min_weight = min(edge_weights)
+        max_weight = max(edge_weights)
+
+        edge_widths = []
+        for weight in edge_weights:
+            if max_weight > min_weight:
+                # Normalize to 0-1, then apply more sensitive scaling
+                normalized = (weight - min_weight) / (max_weight - min_weight)
+                # Use exponential scaling to amplify differences
+                width = 0.8 + (normalized ** 1.5 * 4.0)  # Range: 0.8-4.8
+            else:
+                width = 2.0  # All weights are the same
+            edge_widths.append(width)
+
         return edge_widths
     
     # Panel 1: Spearman Correlation Graph (Original)
@@ -395,10 +360,9 @@ def create_side_by_side_comparison(knn_graph_data, explainer_graph_data, node_fe
 
     pos1 = nx.spring_layout(original_G, k=8, iterations=150, seed=42)
 
-    # Get full node names and colors
-    original_node_names = [original_G.nodes[node].get('name', f'node_{node}') for node in original_G.nodes()]
-    original_node_colors = get_node_colors_with_protection(original_node_names, protected_nodes)
-    original_node_sizes = get_node_sizes_from_abundance(original_node_names, abundance_data)
+    # Get full node names and colors - use node_features directly
+    original_node_colors = get_node_colors_with_protection(node_features, protected_nodes)
+    original_node_sizes = get_node_sizes_from_abundance(node_features, abundance_data)
     original_edge_widths = get_edge_widths_from_correlations(original_G)
 
     # Draw Panel 1: Spearman Correlation Graph
@@ -412,8 +376,8 @@ def create_side_by_side_comparison(knn_graph_data, explainer_graph_data, node_fe
         edge_labels = {(u, v): f'{abs(original_G[u][v].get("weight", 0)):.2f}' for u, v in original_G.edges()}
         nx.draw_networkx_edge_labels(original_G, pos1, edge_labels, ax=ax1, font_size=8)
 
-    # Add full family names as labels
-    node_labels = {node: original_G.nodes[node].get('name', f'node_{node}') for node in original_G.nodes()}
+    # Add full family names as labels - use node_features directly
+    node_labels = {i: node_features[i] for i in range(len(node_features))}
     nx.draw_networkx_labels(original_G, pos1, labels=node_labels, ax=ax1, font_size=9, font_weight='bold')
 
     ax1.set_title('Spearman Correlation Graph (Original)', fontsize=16, fontweight='bold', pad=20)
@@ -429,10 +393,9 @@ def create_side_by_side_comparison(knn_graph_data, explainer_graph_data, node_fe
     )
     pos2 = nx.spring_layout(knn_G, k=8, iterations=150, seed=42)
 
-    # Get node data for k-NN graph
-    knn_node_names = [knn_G.nodes[node].get('name', f'node_{node}') for node in knn_G.nodes()]
-    knn_node_colors = get_node_colors_with_protection(knn_node_names, protected_nodes)
-    knn_node_sizes = get_node_sizes_from_abundance(knn_node_names, abundance_data)
+    # Get node data for k-NN graph - use node_features directly
+    knn_node_colors = get_node_colors_with_protection(node_features, protected_nodes)
+    knn_node_sizes = get_node_sizes_from_abundance(node_features, abundance_data)
     knn_edge_widths = get_edge_widths_from_correlations(knn_G)
 
     # Draw Panel 2: k-NN Graph
@@ -446,8 +409,8 @@ def create_side_by_side_comparison(knn_graph_data, explainer_graph_data, node_fe
         edge_labels = {(u, v): f'{abs(knn_G[u][v].get("weight", 0)):.2f}' for u, v in knn_G.edges()}
         nx.draw_networkx_edge_labels(knn_G, pos2, edge_labels, ax=ax2, font_size=8)
 
-    # Add full family names as labels
-    node_labels = {node: knn_G.nodes[node].get('name', f'node_{node}') for node in knn_G.nodes()}
+    # Add full family names as labels - use node_features directly
+    node_labels = {i: node_features[i] for i in range(len(node_features))}
     nx.draw_networkx_labels(knn_G, pos2, labels=node_labels, ax=ax2, font_size=9, font_weight='bold')
 
     ax2.set_title('k-NN Graph (Sparsified)', fontsize=16, fontweight='bold', pad=20)
@@ -457,7 +420,15 @@ def create_side_by_side_comparison(knn_graph_data, explainer_graph_data, node_fe
     
     # Panel 3: Attention-Pruned Graph
     if explainer_graph_data and 'edge_index' in explainer_graph_data:
+        # Get the actual pruned node names from explainer data
         explainer_node_names = explainer_graph_data.get('pruned_node_names', node_features)
+        print(f"DEBUG: Explainer node names: {explainer_node_names[:3] if explainer_node_names else 'None'}...")
+
+        # Ensure we have valid node names
+        if not explainer_node_names or len(explainer_node_names) == 0:
+            print("Warning: No pruned_node_names found, using fallback")
+            explainer_node_names = node_features
+
         explainer_G = create_networkx_graph_from_edge_data(
             explainer_graph_data['edge_index'],
             explainer_graph_data.get('edge_weight', None),
@@ -465,21 +436,27 @@ def create_side_by_side_comparison(knn_graph_data, explainer_graph_data, node_fe
         )
         pos3 = nx.spring_layout(explainer_G, k=8, iterations=150, seed=42)
 
-        # Get node data for pruned graph - use pruned node names
-        pruned_node_names = [explainer_G.nodes[node].get('name', f'node_{node}') for node in explainer_G.nodes()]
-        pruned_node_colors = get_node_colors_with_protection(pruned_node_names, protected_nodes)
+        # Get node data for pruned graph - use the actual pruned node names from explainer data
+        # Don't retrieve from graph, use the explainer_node_names directly
+        pruned_node_colors = get_node_colors_with_protection(explainer_node_names, protected_nodes)
 
         # For pruned nodes, need to get abundance data for remaining nodes
         pruned_abundance_data = {}
         if abundance_data:
-            for node_name in pruned_node_names:
+            for node_name in explainer_node_names:
                 if node_name in abundance_data:
                     pruned_abundance_data[node_name] = abundance_data[node_name]
 
-        pruned_node_sizes = get_node_sizes_from_abundance(pruned_node_names, pruned_abundance_data)
+        pruned_node_sizes = get_node_sizes_from_abundance(explainer_node_names, pruned_abundance_data)
         pruned_edge_widths = get_edge_widths_from_correlations(explainer_G)
 
-        # Draw Panel 3: Attention-Pruned Graph
+        # Draw Panel 3: Attention-Pruned Graph - ensure array lengths match
+        num_nodes = len(explainer_G.nodes())
+        if len(pruned_node_colors) != num_nodes:
+            pruned_node_colors = pruned_node_colors[:num_nodes] + ['#808080'] * max(0, num_nodes - len(pruned_node_colors))
+        if len(pruned_node_sizes) != num_nodes:
+            pruned_node_sizes = pruned_node_sizes[:num_nodes] + [800] * max(0, num_nodes - len(pruned_node_sizes))
+
         nx.draw_networkx_nodes(explainer_G, pos3, ax=ax3, node_color=pruned_node_colors,
                               node_size=pruned_node_sizes, alpha=0.9, edgecolors='black', linewidths=1.0)
 
@@ -490,8 +467,13 @@ def create_side_by_side_comparison(knn_graph_data, explainer_graph_data, node_fe
             edge_labels = {(u, v): f'{abs(explainer_G[u][v].get("weight", 0)):.2f}' for u, v in explainer_G.edges()}
             nx.draw_networkx_edge_labels(explainer_G, pos3, edge_labels, ax=ax3, font_size=8)
 
-        # Add full family names as labels
-        node_labels = {node: explainer_G.nodes[node].get('name', f'node_{node}') for node in explainer_G.nodes()}
+        # Add full family names as labels - ensure indices match graph nodes
+        node_labels = {}
+        for i, node in enumerate(explainer_G.nodes()):
+            if i < len(explainer_node_names):
+                node_labels[node] = explainer_node_names[i]
+            else:
+                node_labels[node] = f"Node_{node}"
         nx.draw_networkx_labels(explainer_G, pos3, labels=node_labels, ax=ax3, font_size=9, font_weight='bold')
 
         pruning_type = explainer_graph_data.get('pruning_type', 'attention_based')
