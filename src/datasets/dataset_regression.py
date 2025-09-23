@@ -900,11 +900,44 @@ class MicrobialGNNDataset:
                 else:
                     node_labels[node] = f"Node_{node}"
 
-            # Draw the graph with colorful nodes like k-NN graph
-            nx.draw_networkx_nodes(G, pos, node_size=800, alpha=0.9,
+            # Calculate node sizes based on mean abundance across samples
+            node_sizes = []
+            print(f"🔍 SPEARMAN GRAPH - Has df_family_filtered: {hasattr(self, 'df_family_filtered')}")
+
+            for node in G.nodes():
+                if node < len(self.node_feature_names):
+                    family_name = self.node_feature_names[node]
+                    if hasattr(self, 'df_family_filtered') and family_name in self.df_family_filtered.columns:
+                        mean_abundance = self.df_family_filtered[family_name].mean()
+                        # Scale node size with dramatic range for clear visibility: min=100, max=3000
+                        node_size = 100 + (mean_abundance * 30000)
+                        if node < 5:  # Debug first 5 nodes
+                            print(f"🔍 Node {node} ({family_name}): abundance={mean_abundance:.6f}, size={node_size:.0f}")
+                    else:
+                        node_size = 500  # default size
+                        if node < 5:
+                            print(f"🔍 Node {node} ({family_name}): NOT FOUND, using default size=500")
+                else:
+                    node_size = 500
+                node_sizes.append(node_size)
+
+            # Calculate edge widths based on correlation strength
+            edge_widths = []
+            for i, (u, v, data) in enumerate(G.edges(data=True)):
+                weight = abs(data.get('weight', 0.5))  # absolute correlation strength
+                edge_width = 0.2 + (weight * 12)  # Scale to 0.2-12.2 range for visibility
+                edge_widths.append(edge_width)
+                if i < 5:  # Debug first 5 edges
+                    print(f"🔍 Edge {i} ({u}-{v}): weight={weight:.4f}, width={edge_width:.2f}")
+
+            print(f"🔍 SPEARMAN GRAPH - Node sizes: min={min(node_sizes):.1f}, max={max(node_sizes):.1f}, range={max(node_sizes)-min(node_sizes):.1f}")
+            print(f"🔍 SPEARMAN GRAPH - Edge widths: min={min(edge_widths):.1f}, max={max(edge_widths):.1f}, range={max(edge_widths)-min(edge_widths):.1f}")
+
+            # Draw the graph with proportional node sizes and edge widths
+            nx.draw_networkx_nodes(G, pos, node_size=node_sizes, alpha=0.9,
                                  node_color=range(len(G.nodes())), cmap=plt.cm.tab20,
                                  edgecolors='black', linewidths=0.5)
-            nx.draw_networkx_edges(G, pos, width=1.0, alpha=0.6, edge_color='gray')
+            nx.draw_networkx_edges(G, pos, width=edge_widths, alpha=0.6, edge_color='gray')
             nx.draw_networkx_labels(G, pos, labels=node_labels, font_size=8, font_weight='bold')
 
             plt.title(f'Spearman Correlation Graph - Initial Creation ({len(G.nodes())} nodes, {len(G.edges())} edges)',
@@ -968,11 +1001,38 @@ class MicrobialGNNDataset:
                 else:
                     node_labels[node] = f"Node_{node}"
 
-            # Draw the graph with colorful nodes like other graphs
-            nx.draw_networkx_nodes(G, pos, node_size=800, alpha=0.9,
+            # Calculate node sizes based on mean abundance across samples
+            node_sizes = []
+            for node in G.nodes():
+                if node < len(self.node_feature_names):
+                    # Get mean abundance for this family across all samples
+                    family_name = self.node_feature_names[node]
+                    if hasattr(self, 'df_family_filtered') and family_name in self.df_family_filtered.columns:
+                        mean_abundance = self.df_family_filtered[family_name].mean()
+                        # Scale node size with dramatic range for clear visibility: min=100, max=3000
+                        node_size = 100 + (mean_abundance * 30000)
+                    else:
+                        node_size = 600  # default size
+                else:
+                    node_size = 600
+                node_sizes.append(node_size)
+
+            # Calculate edge widths based on correlation strength (for k-NN this is distance-based)
+            edge_widths = []
+            for u, v, data in G.edges(data=True):
+                weight = abs(data.get('weight', 0.5))  # absolute weight strength
+                # Scale edge width for dramatic visibility: min=0.2, max=12.2
+                edge_width = 0.2 + (weight * 12)
+                edge_widths.append(edge_width)
+
+            print(f"🔍 K-NN GRAPH - Node sizes: min={min(node_sizes):.1f}, max={max(node_sizes):.1f}, range={max(node_sizes)-min(node_sizes):.1f}")
+            print(f"🔍 K-NN GRAPH - Edge widths: min={min(edge_widths):.1f}, max={max(edge_widths):.1f}, range={max(edge_widths)-min(edge_widths):.1f}")
+
+            # Draw the graph with proportional node sizes and edge widths
+            nx.draw_networkx_nodes(G, pos, node_size=node_sizes, alpha=0.9,
                                  node_color=range(len(G.nodes())), cmap=plt.cm.tab20,
                                  edgecolors='black', linewidths=0.5)
-            nx.draw_networkx_edges(G, pos, width=1.0, alpha=0.6, edge_color='gray')
+            nx.draw_networkx_edges(G, pos, width=edge_widths, alpha=0.6, edge_color='gray')
             nx.draw_networkx_labels(G, pos, labels=node_labels, font_size=8, font_weight='bold')
 
             plt.title(f'k-NN Sparsified Graph ({len(G.nodes())} nodes, {len(G.edges())} edges)',
