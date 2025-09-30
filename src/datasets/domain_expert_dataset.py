@@ -45,11 +45,11 @@ class AnchoredMicrobialGNNDataset(MicrobialGNNDataset):
     
     def __init__(self, data_path, anchored_features=None, case_type=None,
                  k_neighbors=5, mantel_threshold=0.05, use_fast_correlation=False,
-                 graph_mode='family', family_filter_mode='relaxed',
+                 graph_mode='family', family_filter_mode='relaxed', genus_filter_mode='standard',
                  graph_construction_method='original', save_dir=None):
         """
         Initialize the anchored microbial GNN dataset.
-        
+
         Args:
             data_path (str): Path to the CSV file containing microbial abundance data
             anchored_features (list, optional): List of taxonomic strings for anchored features
@@ -57,8 +57,9 @@ class AnchoredMicrobialGNNDataset(MicrobialGNNDataset):
             k_neighbors (int): Number of neighbors for KNN graph construction
             mantel_threshold (float): P-value threshold for Mantel test
             use_fast_correlation (bool): If True, use fast correlation-based graph construction
-            graph_mode (str): Mode for graph construction ('otu' or 'family')
+            graph_mode (str): Mode for graph construction ('otu', 'family', or 'genus')
             family_filter_mode (str): Mode for family filtering ('strict', 'relaxed', 'permissive')
+            genus_filter_mode (str): Mode for genus filtering ('strict', 'standard', 'permissive')
         """
         # Store anchored features, case type, and save directory
         self.anchored_features = anchored_features or []
@@ -73,6 +74,7 @@ class AnchoredMicrobialGNNDataset(MicrobialGNNDataset):
             use_fast_correlation=use_fast_correlation,
             graph_mode=graph_mode,
             family_filter_mode=family_filter_mode,
+            genus_filter_mode=genus_filter_mode,
             graph_construction_method=graph_construction_method
         )
     
@@ -169,7 +171,137 @@ class AnchoredMicrobialGNNDataset(MicrobialGNNDataset):
         print(f"Final feature set: Mantel-selected + Case-specific anchors")
         
         return df_fam_rel_filtered
-    
+
+    def _process_genera(self):
+        """
+        Extended genus processing with anchored features support.
+
+        This method aggregates OTUs to genus level, applies standard filtering,
+        and then adds anchored features based on the case type.
+
+        Returns:
+            tuple: (genus_dataframe, feature_names_list)
+        """
+        print(f"Processing genera for {self.case_type or 'standard'} analysis...")
+
+        # Call parent class genus processing
+        df_genus_rel_filtered, genus_names = super()._process_genera()
+
+        print(f"Genera after standard filtering: {len(genus_names)}")
+
+        # Add anchored features based on case type
+        if self.anchored_features and self.case_type:
+            # Get full genus data for anchored features
+            # Re-create genus dataframe for anchored features
+            def extract_genus(colname):
+                """Extract genus from taxonomy string."""
+                parts = colname.split(';')
+                family = None
+                genus = None
+
+                for part in parts:
+                    part = part.strip()
+                    if part.startswith('f__'):
+                        family = part[3:] or None
+                    elif part.startswith('g__'):
+                        genus = part[3:] or None
+
+                if genus and genus != '':
+                    return genus
+                elif family and family != '':
+                    return f"{family}_unclassified"
+                else:
+                    return "Unclassified_Genus"
+
+            # Build full genus data
+            col_to_genus = {c: extract_genus(c) for c in self.otu_cols}
+            genus_to_cols = {}
+            for c, gen in col_to_genus.items():
+                if gen not in genus_to_cols:
+                    genus_to_cols[gen] = []
+                genus_to_cols[gen].append(c)
+
+            df_genus = pd.DataFrame({
+                gen: self.df[cols].sum(axis=1)
+                for gen, cols in genus_to_cols.items()
+            }, index=self.df.index)
+
+            df_genus_rel = df_genus.div(df_genus.sum(axis=1), axis=0)
+
+            # Add anchored genera
+            df_genus_rel_filtered = self._add_anchored_genera(df_genus_rel, df_genus_rel_filtered)
+
+        return df_genus_rel_filtered, list(df_genus_rel_filtered.columns)
+
+    def _add_anchored_genera(self, df_genus_rel, df_genus_rel_filtered):
+        """
+        Add case-specific anchored genera to the filtered features.
+
+        This method ensures that domain expert specified genera are included
+        in the final feature set even if they don't pass statistical filtering.
+
+        Args:
+            df_genus_rel (pd.DataFrame): Full genus relative abundance data
+            df_genus_rel_filtered (pd.DataFrame): Filtered genus data
+
+        Returns:
+            pd.DataFrame: Enhanced dataset with anchored genera
+        """
+        print(f"\nAdding case-specific anchored genera for {self.case_type}...")
+
+        # Extract genus names from taxonomy strings
+        anchored_genus_names = []
+        for taxonomy in self.anchored_features:
+            # Extract genus from full taxonomy string
+            # Example: "d__Archaea;p__...;g__Methanosaeta" → "Methanosaeta"
+            parts = taxonomy.split(';')
+            genus_name = None
+
+            for part in parts:
+                part = part.strip()
+                if part.startswith('g__'):
+                    genus_name = part[3:] or None
+                    break
+
+            if genus_name and genus_name != '':
+                anchored_genus_names.append(genus_name)
+
+        print(f"Looking for anchored genera: {anchored_genus_names}")
+
+        # Find matching genera in the data
+        matched_genera = []
+        for genus_name in anchored_genus_names:
+            # Look for exact matches first
+            if genus_name in df_genus_rel.columns:
+                matched_genera.append(genus_name)
+                print(f"  Found exact match: {genus_name}")
+            else:
+                # Look for partial matches
+                partial_matches = [col for col in df_genus_rel.columns if genus_name in col]
+                if partial_matches:
+                    matched_genera.extend(partial_matches)
+                    print(f"  Found partial matches for {genus_name}: {partial_matches}")
+                else:
+                    print(f"  ⚠ Warning: No match found for {genus_name}")
+
+        print(f"Matched anchored genera: {matched_genera}")
+
+        # Add anchored genera to the existing filtered features
+        anchors_added = 0
+        for genus in matched_genera:
+            if genus not in df_genus_rel_filtered.columns:
+                df_genus_rel_filtered[genus] = df_genus_rel[genus]
+                print(f"  Added anchored genus: {genus}")
+                anchors_added += 1
+            else:
+                print(f"  Anchored genus already present in filtered features: {genus}")
+
+        print(f"Added {anchors_added} new anchored features to {df_genus_rel_filtered.shape[1] - anchors_added} filtered features")
+        print(f"Final feature count: {df_genus_rel_filtered.shape[1]} genera")
+        print(f"Final feature set: Filtered + Case-specific anchors")
+
+        return df_genus_rel_filtered
+
     def get_feature_info(self):
         """
         Get detailed information about features in the dataset.

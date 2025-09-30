@@ -144,6 +144,7 @@ class DomainExpertCasesPipeline(MixedEmbeddingPipeline):
                  importance_threshold=0.2,
                  use_fast_correlation=False,
                  graph_mode='family', family_filter_mode='strict',
+                 genus_filter_mode='standard',
                  use_nested_cv=True, use_node_pruning=False,
                  graph_construction_method='original'):
         """
@@ -165,8 +166,9 @@ class DomainExpertCasesPipeline(MixedEmbeddingPipeline):
             save_dir (str): Directory to save results
             importance_threshold (float): Threshold for feature importance filtering
             use_fast_correlation (bool): Use fast correlation computation
-            graph_mode (str): Graph construction mode ('family' or 'otu')
+            graph_mode (str): Graph construction mode ('family', 'genus', or 'otu')
             family_filter_mode (str): Family filtering mode ('strict' or 'relaxed')
+            genus_filter_mode (str): Genus filtering mode ('strict', 'standard', or 'permissive')
             use_nested_cv (bool): Enable nested cross-validation for hyperparameter tuning
             use_node_pruning (bool): Use node-based pruning (True) or edge-only sparsification (False)
         """
@@ -205,7 +207,7 @@ class DomainExpertCasesPipeline(MixedEmbeddingPipeline):
             family_filter_mode=family_filter_mode,
             use_nested_cv=use_nested_cv
         )
-        
+
         # Replace the dataset with our anchored version
         print("Initializing anchored dataset for domain expert case...")
         self.dataset = AnchoredMicrobialGNNDataset(
@@ -217,6 +219,7 @@ class DomainExpertCasesPipeline(MixedEmbeddingPipeline):
             use_fast_correlation=use_fast_correlation,
             graph_mode=graph_mode,
             family_filter_mode=family_filter_mode,
+            genus_filter_mode=genus_filter_mode,
             graph_construction_method=graph_construction_method,
             save_dir=self.save_dir
         )

@@ -15,14 +15,17 @@ Usage:
     python run_enhanced_pipeline.py [--case case1] [--epochs 100] [--quick]
 
 Examples:
-    # Run full pipeline with case 1 (hydrogenotrophic focus)
+    # Run full pipeline with case 1 (hydrogenotrophic focus) - family level
     python run_enhanced_pipeline.py --case case1
-    
+
+    # Run with genus-level analysis
+    python run_enhanced_pipeline.py --case case1 --graph_mode genus --genus_filter_mode standard
+
     # Quick test run (minimal epochs)
     python run_enhanced_pipeline.py --case case1 --quick
-    
-    # Custom configuration
-    python run_enhanced_pipeline.py --case case2 --epochs 50
+
+    # Custom configuration with genus level
+    python run_enhanced_pipeline.py --case case2 --epochs 50 --graph_mode genus
 """
 
 import argparse
@@ -44,7 +47,13 @@ def main():
     parser.add_argument('--graph_method', default='paper_correlation',
                         choices=['original', 'paper_correlation', 'hybrid'],
                         help='Graph construction method (default: paper_correlation)')
-    
+    parser.add_argument('--graph_mode', default='family',
+                        choices=['family', 'genus'],
+                        help='Taxonomic level for graph construction (default: family)')
+    parser.add_argument('--genus_filter_mode', default='standard',
+                        choices=['strict', 'standard', 'permissive'],
+                        help='Genus filtering mode (default: standard). Only used when --graph_mode genus')
+
     args = parser.parse_args()
 
     # Handle "all" cases option
@@ -101,7 +110,8 @@ Key Features Enabled:
             'batch_size': 8,
             'learning_rate': 0.001,
             'patience': 20 if not args.quick else 5,
-            'graph_mode': 'family',
+            'graph_mode': args.graph_mode,
+            'genus_filter_mode': args.genus_filter_mode,
             'graph_construction_method': args.graph_method,  # User-selected graph construction method
             'use_node_pruning': True  # ✅ ENABLE ATTENTION-BASED NODE PRUNING
         }
@@ -250,7 +260,8 @@ def run_all_cases(args):
                 'batch_size': 8,
                 'learning_rate': 0.001,
                 'patience': 20 if not args.quick else 5,
-                'graph_mode': 'family',
+                'graph_mode': args.graph_mode,
+                'genus_filter_mode': args.genus_filter_mode,
                 'graph_construction_method': args.graph_method
             }
 

@@ -20,7 +20,8 @@ class MicrobialGNNDataset:
     """Dataset class for GNN-based regression on microbial data"""
     
     def __init__(self, data_path, k_neighbors=5, mantel_threshold=0.05, use_fast_correlation=True,
-                 graph_mode='otu', family_filter_mode='relaxed', graph_construction_method='original'):
+                 graph_mode='otu', family_filter_mode='relaxed', genus_filter_mode='standard',
+                 graph_construction_method='original'):
         """
         Initialize the microbial GNN dataset
 
@@ -29,8 +30,9 @@ class MicrobialGNNDataset:
             k_neighbors: Number of neighbors for KNN graph construction
             mantel_threshold: P-value threshold for Mantel test
             use_fast_correlation: If True, use fast correlation-based graph construction
-            graph_mode: Mode for graph construction ('otu' or 'family')
-            family_filter_mode: Mode for family filtering ('relaxed' or 'strict')
+            graph_mode: Mode for graph construction ('otu', 'family', or 'genus')
+            family_filter_mode: Mode for family filtering ('relaxed', 'strict', or 'permissive')
+            genus_filter_mode: Mode for genus filtering ('strict', 'standard', or 'permissive')
             graph_construction_method: 'original', 'paper_correlation', or 'hybrid'
         """
         self.data_path = data_path
@@ -39,6 +41,7 @@ class MicrobialGNNDataset:
         self.use_fast_correlation = use_fast_correlation
         self.graph_mode = graph_mode
         self.family_filter_mode = family_filter_mode
+        self.genus_filter_mode = genus_filter_mode
         self.graph_construction_method = graph_construction_method
         
         # Initialize data containers
@@ -182,9 +185,30 @@ class MicrobialGNNDataset:
             self.df_family_filtered, self.feature_cols = self._process_families()
             
             print(f"Family mode: Selected {len(self.feature_cols)} family feature columns and {len(self.target_cols)} target columns")
-        
+
+        elif self.graph_mode == 'genus':
+            # Similar to family mode, but process at genus level
+            self.target_cols = [col for col in self.df.columns if col.strip() in ['ACE-km', 'H2-km']]
+
+            # Find OTU columns (all columns except targets)
+            self.otu_cols = []
+            taxonomic_patterns = ['d__', 'p__', 'c__', 'o__', 'f__', 'g__', 's__']
+
+            for col in self.df.columns:
+                if col not in self.target_cols:  # Exclude target columns
+                    # Check if column contains taxonomic patterns
+                    if any(pattern in col for pattern in taxonomic_patterns):
+                        self.otu_cols.append(col)
+
+            print(f"Genus mode: Found {len(self.otu_cols)} OTU columns, processing at genus level...")
+
+            # Process genera and get filtered genus columns
+            self.df_genus_filtered, self.feature_cols = self._process_genera()
+
+            print(f"Genus mode: Selected {len(self.feature_cols)} genus feature columns and {len(self.target_cols)} target columns")
+
         else:
-            raise ValueError(f"Invalid graph_mode: {self.graph_mode}. Must be 'otu' or 'family'")
+            raise ValueError(f"Invalid graph_mode: {self.graph_mode}. Must be 'otu', 'family', or 'genus'")
         
         print(f"Target columns: {self.target_cols}")
         
@@ -216,6 +240,9 @@ class MicrobialGNNDataset:
         elif self.graph_mode == 'family':
             # Use the already filtered family data
             df_features = self.df_family_filtered.copy()
+        elif self.graph_mode == 'genus':
+            # Use the already filtered genus data
+            df_features = self.df_genus_filtered.copy()
         else:
             raise ValueError(f"Invalid graph_mode: {self.graph_mode}")
         
@@ -359,7 +386,133 @@ class MicrobialGNNDataset:
         print(f"Final abundance range: {final_abundance.min():.6f} - {final_abundance.max():.3f}")
         
         return df_fam_rel_filtered, list(df_fam_rel_filtered.columns)
-    
+
+    def _process_genera(self):
+        """Extract genus level taxonomy and aggregate OTUs"""
+        print("\n" + "="*60)
+        print("GENUS-LEVEL PROCESSING")
+        print("="*60)
+
+        # Function to extract genus from taxonomy string
+        def extract_genus(colname):
+            """
+            Extract genus from QIIME2-style taxonomy string.
+
+            Handles cases:
+            1. Full assignment: g__Faecalibacterium → "Faecalibacterium"
+            2. Partial assignment: g__ → Use family name + "_unclassified"
+            3. Missing genus: __ → Use family name + "_unclassified"
+            4. Completely unclassified: Multiple levels missing → "Unclassified_Genus"
+            """
+            parts = colname.split(';')
+
+            # Extract family and genus
+            family = None
+            genus = None
+
+            for part in parts:
+                part = part.strip()
+                if part.startswith('f__'):
+                    family = part[3:] or None
+                elif part.startswith('g__'):
+                    genus = part[3:] or None
+
+            # Genus classification logic
+            if genus and genus != '':
+                return genus
+            elif family and family != '':
+                # Genus unclassified but family known
+                return f"{family}_unclassified"
+            else:
+                # Both family and genus unclassified
+                return "Unclassified_Genus"
+
+        # Map OTUs to genera
+        col_to_genus = {c: extract_genus(c) for c in self.otu_cols}
+        genus_to_cols = {}
+        for c, gen in col_to_genus.items():
+            if gen not in genus_to_cols:
+                genus_to_cols[gen] = []
+            genus_to_cols[gen].append(c)
+
+        # Aggregate OTUs at genus level (sum within same genus)
+        df_genus = pd.DataFrame({
+            gen: self.df[cols].sum(axis=1)
+            for gen, cols in genus_to_cols.items()
+        }, index=self.df.index)
+
+        # Convert to relative abundance
+        df_genus_rel = df_genus.div(df_genus.sum(axis=1), axis=0)
+
+        print(f"Total genera before filtering: {df_genus_rel.shape[1]}")
+        print(f"  - Classified genera: {sum(1 for g in df_genus_rel.columns if not g.endswith('_unclassified') and g != 'Unclassified_Genus')}")
+        print(f"  - Family-level unclassified: {sum(1 for g in df_genus_rel.columns if g.endswith('_unclassified'))}")
+        print(f"  - Completely unclassified: {sum(1 for g in df_genus_rel.columns if g == 'Unclassified_Genus')}")
+
+        # FILTERING CRITERIA based on genus_filter_mode
+        presence_count = (df_genus_rel > 0).sum(axis=0)
+        prevalence = presence_count / df_genus_rel.shape[0]
+        mean_abund = df_genus_rel.mean(axis=0)
+
+        # Set thresholds based on filter mode (research-backed)
+        if self.genus_filter_mode == 'strict':
+            prevalence_threshold = 0.15  # 15% of samples
+            abundance_threshold = 0.001  # 0.1% mean abundance
+            use_intersection = True      # Both criteria must be met
+            target_min_genera = 40
+        elif self.genus_filter_mode == 'standard':
+            prevalence_threshold = 0.10  # 10% of samples (literature standard)
+            abundance_threshold = 0.0005  # 0.05% mean abundance
+            use_intersection = False     # Either criterion (UNION)
+            target_min_genera = 80
+        elif self.genus_filter_mode == 'permissive':
+            prevalence_threshold = 0.05  # 5% of samples
+            abundance_threshold = 0.0002  # 0.02% mean abundance
+            use_intersection = False     # Either criterion (UNION)
+            target_min_genera = 120
+        else:
+            raise ValueError(f"Invalid genus_filter_mode: {self.genus_filter_mode}")
+
+        high_prev = prevalence[prevalence >= prevalence_threshold].index
+        high_abund = mean_abund[mean_abund >= abundance_threshold].index
+
+        # Apply filtering logic
+        if use_intersection:
+            selected_genera = high_prev.intersection(high_abund)
+            filter_method = "INTERSECTION (prevalence AND abundance)"
+        else:
+            selected_genera = high_prev.union(high_abund)
+            filter_method = "UNION (prevalence OR abundance)"
+
+        # If still too few genera, use ultra-permissive criteria
+        if len(selected_genera) < target_min_genera:
+            print(f"Only {len(selected_genera)} genera with {self.genus_filter_mode} criteria. Using ultra-permissive filtering...")
+            ultra_prev = prevalence[prevalence >= 0.037].index  # ~2 samples
+            ultra_abund = mean_abund[mean_abund >= 0.0001].index  # 0.01% abundance
+            selected_genera = ultra_prev.union(ultra_abund)
+            filter_method = "ULTRA-PERMISSIVE (prevalence OR abundance)"
+
+        # Ensure we don't include completely absent genera
+        non_zero_genera = df_genus_rel.columns[df_genus_rel.sum(axis=0) > 0]
+        selected_genera = selected_genera.intersection(non_zero_genera)
+
+        df_genus_rel_filtered = df_genus_rel[selected_genera].copy()
+
+        print(f"Selected {len(selected_genera)} genera after {self.genus_filter_mode} filtering (out of {df_genus_rel.shape[1]}).")
+        print(f"Filter mode: {self.genus_filter_mode}")
+        print(f"Prevalence threshold: {prevalence_threshold*100:.1f}% of samples")
+        print(f"Abundance threshold: {abundance_threshold*100:.3f}% mean abundance")
+        print(f"Filtering method: {filter_method}")
+
+        # Show some statistics
+        final_prevalence = (df_genus_rel_filtered > 0).sum(axis=0) / df_genus_rel_filtered.shape[0]
+        final_abundance = df_genus_rel_filtered.mean(axis=0)
+
+        print(f"Final prevalence range: {final_prevalence.min():.3f} - {final_prevalence.max():.3f}")
+        print(f"Final abundance range: {final_abundance.min():.6f} - {final_abundance.max():.3f}")
+
+        return df_genus_rel_filtered, list(df_genus_rel_filtered.columns)
+
     def _create_graph_structure(self):
         """Create graph structure based on correlation or distance metrics"""
         if self.graph_construction_method == 'paper_correlation':
