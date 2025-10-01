@@ -7,7 +7,7 @@ from explainers.explainer_regression import GNNExplainerRegression
 # Set device
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
-def create_explainer_sparsified_graph(pipeline, model, target_idx=0, importance_threshold=0.3, 
+def create_explainer_sparsified_graph(pipeline, model, target_idx=0, importance_threshold=0.2,  # Relaxed from 0.3 to 0.2
                                      use_node_pruning=True, use_attention_pruning=None, target_name=None):
     """
     Create a sparsified graph based on GNNExplainer results with node-based pruning
@@ -439,33 +439,75 @@ def create_unified_pruned_graph_pipeline(pipeline, explainer, model, importance_
         attention_scores = np.ones(len(edge_node_importance))
         attention_std = 0.0
     
-    # Step 3: Intelligently combine edge and attention importance
-    print("Step 3: Combining importance scores...")
+    # Step 3: Add network topology analysis
+    print("Step 3: Computing network topology scores...")
+    try:
+        from utils.network_topology_analysis import NetworkTopologyAnalyzer
+        
+        # Initialize topology analyzer
+        topology_analyzer = NetworkTopologyAnalyzer(device=str(pipeline.dataset.data_list[0].x.device))
+        
+        # Analyze network topology
+        topology_scores, network_properties = topology_analyzer.analyze_network_topology(template_data)
+        
+        print(f"Topology scores range: {topology_scores.min():.4f} - {topology_scores.max():.4f}")
+        print(f"Network modularity: {network_properties.get('modularity', 0.0):.3f}")
+        print(f"Network clustering: {network_properties.get('clustering_coefficient', 0.0):.3f}")
+        
+    except Exception as e:
+        print(f"Warning: Topology analysis failed: {e}")
+        topology_scores = np.ones(len(edge_node_importance)) * 0.5
+        network_properties = {}
+    
+    # Step 4: Intelligently combine edge, attention, and topology importance
+    print("Step 4: Combining importance scores (Edge + Attention + Topology)...")
     
     if attention_std > 0.1:
-        # Good attention scores - combine them
-        print("Good attention variance detected, combining edge + attention scores")
-        # Normalize both to [0,1] range  
+        # Good attention scores - combine all three
+        print("Good attention variance detected, combining edge + attention + topology scores")
+        # Normalize all to [0,1] range  
         edge_norm = (edge_node_importance - edge_node_importance.min()) / (edge_node_importance.max() - edge_node_importance.min() + 1e-8)
         attention_norm = (attention_scores - attention_scores.min()) / (attention_scores.max() - attention_scores.min() + 1e-8)
-        # Weighted combination (favor edge importance slightly as it's more reliable)
-        combined_importance = 0.6 * edge_norm + 0.4 * attention_norm
-        print("Using weighted combination: 60% edge + 40% attention")
+        topology_norm = (topology_scores - topology_scores.min()) / (topology_scores.max() - topology_scores.min() + 1e-8)
+        
+        # Weighted combination: 40% edge + 30% attention + 30% topology
+        combined_importance = 0.4 * edge_norm + 0.3 * attention_norm + 0.3 * topology_norm
+        print("Using weighted combination: 40% edge + 30% attention + 30% topology")
     else:
-        # Poor attention scores - use edge importance only
-        print("Poor attention variance detected, using edge-based importance only")
-        combined_importance = edge_node_importance
+        # Poor attention scores - combine edge + topology
+        print("Poor attention variance detected, combining edge + topology scores")
+        edge_norm = (edge_node_importance - edge_node_importance.min()) / (edge_node_importance.max() - edge_node_importance.min() + 1e-8)
+        topology_norm = (topology_scores - topology_scores.min()) / (topology_scores.max() - topology_scores.min() + 1e-8)
+        
+        # Weighted combination: 60% edge + 40% topology
+        combined_importance = 0.6 * edge_norm + 0.4 * topology_norm
+        print("Using weighted combination: 60% edge + 40% topology")
     
-    # Step 4: Adaptive thresholding to guarantee pruning
-    print("Step 4: Applying adaptive thresholding...")
+    # Step 5: Adaptive thresholding based on network properties
+    print("Step 5: Applying network-aware adaptive thresholding...")
     
-    # More aggressive pruning - aim to keep 50-60% of nodes (prune 40-50%)
-    target_retention = 0.55  # Keep 55% of nodes
-    adaptive_threshold = np.percentile(combined_importance, (1 - target_retention) * 100)
+    # Use topology analyzer for adaptive thresholding if available
+    if 'topology_analyzer' in locals():
+        try:
+            adaptive_threshold = topology_analyzer.determine_adaptive_threshold(
+                combined_importance, network_properties, importance_threshold
+            )
+            print(f"Network-aware adaptive threshold: {adaptive_threshold:.4f}")
+        except Exception as e:
+            print(f"Warning: Network-aware thresholding failed: {e}")
+            # Fallback to percentile-based thresholding (relaxed)
+            target_retention = 0.75  # Keep 75% of nodes (relaxed from 55%)
+            adaptive_threshold = np.percentile(combined_importance, (1 - target_retention) * 100)
+            print(f"Fallback threshold (75% retention): {adaptive_threshold:.4f}")
+    else:
+        # Standard percentile-based thresholding (relaxed)
+        target_retention = 0.75  # Keep 75% of nodes (relaxed from 55%)
+        adaptive_threshold = np.percentile(combined_importance, (1 - target_retention) * 100)
+        print(f"Standard threshold (75% retention): {adaptive_threshold:.4f}")
     
     print(f"Combined importance range: {combined_importance.min():.4f} - {combined_importance.max():.4f}")
     print(f"Original threshold: {importance_threshold:.4f}")
-    print(f"Adaptive threshold (55% retention): {adaptive_threshold:.4f}")
+    print(f"Final adaptive threshold: {adaptive_threshold:.4f}")
 
     # Save combined importance scores for analysis
     import pandas as pd
@@ -480,6 +522,7 @@ def create_unified_pruned_graph_pipeline(pipeline, explainer, model, importance_
         'node_name': pipeline.dataset.node_feature_names,
         'edge_importance': edge_node_importance,
         'attention_score': attention_scores,
+        'topology_score': topology_scores,
         'combined_importance': combined_importance,
         'above_adaptive_threshold': combined_importance > adaptive_threshold
     })
@@ -508,8 +551,8 @@ def create_unified_pruned_graph_pipeline(pipeline, explainer, model, importance_
     # Combine threshold-based selection with protected nodes
     important_nodes_set = set(important_nodes) | protected_indices
     
-    # If too few nodes, keep top nodes by importance (more aggressive minimum)
-    min_nodes = max(5, int(0.25 * len(pipeline.dataset.node_feature_names)))  # At least 25% of original nodes or minimum 5
+    # If too few nodes, keep top nodes by importance (more conservative minimum)
+    min_nodes = max(8, int(0.4 * len(pipeline.dataset.node_feature_names)))  # At least 40% of original nodes or minimum 8 (relaxed)
     if len(important_nodes_set) < min_nodes:
         print(f"Only {len(important_nodes_set)} nodes exceed threshold, ensuring minimum {min_nodes} nodes")
         sorted_indices = np.argsort(combined_importance)[::-1]  # Sort by importance descending
