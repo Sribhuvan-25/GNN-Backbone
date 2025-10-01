@@ -44,14 +44,15 @@ class NetworkTopologyAnalyzer:
         """
         self.device = device
         
-        # Research-backed weights for centrality measures
-        # Based on analysis of biological networks and graph theory literature
+        # Empirically determined weights for centrality measures
+        # Based on general network analysis principles and domain expertise
+        # Note: These weights are empirically chosen and can be adjusted based on specific network properties
         self.centrality_weights = {
-            'degree': 0.35,        # Direct connectivity importance
-            'betweenness': 0.25,   # Bridge/hub importance  
+            'degree': 0.35,        # Direct connectivity importance (highest weight)
+            'betweenness': 0.25,   # Bridge/hub importance (second highest)
             'closeness': 0.20,     # Global reach importance
             'eigenvector': 0.15,   # Connection quality importance
-            'pagerank': 0.05       # Global influence importance
+            'pagerank': 0.05       # Global influence importance (lowest weight)
         }
         
         # Network property thresholds for adaptive pruning (relaxed)
