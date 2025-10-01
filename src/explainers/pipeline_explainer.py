@@ -7,7 +7,7 @@ from explainers.explainer_regression import GNNExplainerRegression
 # Set device
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
-def create_explainer_sparsified_graph(pipeline, model, target_idx=0, importance_threshold=0.3, 
+def create_explainer_sparsified_graph(pipeline, model, target_idx=0, importance_threshold=0.2,  # Relaxed from 0.3 to 0.2
                                      use_node_pruning=True, use_attention_pruning=None, target_name=None):
     """
     Create a sparsified graph based on GNNExplainer results with node-based pruning
@@ -495,15 +495,15 @@ def create_unified_pruned_graph_pipeline(pipeline, explainer, model, importance_
             print(f"Network-aware adaptive threshold: {adaptive_threshold:.4f}")
         except Exception as e:
             print(f"Warning: Network-aware thresholding failed: {e}")
-            # Fallback to percentile-based thresholding
-            target_retention = 0.55
+            # Fallback to percentile-based thresholding (relaxed)
+            target_retention = 0.75  # Keep 75% of nodes (relaxed from 55%)
             adaptive_threshold = np.percentile(combined_importance, (1 - target_retention) * 100)
-            print(f"Fallback threshold (55% retention): {adaptive_threshold:.4f}")
+            print(f"Fallback threshold (75% retention): {adaptive_threshold:.4f}")
     else:
-        # Standard percentile-based thresholding
-        target_retention = 0.55
+        # Standard percentile-based thresholding (relaxed)
+        target_retention = 0.75  # Keep 75% of nodes (relaxed from 55%)
         adaptive_threshold = np.percentile(combined_importance, (1 - target_retention) * 100)
-        print(f"Standard threshold (55% retention): {adaptive_threshold:.4f}")
+        print(f"Standard threshold (75% retention): {adaptive_threshold:.4f}")
     
     print(f"Combined importance range: {combined_importance.min():.4f} - {combined_importance.max():.4f}")
     print(f"Original threshold: {importance_threshold:.4f}")
@@ -551,8 +551,8 @@ def create_unified_pruned_graph_pipeline(pipeline, explainer, model, importance_
     # Combine threshold-based selection with protected nodes
     important_nodes_set = set(important_nodes) | protected_indices
     
-    # If too few nodes, keep top nodes by importance (more aggressive minimum)
-    min_nodes = max(5, int(0.25 * len(pipeline.dataset.node_feature_names)))  # At least 25% of original nodes or minimum 5
+    # If too few nodes, keep top nodes by importance (more conservative minimum)
+    min_nodes = max(8, int(0.4 * len(pipeline.dataset.node_feature_names)))  # At least 40% of original nodes or minimum 8 (relaxed)
     if len(important_nodes_set) < min_nodes:
         print(f"Only {len(important_nodes_set)} nodes exceed threshold, ensuring minimum {min_nodes} nodes")
         sorted_indices = np.argsort(combined_importance)[::-1]  # Sort by importance descending

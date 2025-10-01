@@ -54,11 +54,11 @@ class NetworkTopologyAnalyzer:
             'pagerank': 0.05       # Global influence importance
         }
         
-        # Network property thresholds for adaptive pruning
+        # Network property thresholds for adaptive pruning (relaxed)
         self.network_thresholds = {
-            'high_modularity': 0.5,      # Highly modular networks
-            'dense_network': 2.0,        # Average path length threshold
-            'small_world': 0.3,         # Clustering coefficient threshold
+            'high_modularity': 0.4,      # Highly modular networks (relaxed from 0.5)
+            'dense_network': 2.5,        # Average path length threshold (relaxed from 2.0)
+            'small_world': 0.25,         # Clustering coefficient threshold (relaxed from 0.3)
             'scale_free': 2.5           # Degree distribution power law threshold
         }
     
@@ -313,24 +313,24 @@ class NetworkTopologyAnalyzer:
         clustering = network_properties.get('clustering_coefficient', 0.3)
         density = network_properties.get('density', 0.1)
         
-        # Adaptive thresholding rules based on network properties
+        # Adaptive thresholding rules based on network properties (relaxed)
         if modularity > self.network_thresholds['high_modularity']:
             # Highly modular network - preserve more nodes to maintain communities
-            threshold = np.percentile(topology_scores, 30)  # Keep top 70%
+            threshold = np.percentile(topology_scores, 20)  # Keep top 80% (relaxed from 70%)
             print(f"  High modularity detected ({modularity:.3f}), using conservative threshold")
         elif avg_path_length < self.network_thresholds['dense_network']:
             # Dense, well-connected network - can prune more aggressively
-            threshold = np.percentile(topology_scores, 60)  # Keep top 40%
-            print(f"  Dense network detected (path length: {avg_path_length:.3f}), using aggressive threshold")
+            threshold = np.percentile(topology_scores, 40)  # Keep top 60% (relaxed from 40%)
+            print(f"  Dense network detected (path length: {avg_path_length:.3f}), using moderate threshold")
         elif clustering > self.network_thresholds['small_world']:
             # Small-world network - preserve clustering structure
-            threshold = np.percentile(topology_scores, 40)  # Keep top 60%
-            print(f"  Small-world network detected (clustering: {clustering:.3f}), using moderate threshold")
+            threshold = np.percentile(topology_scores, 25)  # Keep top 75% (relaxed from 60%)
+            print(f"  Small-world network detected (clustering: {clustering:.3f}), using conservative threshold")
         else:
             # Standard network - use base threshold with score distribution adjustment
             mean_score = np.mean(topology_scores)
             std_score = np.std(topology_scores)
-            threshold = max(base_threshold, mean_score + 0.5 * std_score)
+            threshold = max(base_threshold * 0.8, mean_score + 0.3 * std_score)  # More conservative
             print(f"  Standard network, using adjusted base threshold")
         
         # Ensure threshold is within valid range

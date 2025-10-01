@@ -33,8 +33,8 @@ class PaperStyleCorrelationGraph:
     """
 
     def __init__(self,
-                 correlation_threshold: float = 0.6,
-                 significance_threshold: float = 0.05,
+                 correlation_threshold: float = 0.4,  # Relaxed from 0.6 to 0.4
+                 significance_threshold: float = 0.1,  # Relaxed from 0.05 to 0.1
                  min_edges: int = 20,
                  max_edges: Optional[int] = None):
         """
@@ -200,7 +200,7 @@ class PaperStyleCorrelationGraph:
         """Ensure minimum graph connectivity by relaxing criteria if needed"""
 
         # Strategy 1: Lower correlation threshold but keep significance
-        relaxed_threshold = max(0.3, self.correlation_threshold - 0.2)
+        relaxed_threshold = max(0.2, self.correlation_threshold - 0.15)  # More relaxed fallback
         print(f"Trying relaxed correlation threshold: {relaxed_threshold}")
 
         edge_index, edge_weight, edge_type = self._create_edges_with_threshold(
@@ -211,7 +211,7 @@ class PaperStyleCorrelationGraph:
             return edge_index, edge_weight, edge_type
 
         # Strategy 2: Further relax correlation threshold
-        very_relaxed_threshold = 0.2
+        very_relaxed_threshold = 0.15  # More relaxed from 0.2 to 0.15
         print(f"Trying very relaxed correlation threshold: {very_relaxed_threshold}")
 
         edge_index, edge_weight, edge_type = self._create_edges_with_threshold(

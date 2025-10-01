@@ -943,7 +943,7 @@ class GNNExplainerRegression:
         return pruned_data, important_nodes, pruned_node_names
     
     def create_attention_based_node_pruning(self, data, model, node_names=None, 
-                                          attention_threshold=0.2, min_nodes=10, protected_nodes=None):
+                                          attention_threshold=0.15, min_nodes=8, protected_nodes=None):  # Relaxed thresholds
         """
         UNIVERSAL ATTENTION-BASED NODE PRUNING FOR GRAPH NEURAL NETWORKS
         
