@@ -17,12 +17,15 @@ Usage:
 Examples:
     # Run full pipeline with case 1 (hydrogenotrophic focus)
     python run_enhanced_pipeline.py --case case1
-    
+
+    # Keep top 80% of edges in explainer pruning (default is 20%)
+    python run_enhanced_pipeline.py --case case1 --importance_threshold 0.8
+
     # Quick test run (minimal epochs)
     python run_enhanced_pipeline.py --case case1 --quick
-    
-    # Custom configuration
-    python run_enhanced_pipeline.py --case case2 --epochs 50
+
+    # Custom configuration with genus level and 50% edge retention
+    python run_enhanced_pipeline.py --case case2 --epochs 50 --graph_mode genus --importance_threshold 0.5
 """
 
 import argparse
@@ -44,7 +47,9 @@ def main():
     parser.add_argument('--graph_method', default='paper_correlation',
                         choices=['original', 'paper_correlation', 'hybrid'],
                         help='Graph construction method (default: paper_correlation)')
-    
+    parser.add_argument('--importance_threshold', type=float, default=0.2,
+                        help='Threshold for explainer edge importance (default: 0.2 = keep top 20%% of edges)')
+
     args = parser.parse_args()
 
     # Handle "all" cases option
@@ -101,9 +106,11 @@ Key Features Enabled:
             'batch_size': 8,
             'learning_rate': 0.001,
             'patience': 20 if not args.quick else 5,
-            'graph_mode': 'family',
+            'graph_mode': args.graph_mode,
+            'genus_filter_mode': args.genus_filter_mode,
+            'importance_threshold': args.importance_threshold,
             'graph_construction_method': args.graph_method,  # User-selected graph construction method
-            'use_node_pruning': True  # ✅ ENABLE ATTENTION-BASED NODE PRUNING
+            'use_node_pruning': False  # ✅ EDGE-ONLY SPARSIFICATION
         }
         
         print("Initializing enhanced pipeline...")
@@ -250,7 +257,9 @@ def run_all_cases(args):
                 'batch_size': 8,
                 'learning_rate': 0.001,
                 'patience': 20 if not args.quick else 5,
-                'graph_mode': 'family',
+                'graph_mode': args.graph_mode,
+                'genus_filter_mode': args.genus_filter_mode,
+                'importance_threshold': args.importance_threshold,
                 'graph_construction_method': args.graph_method
             }
 
