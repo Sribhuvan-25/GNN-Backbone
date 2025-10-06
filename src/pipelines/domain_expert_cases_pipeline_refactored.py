@@ -163,12 +163,13 @@ class DomainExpertCasesPipeline(MixedEmbeddingPipeline):
             patience (int): Early stopping patience
             num_folds (int): Number of cross-validation folds
             save_dir (str): Directory to save results
-            importance_threshold (float): Threshold for feature importance filtering
+            importance_threshold (float): Threshold for edge importance filtering in GNNExplainer
             use_fast_correlation (bool): Use fast correlation computation
-            graph_mode (str): Graph construction mode ('family' or 'otu')
+            graph_mode (str): Graph construction mode ('family' - family-level nodes only)
             family_filter_mode (str): Family filtering mode ('strict' or 'relaxed')
             use_nested_cv (bool): Enable nested cross-validation for hyperparameter tuning
-            use_node_pruning (bool): Use node-based pruning (True) or edge-only sparsification (False)
+            use_node_pruning (bool): MUST be False - always use edge-only sparsification (not node pruning)
+            graph_construction_method (str): Graph construction method ('original', 'paper_correlation', or 'hybrid')
         """
         
         # Initialize case implementations to get feature groups and logic
@@ -186,6 +187,7 @@ class DomainExpertCasesPipeline(MixedEmbeddingPipeline):
         self.graph_construction_method = graph_construction_method
 
         # Initialize parent class with case-specific save directory
+        # NOTE: Only family-level analysis, edge-based sparsification only (no node pruning)
         super().__init__(
             data_path=data_path,
             k_neighbors=k_neighbors,
@@ -203,7 +205,8 @@ class DomainExpertCasesPipeline(MixedEmbeddingPipeline):
             use_fast_correlation=use_fast_correlation,
             graph_mode=graph_mode,
             family_filter_mode=family_filter_mode,
-            use_nested_cv=use_nested_cv
+            use_nested_cv=use_nested_cv,
+            graph_construction_method=graph_construction_method
         )
         
         # Replace the dataset with our anchored version
@@ -221,9 +224,11 @@ class DomainExpertCasesPipeline(MixedEmbeddingPipeline):
             save_dir=self.save_dir
         )
         
-        # Store pruning configuration
+        # Store sparsification configuration (MUST be False - edge-based sparsification only)
         self.use_node_pruning = use_node_pruning
-        print(f"Explainer pruning mode: {'Node-based pruning' if use_node_pruning else 'Edge-only sparsification'}")
+        if use_node_pruning:
+            raise ValueError("use_node_pruning MUST be False. Only edge-based sparsification is supported.")
+        print(f"✅ Explainer mode: Edge-based sparsification (use_node_pruning={use_node_pruning})")
         
         # Define protected nodes for this domain expert case
         self.dataset.protected_nodes = self._get_protected_nodes_for_case(case_type)
@@ -704,10 +709,10 @@ class DomainExpertCasesPipeline(MixedEmbeddingPipeline):
                     model = best_model_info['model_data']['model']
                     model.to(device)
                 
-                # Generate explainer-sparsified graphs
+                # Generate explainer-sparsified graphs using EDGE-BASED sparsification
                 print(f"DEBUG: About to call create_explainer_sparsified_graph with model {best_model_info['model_type']}")
                 print(f"DEBUG: Model is GAT: {best_model_info['model_type'] == 'gat'}")
-                print(f"DEBUG: Using {'NODE-BASED pruning' if self.use_node_pruning else 'EDGE-ONLY sparsification'}")
+                print(f"✅ Using EDGE-BASED sparsification (use_node_pruning={self.use_node_pruning})")
                 
                 try:
                     explainer_data = create_explainer_sparsified_graph(
@@ -715,7 +720,7 @@ class DomainExpertCasesPipeline(MixedEmbeddingPipeline):
                         model=model,
                         target_idx=target_idx,
                         importance_threshold=self.importance_threshold,
-                        use_node_pruning=self.use_node_pruning,  # Configurable: node pruning or edge-only sparsification
+                        use_node_pruning=False,  # MUST be False - edge-based sparsification only
                         target_name=target_name
                     )
                 except Exception as explainer_error:

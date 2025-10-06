@@ -89,9 +89,9 @@ class MixedEmbeddingPipeline:
                  use_enhanced_training=True,  # New parameter for enhanced training
                  adaptive_hyperparameters=True,  # New parameter for adaptive hyperparameters
                  use_nested_cv=True,  # New parameter for nested CV hyperparameter tuning
-                 use_node_sparsification=False,  # New parameter for node sparsification
-                 node_importance_threshold=0.1,  # Threshold for node importance
-                 min_nodes_to_keep=10,  # Minimum number of nodes to keep after sparsification
+                 use_node_sparsification=False,  # DEPRECATED - MUST be False (use edge-based sparsification only)
+                 node_importance_threshold=0.1,  # DEPRECATED - not used with edge-based sparsification
+                 min_nodes_to_keep=10,  # DEPRECATED - not used with edge-based sparsification
                  graph_construction_method='original'):  # Graph construction method
         """
         Initialize the mixed embedding pipeline
@@ -111,14 +111,14 @@ class MixedEmbeddingPipeline:
             save_dir: Directory to save results
             importance_threshold: Threshold for edge importance in GNNExplainer sparsification
             use_fast_correlation: If True, use fast correlation-based graph construction
-            graph_mode: Mode for graph construction ('otu' or 'family') - now defaults to 'family'
+            graph_mode: Mode for graph construction ('family' only - family-level analysis)
             family_filter_mode: Mode for family filtering ('relaxed' or 'strict')
             use_enhanced_training: If True, use enhanced training
             adaptive_hyperparameters: If True, use adaptive hyperparameters
             use_nested_cv: If True, use nested cross-validation for hyperparameter tuning
-            use_node_sparsification: If True, enable node sparsification based on importance
-            node_importance_threshold: Threshold for node importance (0.0 to 1.0)
-            min_nodes_to_keep: Minimum number of nodes to keep after sparsification
+            use_node_sparsification: DEPRECATED - MUST be False (edge-based sparsification only)
+            node_importance_threshold: DEPRECATED - not used (edge-based sparsification only)
+            min_nodes_to_keep: DEPRECATED - not used (edge-based sparsification only)
         """
         self.data_path = data_path
         self.k_neighbors = k_neighbors
