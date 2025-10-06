@@ -1,10 +1,11 @@
 #!/usr/bin/env python3
 """
-Run Enhanced Node Pruning Pipeline
+Run Enhanced Edge-Based Sparsification Pipeline
 
 This script demonstrates how to run the enhanced domain expert pipeline
 with comprehensive validation framework including:
-- Mathematical formulation for unified node pruning
+- Edge-based sparsification using GNNExplainer (NO node pruning)
+- Family-level microbial analysis only
 - Statistical validation with significance testing
 - Enhanced Graph Transformer architecture
 - Baseline comparisons (PageRank, Integrated Gradients, etc.)
@@ -17,12 +18,15 @@ Usage:
 Examples:
     # Run full pipeline with case 1 (hydrogenotrophic focus)
     python run_enhanced_pipeline.py --case case1
-    
+
+    # Keep top 80% of edges in explainer pruning (default is 20%)
+    python run_enhanced_pipeline.py --case case1 --importance_threshold 0.8
+
     # Quick test run (minimal epochs)
     python run_enhanced_pipeline.py --case case1 --quick
-    
-    # Custom configuration
-    python run_enhanced_pipeline.py --case case2 --epochs 50
+
+    # Custom configuration with 50% edge retention
+    python run_enhanced_pipeline.py --case case2 --epochs 50 --importance_threshold 0.5
 """
 
 import argparse
@@ -44,7 +48,9 @@ def main():
     parser.add_argument('--graph_method', default='paper_correlation',
                         choices=['original', 'paper_correlation', 'hybrid'],
                         help='Graph construction method (default: paper_correlation)')
-    
+    parser.add_argument('--importance_threshold', type=float, default=0.2,
+                        help='Threshold for explainer edge importance (default: 0.2 = keep top 20%% of edges)')
+
     args = parser.parse_args()
 
     # Handle "all" cases option
@@ -65,17 +71,20 @@ def main():
     
     print(f"""
 {'='*80}
-ENHANCED NODE PRUNING PIPELINE
+ENHANCED EDGE-BASED SPARSIFICATION PIPELINE
 {'='*80}
 Case: {args.case}
 Epochs: {epochs}
 Folds: {folds}
 Nested CV: {nested_cv}
 Data: {args.data_path}
+Graph Mode: family (family-level analysis only)
+Sparsification: Edge-based using GNNExplainer
 {'='*80}
 
 Key Features Enabled:
-✅ Mathematical formulation for unified node importance scoring
+✅ Edge-based sparsification with GNNExplainer (NO node pruning)
+✅ Family-level microbial analysis only
 ✅ Statistical validation with significance testing
 ✅ Enhanced Graph Transformer with proper architecture
 ✅ Comprehensive baseline comparisons
@@ -101,9 +110,9 @@ Key Features Enabled:
             'batch_size': 8,
             'learning_rate': 0.001,
             'patience': 20 if not args.quick else 5,
-            'graph_mode': 'family',
+            'importance_threshold': args.importance_threshold,
             'graph_construction_method': args.graph_method,  # User-selected graph construction method
-            'use_node_pruning': True  # ✅ ENABLE ATTENTION-BASED NODE PRUNING
+            'use_node_pruning': False  # ✅ EDGE-ONLY SPARSIFICATION
         }
         
         print("Initializing enhanced pipeline...")
@@ -169,9 +178,10 @@ Key Features Enabled:
                             overall_score = bio_val.get('overall_biological_validity', {}).get('overall_score', 'N/A')
                             print(f"  Biological validity: {overall_score}")
         
-        print(f"\n🎉 Enhanced node pruning pipeline completed successfully!")
+        print(f"\n🎉 Enhanced edge-based sparsification pipeline completed successfully!")
         print(f"📁 Check results directory: {pipeline.save_dir}")
         print(f"📊 Validation results include statistical tests and biological pathway analysis")
+        print(f"🔬 Analysis performed at family-level with edge-based graph sparsification")
         
         if args.quick:
             print(f"\n💡 For full research results, run without --quick flag")
@@ -197,9 +207,10 @@ def run_all_cases(args):
     print("RUNNING ALL DOMAIN EXPERT CASES WITH ENHANCED PIPELINE")
     print("="*80)
     print("Features enabled:")
+    print("✓ Edge-based sparsification using GNNExplainer (NO node pruning)")
+    print("✓ Family-level microbial analysis only")
     print("✓ Spearman correlation graph initialization")
-    print("✓ Attention-based node pruning with feature importance tracking")
-    print("✓ Protected anchored features during pruning")
+    print("✓ Protected anchored features during edge sparsification")
     print("✓ Working transformer models")
     print("✓ Comprehensive graph visualizations")
     print("="*80)
@@ -250,7 +261,7 @@ def run_all_cases(args):
                 'batch_size': 8,
                 'learning_rate': 0.001,
                 'patience': 20 if not args.quick else 5,
-                'graph_mode': 'family',
+                'importance_threshold': args.importance_threshold,
                 'graph_construction_method': args.graph_method
             }
 

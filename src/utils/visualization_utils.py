@@ -103,30 +103,26 @@ def create_networkx_graph_from_edge_data(edge_index, edge_weight, node_features)
     """
     G = nx.Graph()
 
-    # First, find all unique node indices referenced in edges
-    edge_index_np = edge_index.cpu().numpy()
-    all_node_indices = np.unique(edge_index_np.flatten())
-
-    # Add all nodes with names, ensuring every node gets a proper name
-    for node_idx in all_node_indices:
-        if node_idx < len(node_features):
-            node_name = node_features[node_idx]
-        else:
-            # This shouldn't happen, but provide fallback
-            node_name = f"Unknown_Family_{node_idx}"
+    # For edge-only sparsification, include ALL nodes, not just those with edges
+    # This ensures isolated nodes (nodes with no edges) are still shown
+    for node_idx in range(len(node_features)):
+        node_name = node_features[node_idx]
         G.add_node(node_idx, name=node_name)
 
     # Add edges with weights
     # Handle None edge_weight gracefully
-    if edge_weight is not None:
-        edge_weight_np = edge_weight.cpu().numpy()
-    else:
-        edge_weight_np = np.ones(edge_index_np.shape[1])  # Default weights
+    if edge_index is not None and edge_index.shape[1] > 0:
+        edge_index_np = edge_index.cpu().numpy()
+        
+        if edge_weight is not None:
+            edge_weight_np = edge_weight.cpu().numpy()
+        else:
+            edge_weight_np = np.ones(edge_index_np.shape[1])  # Default weights
 
-    for i in range(edge_index_np.shape[1]):
-        src, dst = edge_index_np[:, i]
-        weight = edge_weight_np[i]
-        G.add_edge(src, dst, weight=weight)
+        for i in range(edge_index_np.shape[1]):
+            src, dst = edge_index_np[:, i]
+            weight = edge_weight_np[i]
+            G.add_edge(src, dst, weight=weight)
 
     return G
 
