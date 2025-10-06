@@ -554,7 +554,30 @@ def create_side_by_side_comparison(knn_graph_data, explainer_graph_data, node_fe
                               node_size=pruned_node_sizes, alpha=0.9, edgecolors='black', linewidths=1.0)
 
         if explainer_G.edges():
-            nx.draw_networkx_edges(explainer_G, pos3, ax=ax3, alpha=0.6, width=pruned_edge_widths, edge_color='darkgray')
+            # Get all edges with their weights and sort by weight
+            edge_weights_list = []
+            for u, v in explainer_G.edges():
+                weight = abs(explainer_G[u][v].get("weight", 0))
+                edge_weights_list.append(((u, v), weight))
+            
+            # Sort edges by weight (descending) and get top 10
+            edge_weights_list.sort(key=lambda x: x[1], reverse=True)
+            top_10_edges = [edge for edge, weight in edge_weights_list[:10]]
+            regular_edges = [edge for edge, weight in edge_weights_list[10:]]
+            
+            # Draw regular edges (all except top 10) in gray
+            if regular_edges:
+                regular_widths = [pruned_edge_widths[list(explainer_G.edges()).index(edge)] 
+                                 for edge in regular_edges if edge in explainer_G.edges()]
+                nx.draw_networkx_edges(explainer_G, pos3, edgelist=regular_edges, ax=ax3, 
+                                      alpha=0.6, width=regular_widths, edge_color='darkgray')
+            
+            # Draw top 10 edges in orange/gold to highlight them
+            if top_10_edges:
+                top_widths = [pruned_edge_widths[list(explainer_G.edges()).index(edge)] 
+                             for edge in top_10_edges if edge in explainer_G.edges()]
+                nx.draw_networkx_edges(explainer_G, pos3, edgelist=top_10_edges, ax=ax3, 
+                                      alpha=0.9, width=top_widths, edge_color='#FF8C00')  # Dark orange
 
             # Add edge weight labels
             edge_labels = {(u, v): f'{abs(explainer_G[u][v].get("weight", 0)):.2f}' for u, v in explainer_G.edges()}
@@ -607,13 +630,16 @@ def create_side_by_side_comparison(knn_graph_data, explainer_graph_data, node_fe
 
     # Add enhanced legend
     from matplotlib.patches import Patch
+    from matplotlib.lines import Line2D
     legend_elements = [
         Patch(facecolor='#00FFFF', label='Protected/Anchored Nodes'),
-        Patch(facecolor='#808080', label='Other Nodes')
+        Patch(facecolor='#808080', label='Other Nodes'),
+        Line2D([0], [0], color='#FF8C00', linewidth=3, label='Top 10 Edges by Weight'),
+        Line2D([0], [0], color='darkgray', linewidth=2, label='Other Edges')
     ]
 
     fig.legend(handles=legend_elements, loc='lower center', bbox_to_anchor=(0.5, 0.02),
-              ncol=2, fontsize=14, framealpha=0.9)
+              ncol=4, fontsize=14, framealpha=0.9)
 
     plt.tight_layout()
     plt.subplots_adjust(bottom=0.1, top=0.92)
