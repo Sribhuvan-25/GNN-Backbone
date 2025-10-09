@@ -786,7 +786,8 @@ class MicrobialGNNDataset:
                 edge_labels[(u, v)] = f'{abs(weight):.2f}'
             
             # Create layout
-            pos = nx.spring_layout(G, k=6, iterations=100, seed=42)
+            from utils.visualization_utils import get_optimal_layout
+            pos = get_optimal_layout(G, seed=42, scale=2.0)
             
             # Create figure
             plt.figure(figsize=(20, 16))
@@ -879,9 +880,10 @@ class MicrobialGNNDataset:
             # Create visualization
             plt.figure(figsize=(15, 15))
 
-            # Simple spring layout
+            # Use optimal layout
             try:
-                pos = nx.spring_layout(G, k=1.5, iterations=50, seed=42)
+                from utils.visualization_utils import get_optimal_layout
+                pos = get_optimal_layout(G, seed=42, scale=1.5)
             except:
                 pos = nx.circular_layout(G)
 
@@ -984,9 +986,10 @@ class MicrobialGNNDataset:
             # Create visualization
             plt.figure(figsize=(15, 15))
 
-            # Spring layout
+            # Use optimal layout
             try:
-                pos = nx.spring_layout(G, k=1.5, iterations=50, seed=42)
+                from utils.visualization_utils import get_optimal_layout
+                pos = get_optimal_layout(G, seed=42, scale=1.5)
             except:
                 pos = nx.circular_layout(G)
 
@@ -1132,35 +1135,27 @@ class MicrobialGNNDataset:
                 pos[node] = (math.cos(angle), math.sin(angle))
             return pos
         
-        # Try NetworkX layout with multiple fallbacks
+        # Try optimal layout with fallbacks
         pos = None
         try:
-            # Try basic spring_layout first
-            pos = nx.spring_layout(G, k=0.3)
+            from utils.visualization_utils import get_optimal_layout
+            pos = get_optimal_layout(G, seed=42, scale=0.3)
         except Exception as e1:
             try:
-                # Try with seed parameter
+                # Try basic spring_layout as fallback
                 pos = nx.spring_layout(G, k=0.3, seed=42)
             except Exception as e2:
                 try:
-                    # Try with random_state parameter
-                    pos = nx.spring_layout(G, k=0.3, random_state=42)
+                    # Try circular layout
+                    pos = nx.circular_layout(G)
                 except Exception as e3:
                     try:
-                        # Try without any parameters
-                        pos = nx.spring_layout(G)
+                        # Try shell layout
+                        pos = nx.shell_layout(G)
                     except Exception as e4:
-                        try:
-                            # Try circular layout
-                            pos = nx.circular_layout(G)
-                        except Exception as e5:
-                            try:
-                                # Try shell layout
-                                pos = nx.shell_layout(G)
-                            except Exception as e6:
-                                # Final fallback - custom circular layout
-                                print(f"NetworkX layout failed, using custom layout. Errors: {e1}, {e2}, {e3}, {e4}, {e5}, {e6}")
-                                pos = create_custom_layout(G)
+                        # Final fallback - custom circular layout
+                        print(f"All layout methods failed, using custom layout. Errors: {e1}, {e2}, {e3}, {e4}")
+                        pos = create_custom_layout(G)
         
         # Calculate node size - make uniform for better visualization
         # Option 1: Uniform node size for cleaner visualization

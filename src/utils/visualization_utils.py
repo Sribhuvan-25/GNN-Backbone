@@ -9,6 +9,40 @@ from matplotlib.patches import Patch
 from sklearn.metrics import r2_score, mean_squared_error, mean_absolute_error
 
 
+def get_optimal_layout(G, seed=42, scale=2.0):
+    """
+    Get optimal layout for graph visualization with fallbacks.
+    
+    Args:
+        G: NetworkX graph
+        seed: Random seed for reproducibility
+        scale: Scale factor for layout spacing
+        
+    Returns:
+        dict: Node positions
+    """
+    # Try Kamada-Kawai first (best for showing natural clustering)
+    try:
+        if nx.is_connected(G):
+            # Set random seed before calling kamada_kawai_layout (it doesn't accept seed parameter)
+            np.random.seed(seed)
+            pos = nx.kamada_kawai_layout(G, scale=scale)
+            print("Using Kamada-Kawai layout")
+            return pos
+        else:
+            print("Graph is disconnected, using spring layout")
+            pos = nx.spring_layout(G, k=scale, iterations=150, seed=seed)
+            return pos
+    except Exception as e:
+        print(f"Kamada-Kawai failed ({e}), falling back to spring layout")
+        try:
+            pos = nx.spring_layout(G, k=scale, iterations=150, seed=seed)
+            return pos
+        except Exception as e2:
+            print(f"Spring layout failed ({e2}), using circular layout")
+            return nx.circular_layout(G, scale=scale)
+
+
 def adjust_color_brightness(hex_color, factor=0.8):
     """
     Adjust the brightness of a hex color.
@@ -171,7 +205,7 @@ def save_graph_visualization(G, node_colors, output_path, title="Graph Visualiza
     plt.figure(figsize=figsize)
     
     # Calculate layout with improved spacing for less cluttered graphs
-    pos = nx.spring_layout(G, k=8, iterations=150, seed=42)
+    pos = get_optimal_layout(G, seed=42, scale=2.0)
     
     # Draw nodes with uniform size as requested
     # Convert node index to node name for color lookup
@@ -179,11 +213,11 @@ def save_graph_visualization(G, node_colors, output_path, title="Graph Visualiza
     for node in G.nodes():
         # Get node name from the graph's node data
         node_name = G.nodes[node].get('name', f'node_{node}')
-        color = node_colors.get(node_name, '#95A5A6')  # Use node name as key
+        color = node_colors.get(node_name, '#B0C4DE')  # Use node name as key
         node_color_list.append(color)
     
     nx.draw_networkx_nodes(G, pos, node_color=node_color_list, 
-                          node_size=500, alpha=0.9, edgecolors='black', linewidths=0.5)
+                          node_size=500, alpha=0.9, edgecolors='black', linewidths=1.5)
     
     if show_edge_weights and G.edges():
         # Get edge weights for visualization
@@ -300,14 +334,14 @@ def create_side_by_side_comparison(knn_graph_data, explainer_graph_data, node_fe
 
     fig, (ax1, ax2, ax3) = plt.subplots(1, 3, figsize=(45, 15))
 
-    # Enhanced color scheme: Protected nodes = cyan, others = gray
+    # Enhanced color scheme: Protected nodes = pink, others = light blue-gray
     def get_node_colors_with_protection(node_list, protected_list=None):
         colors = []
         for node in node_list:
             if protected_list and node in protected_list:
-                colors.append('#00FFFF')  # Cyan for protected nodes
+                colors.append('#FF69B4')  # Hot pink for protected/anchored nodes
             else:
-                colors.append('#808080')  # Gray for others
+                colors.append('#B0C4DE')  # Light steel blue for others
         return colors
 
     # Function to calculate node sizes based on abundance with better scaling
@@ -325,7 +359,7 @@ def create_side_by_side_comparison(knn_graph_data, explainer_graph_data, node_fe
                 if max_abundance > min_abundance:
                     normalized = (abundance - min_abundance) / (max_abundance - min_abundance)
                     # Use square root to make differences more visible
-                    size = 400 + (normalized ** 0.7 * 1200)  # Range: 400-1600
+                    size = 300 + (normalized ** 0.7 * 1200)  # Range: 300-1500
                 else:
                     size = 800  # All same abundance
                 sizes.append(size)
@@ -352,8 +386,8 @@ def create_side_by_side_comparison(knn_graph_data, explainer_graph_data, node_fe
             if max_weight > min_weight:
                 # Normalize to 0-1, then apply more sensitive scaling
                 normalized = (weight - min_weight) / (max_weight - min_weight)
-                # Use exponential scaling to amplify differences
-                width = 0.8 + (normalized ** 1.5 * 4.0)  # Range: 0.8-4.8
+                # Use exponential scaling to amplify differences (less aggressive than before)
+                width = 0.5 + (normalized ** 1.2 * 4.5)  # Range: 0.5-5.0
             else:
                 width = 2.0  # All weights are the same
             edge_widths.append(width)
@@ -381,7 +415,7 @@ def create_side_by_side_comparison(knn_graph_data, explainer_graph_data, node_fe
         )
         print(f"Panel 1 (k-NN fallback): {len(original_G.nodes())} nodes, {len(original_G.edges())} edges")
 
-    pos1 = nx.spring_layout(original_G, k=8, iterations=150, seed=42)
+    pos1 = get_optimal_layout(original_G, seed=42, scale=2.0)
 
     # Get full node names and colors - ensure arrays match graph size
     num_graph_nodes = len(original_G.nodes())
@@ -397,13 +431,13 @@ def create_side_by_side_comparison(knn_graph_data, explainer_graph_data, node_fe
 
     # Ensure arrays match graph size
     if len(original_node_colors) != num_graph_nodes:
-        original_node_colors = original_node_colors[:num_graph_nodes] + ['#808080'] * max(0, num_graph_nodes - len(original_node_colors))
+        original_node_colors = original_node_colors[:num_graph_nodes] + ['#B0C4DE'] * max(0, num_graph_nodes - len(original_node_colors))
     if len(original_node_sizes) != num_graph_nodes:
         original_node_sizes = original_node_sizes[:num_graph_nodes] + [800] * max(0, num_graph_nodes - len(original_node_sizes))
 
     # Draw Panel 1: Spearman Correlation Graph
     nx.draw_networkx_nodes(original_G, pos1, ax=ax1, node_color=original_node_colors,
-                          node_size=original_node_sizes, alpha=0.9, edgecolors='black', linewidths=1.0)
+                          node_size=original_node_sizes, alpha=0.9, edgecolors='black', linewidths=1.5)
 
     if original_G.edges():
         nx.draw_networkx_edges(original_G, pos1, ax=ax1, alpha=0.6, width=original_edge_widths, edge_color='darkgray')
@@ -448,7 +482,7 @@ def create_side_by_side_comparison(knn_graph_data, explainer_graph_data, node_fe
         original_node_names  # Use original names, not current node_features
     )
     print(f"Panel 2 (k-NN): {len(knn_G.nodes())} nodes, {len(knn_G.edges())} edges")
-    pos2 = nx.spring_layout(knn_G, k=8, iterations=150, seed=42)
+    pos2 = get_optimal_layout(knn_G, seed=42, scale=2.0)
 
     # Get node data for k-NN graph - ensure arrays match graph size
     num_knn_nodes = len(knn_G.nodes())
@@ -464,13 +498,13 @@ def create_side_by_side_comparison(knn_graph_data, explainer_graph_data, node_fe
 
     # Ensure arrays match graph size
     if len(knn_node_colors) != num_knn_nodes:
-        knn_node_colors = knn_node_colors[:num_knn_nodes] + ['#808080'] * max(0, num_knn_nodes - len(knn_node_colors))
+        knn_node_colors = knn_node_colors[:num_knn_nodes] + ['#B0C4DE'] * max(0, num_knn_nodes - len(knn_node_colors))
     if len(knn_node_sizes) != num_knn_nodes:
         knn_node_sizes = knn_node_sizes[:num_knn_nodes] + [800] * max(0, num_knn_nodes - len(knn_node_sizes))
 
     # Draw Panel 2: k-NN Graph
     nx.draw_networkx_nodes(knn_G, pos2, ax=ax2, node_color=knn_node_colors,
-                          node_size=knn_node_sizes, alpha=0.9, edgecolors='black', linewidths=1.0)
+                          node_size=knn_node_sizes, alpha=0.9, edgecolors='black', linewidths=1.5)
 
     if knn_G.edges():
         nx.draw_networkx_edges(knn_G, pos2, ax=ax2, alpha=0.6, width=knn_edge_widths, edge_color='darkgray')
@@ -523,7 +557,7 @@ def create_side_by_side_comparison(knn_graph_data, explainer_graph_data, node_fe
             explainer_node_names
         )
         print(f"Panel 3 (Explainer): {len(explainer_G.nodes())} nodes, {len(explainer_G.edges())} edges")
-        pos3 = nx.spring_layout(explainer_G, k=8, iterations=150, seed=42)
+        pos3 = get_optimal_layout(explainer_G, seed=42, scale=2.0)
 
         # Get node data for pruned graph - extract actual node names from the explainer graph
         explainer_graph_node_features = []
@@ -546,12 +580,12 @@ def create_side_by_side_comparison(knn_graph_data, explainer_graph_data, node_fe
         # Draw Panel 3: Attention-Pruned Graph - ensure array lengths match
         num_nodes = len(explainer_G.nodes())
         if len(pruned_node_colors) != num_nodes:
-            pruned_node_colors = pruned_node_colors[:num_nodes] + ['#808080'] * max(0, num_nodes - len(pruned_node_colors))
+            pruned_node_colors = pruned_node_colors[:num_nodes] + ['#B0C4DE'] * max(0, num_nodes - len(pruned_node_colors))
         if len(pruned_node_sizes) != num_nodes:
             pruned_node_sizes = pruned_node_sizes[:num_nodes] + [800] * max(0, num_nodes - len(pruned_node_sizes))
 
         nx.draw_networkx_nodes(explainer_G, pos3, ax=ax3, node_color=pruned_node_colors,
-                              node_size=pruned_node_sizes, alpha=0.9, edgecolors='black', linewidths=1.0)
+                              node_size=pruned_node_sizes, alpha=0.9, edgecolors='black', linewidths=1.5)
 
         if explainer_G.edges():
             # Get all edges with their weights and sort by weight
@@ -632,8 +666,8 @@ def create_side_by_side_comparison(knn_graph_data, explainer_graph_data, node_fe
     from matplotlib.patches import Patch
     from matplotlib.lines import Line2D
     legend_elements = [
-        Patch(facecolor='#00FFFF', label='Protected/Anchored Nodes'),
-        Patch(facecolor='#808080', label='Other Nodes'),
+        Patch(facecolor='#FF69B4', label='Protected/Anchored Nodes'),
+        Patch(facecolor='#B0C4DE', label='Other Nodes'),
         Line2D([0], [0], color='#FF8C00', linewidth=3, label='Top 10 Edges by Weight'),
         Line2D([0], [0], color='darkgray', linewidth=2, label='Other Edges')
     ]
