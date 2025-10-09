@@ -426,7 +426,8 @@ def create_visualizations(G, node_names, centrality_measures, communities, class
     plt.style.use('default')
 
     # 1. Network layout for all plots
-    pos = nx.spring_layout(G, k=3, iterations=50, seed=42)
+    from utils.visualization_utils import get_optimal_layout
+    pos = get_optimal_layout(G, seed=42, scale=3.0)
 
     # 2. Centrality visualization
     fig, axes = plt.subplots(2, 2, figsize=(20, 16))
