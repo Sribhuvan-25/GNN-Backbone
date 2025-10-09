@@ -2571,13 +2571,15 @@ class MixedEmbeddingPipeline:
                 data.batch = data.batch.detach() if data.batch.requires_grad else data.batch
         
         # Create data loaders
-        batch_size = min(self.batch_size, len(train_data) // 4)
+        # batch_size = min(self.batch_size, len(train_data) // 4)
+        batch_size = max(4, min(self.batch_size, len(train_data) // 2))
         train_loader = DataLoader(train_data, batch_size=batch_size, shuffle=True)
         val_loader = DataLoader(val_data, batch_size=batch_size, shuffle=False)
         
         # Setup optimizer and scheduler
         optimizer = Adam(model.parameters(), lr=self.learning_rate, weight_decay=self.weight_decay)
-        scheduler = lr_scheduler.ReduceLROnPlateau(optimizer, mode='min', factor=0.5, patience=5, min_lr=1e-5)
+        # scheduler = lr_scheduler.ReduceLROnPlateau(optimizer, mode='min', factor=0.5, patience=5, min_lr=1e-5)
+        scheduler = lr_scheduler.ReduceLROnPlateau(optimizer, mode='min', factor=0.8, patience=10, min_lr=1e-6)
         
         criterion = nn.MSELoss()
         
@@ -2605,7 +2607,8 @@ class MixedEmbeddingPipeline:
                 
                 loss = criterion(out, target)
                 loss.backward()
-                torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
+                # torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
+                torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=5.0)
                 optimizer.step()
                 
                 total_train_loss += loss.item() * batch_data.num_graphs
@@ -2631,7 +2634,8 @@ class MixedEmbeddingPipeline:
                 patience_counter = 0
             else:
                 patience_counter += 1
-                if patience_counter >= min(self.patience, 10):  # Shorter patience for inner CV
+                # if patience_counter >= min(self.patience, 10):  # Shorter patience for inner CV
+                if patience_counter >= self.patience:
                     break
         
         # Final evaluation
