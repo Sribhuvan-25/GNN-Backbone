@@ -114,8 +114,7 @@ Key Features Enabled:
         #     'graph_construction_method': args.graph_method,  # User-selected graph construction method
         #     'use_node_pruning': False  # ✅ EDGE-ONLY SPARSIFICATION
         # }
-        
-         config = {
+        config = {
             'data_path': args.data_path,
             'case_type': args.case,
             'num_epochs': epochs,
@@ -267,7 +266,7 @@ def run_all_cases(args):
             # Import and configure pipeline
             from pipelines.domain_expert_cases_pipeline_refactored import DomainExpertCasesPipeline
 
-            config = {
+           config = {
                 'data_path': args.data_path,
                 'case_type': case,
                 'num_epochs': epochs,
