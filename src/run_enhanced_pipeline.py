@@ -123,14 +123,14 @@ Key Features Enabled:
             'save_dir': f'enhanced_results_{args.case}',
             'k_neighbors': 10,
             'hidden_dim': 64,
-            'dropout_rate': 0.2,        # CHANGE TO 0.2
-            'batch_size': 16,            # CHANGE TO 16
-            'learning_rate': 0.01,     # CHANGE TO 0.01
-            'patience': 50 if not args.quick else 5,  # CHANGE TO 50
+            'dropout_rate': 0.3,        # CHANGE TO 0.2
+            'batch_size': 8,            # CHANGE TO 16
+            'learning_rate': 0.003,     # CHANGE TO 0.01
+            'patience': 25 if not args.quick else 5,  # CHANGE TO 50
             'importance_threshold': args.importance_threshold,
             'graph_construction_method': args.graph_method,
             'use_node_pruning': False,
-            'weight_decay': 1e-5        # CHANGE TO 1e-5
+            'weight_decay': 1e-4        # CHANGE TO 1e-5
         }
         
         print("Initializing enhanced pipeline...")
