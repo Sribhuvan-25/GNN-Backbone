@@ -692,7 +692,7 @@ class DomainExpertCasesPipeline(MixedEmbeddingPipeline):
             
             ax2.text(0.1, 0.9, '\n'.join(stats_text), transform=ax2.transAxes, 
                     fontsize=11, verticalalignment='top',
-                    bbox=dict(boxstyle='round,pad=1', facecolor='lightblue', alpha=0.8))
+                    bbox=dict(boxstyle='round,pad=1', facecolor='#E8E8E8', alpha=0.8))
             ax2.set_xlim(0, 1)
             ax2.set_ylim(0, 1)
             ax2.axis('off')
@@ -711,7 +711,7 @@ class DomainExpertCasesPipeline(MixedEmbeddingPipeline):
             
             ax2.text(0.1, 0.4, '\n'.join(file_structure), transform=ax2.transAxes, 
                     fontsize=9, verticalalignment='top', fontfamily='monospace',
-                    bbox=dict(boxstyle='round,pad=0.5', facecolor='lightyellow', alpha=0.8))
+                    bbox=dict(boxstyle='round,pad=0.5', facecolor='#D8D8D8', alpha=0.8))
             
             plt.tight_layout()
             plt.savefig(f"{self.save_dir}/graph_visualization_summary_{target_name}.png", 
@@ -1416,7 +1416,7 @@ class DomainExpertCasesPipeline(MixedEmbeddingPipeline):
         # Plot 3: Performance by hyperparameters
         ax3 = axes[1, 0]
         perf_by_hidden = combined_df.groupby('hidden_dim')['r2'].mean()
-        perf_by_hidden.plot(kind='bar', ax=ax3, color='skyblue')
+        perf_by_hidden.plot(kind='bar', ax=ax3, color='#808080')
         ax3.set_title('Average R² by Hidden Dimension')
         ax3.set_xlabel('Hidden Dimension')
         ax3.set_ylabel('Average R²')
@@ -1425,7 +1425,7 @@ class DomainExpertCasesPipeline(MixedEmbeddingPipeline):
         # Plot 4: Performance by k-neighbors
         ax4 = axes[1, 1]
         perf_by_k = combined_df.groupby('k_neighbors')['r2'].mean()
-        perf_by_k.plot(kind='bar', ax=ax4, color='lightcoral')
+        perf_by_k.plot(kind='bar', ax=ax4, color='#999999')
         ax4.set_title('Average R² by K-Neighbors')
         ax4.set_xlabel('K-Neighbors')
         ax4.set_ylabel('Average R²')
@@ -2993,7 +2993,7 @@ class DomainExpertCasesPipeline(MixedEmbeddingPipeline):
         # Add sparsification ratio text
         ax1.text(0.5, 0.8, f'Sparsification: {sparsification_ratio:.1%}', 
                 transform=ax1.transAxes, ha='center', va='center',
-                bbox=dict(boxstyle='round,pad=0.5', facecolor='yellow', alpha=0.7),
+                bbox=dict(boxstyle='round,pad=0.5', facecolor='#E8E8E8', alpha=0.7),
                 fontsize=12, fontweight='bold')
         
         # Plot 2: Sample visualization of one graph

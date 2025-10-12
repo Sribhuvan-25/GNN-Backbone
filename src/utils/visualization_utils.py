@@ -241,13 +241,13 @@ def save_graph_visualization(G, node_colors, output_path, title="Graph Visualiza
                     edge_labels[(u, v)] = f'{abs(weight):.2f}'
                 
                 # Draw edge labels with smaller font to reduce clutter
-                nx.draw_networkx_edge_labels(G, pos, edge_labels, font_size=6)
+                nx.draw_networkx_edge_labels(G, pos, edge_labels, font_size=8)
             else:
                 # All edges have the same weight - draw with uniform style
                 nx.draw_networkx_edges(G, pos, alpha=0.4, width=0.8, edge_color='gray')
                 # Still show the weight values even if they're all the same
                 edge_labels = {(u, v): f'{abs(edge_weights[0]):.2f}' for u, v in G.edges()}
-                nx.draw_networkx_edge_labels(G, pos, edge_labels, font_size=6)
+                nx.draw_networkx_edge_labels(G, pos, edge_labels, font_size=8)
         else:
             # No edges
             pass
@@ -265,7 +265,7 @@ def save_graph_visualization(G, node_colors, output_path, title="Graph Visualiza
         truncated_labels = {k: (v[:15] + '...' if len(v) > 18 else v) 
                            for k, v in node_labels.items()}
         
-        nx.draw_networkx_labels(G, pos, labels=truncated_labels, font_size=7, font_weight='bold')
+        nx.draw_networkx_labels(G, pos, labels=truncated_labels, font_size=9, font_weight='bold')
     
     plt.title(title, fontsize=16, fontweight='bold', pad=20)
     
@@ -280,7 +280,7 @@ def save_graph_visualization(G, node_colors, output_path, title="Graph Visualiza
         stats_text += f"  |  Avg. Weight: {avg_weight:.3f}"
     
     plt.figtext(0.02, 0.02, stats_text, fontsize=10, style='italic', 
-                bbox=dict(boxstyle="round,pad=0.3", facecolor="lightgray", alpha=0.8))
+                bbox=dict(boxstyle="round,pad=0.3", facecolor="#E0E0E0", alpha=0.9))
     
     plt.axis('off')
     plt.tight_layout()
@@ -339,7 +339,7 @@ def create_side_by_side_comparison(knn_graph_data, explainer_graph_data, node_fe
         colors = []
         for node in node_list:
             if protected_list and node in protected_list:
-                colors.append('#2C2C2C')  # Dark charcoal for protected/anchored nodes
+                colors.append('#606060')  # Medium-dark gray for protected/anchored nodes (lightened)
             else:
                 colors.append('#D3D3D3')  # Light gray for others
         return colors
@@ -444,7 +444,7 @@ def create_side_by_side_comparison(knn_graph_data, explainer_graph_data, node_fe
 
         # Add edge weight labels
         edge_labels = {(u, v): f'{abs(original_G[u][v].get("weight", 0)):.2f}' for u, v in original_G.edges()}
-        nx.draw_networkx_edge_labels(original_G, pos1, edge_labels, ax=ax1, font_size=8)
+        nx.draw_networkx_edge_labels(original_G, pos1, edge_labels, ax=ax1, font_size=10)
 
     # Add full family names as labels - use original_node_names directly by position
     node_labels = {}
@@ -467,12 +467,12 @@ def create_side_by_side_comparison(knn_graph_data, explainer_graph_data, node_fe
             node_labels[node_id] = family_name
         else:
             node_labels[node_id] = f'Node_{node_id}'
-    nx.draw_networkx_labels(original_G, pos1, labels=node_labels, ax=ax1, font_size=8, font_weight='bold')
+    nx.draw_networkx_labels(original_G, pos1, labels=node_labels, ax=ax1, font_size=10, font_weight='bold')
 
     ax1.set_title('Spearman Correlation Graph (Original)', fontsize=16, fontweight='bold', pad=20)
     ax1.text(0.02, 0.98, f"Nodes: {len(original_G.nodes())}\nEdges: {len(original_G.edges())}",
             transform=ax1.transAxes, fontsize=12, verticalalignment='top',
-            bbox=dict(boxstyle="round,pad=0.5", facecolor="lightblue", alpha=0.8))
+            bbox=dict(boxstyle="round,pad=0.5", facecolor="#E8E8E8", alpha=0.9))
 
     # Panel 2: k-NN Graph
     # IMPORTANT: Also use original node names for Panel 2, same reason as Panel 1
@@ -511,7 +511,7 @@ def create_side_by_side_comparison(knn_graph_data, explainer_graph_data, node_fe
 
         # Add edge weight labels
         edge_labels = {(u, v): f'{abs(knn_G[u][v].get("weight", 0)):.2f}' for u, v in knn_G.edges()}
-        nx.draw_networkx_edge_labels(knn_G, pos2, edge_labels, ax=ax2, font_size=8)
+        nx.draw_networkx_edge_labels(knn_G, pos2, edge_labels, ax=ax2, font_size=10)
 
     # Add full family names as labels - use original_node_names directly by position
     node_labels = {}
@@ -534,12 +534,12 @@ def create_side_by_side_comparison(knn_graph_data, explainer_graph_data, node_fe
             node_labels[node_id] = family_name
         else:
             node_labels[node_id] = f'Node_{node_id}'
-    nx.draw_networkx_labels(knn_G, pos2, labels=node_labels, ax=ax2, font_size=8, font_weight='bold')
+    nx.draw_networkx_labels(knn_G, pos2, labels=node_labels, ax=ax2, font_size=10, font_weight='bold')
 
     ax2.set_title('k-NN Graph (Sparsified)', fontsize=16, fontweight='bold', pad=20)
     ax2.text(0.02, 0.98, f"Nodes: {len(knn_G.nodes())}\nEdges: {len(knn_G.edges())}",
             transform=ax2.transAxes, fontsize=12, verticalalignment='top',
-            bbox=dict(boxstyle="round,pad=0.5", facecolor="lightyellow", alpha=0.8))
+            bbox=dict(boxstyle="round,pad=0.5", facecolor="#D8D8D8", alpha=0.9))
     
     # Panel 3: Attention-Pruned Graph
     if explainer_graph_data and 'edge_index' in explainer_graph_data:
@@ -615,7 +615,7 @@ def create_side_by_side_comparison(knn_graph_data, explainer_graph_data, node_fe
 
             # Add edge weight labels
             edge_labels = {(u, v): f'{abs(explainer_G[u][v].get("weight", 0)):.2f}' for u, v in explainer_G.edges()}
-            nx.draw_networkx_edge_labels(explainer_G, pos3, edge_labels, ax=ax3, font_size=8)
+            nx.draw_networkx_edge_labels(explainer_G, pos3, edge_labels, ax=ax3, font_size=10)
 
         # Add full family names as labels - use stored node names from graph
         node_labels = {}
@@ -645,14 +645,14 @@ def create_side_by_side_comparison(knn_graph_data, explainer_graph_data, node_fe
                     mid = len(family_name) // 2
                     family_name = f"{family_name[:mid]}\n{family_name[mid:]}"
             node_labels[node_id] = family_name
-        nx.draw_networkx_labels(explainer_G, pos3, labels=node_labels, ax=ax3, font_size=8, font_weight='bold')
+        nx.draw_networkx_labels(explainer_G, pos3, labels=node_labels, ax=ax3, font_size=10, font_weight='bold')
 
         pruning_type = explainer_graph_data.get('pruning_type', 'attention_based')
         title_text = "Attention-Pruned Graph" if pruning_type == 'attention_based' else "Explainer-Pruned Graph"
         ax3.set_title(title_text, fontsize=16, fontweight='bold', pad=20)
         ax3.text(0.02, 0.98, f"Nodes: {len(explainer_G.nodes())}\nEdges: {len(explainer_G.edges())}",
                 transform=ax3.transAxes, fontsize=12, verticalalignment='top',
-                bbox=dict(boxstyle="round,pad=0.5", facecolor="lightcoral", alpha=0.8))
+                bbox=dict(boxstyle="round,pad=0.5", facecolor="#C8C8C8", alpha=0.9))
 
     # Remove axes
     ax1.axis('off')
@@ -666,7 +666,7 @@ def create_side_by_side_comparison(knn_graph_data, explainer_graph_data, node_fe
     from matplotlib.patches import Patch
     from matplotlib.lines import Line2D
     legend_elements = [
-        Patch(facecolor='#2C2C2C', edgecolor='black', label='Protected/Anchored Nodes'),
+        Patch(facecolor='#606060', edgecolor='black', label='Protected/Anchored Nodes'),
         Patch(facecolor='#D3D3D3', edgecolor='black', label='Other Nodes'),
         Line2D([0], [0], color='#000000', linewidth=3, label='Top 10 Edges by Weight'),
         Line2D([0], [0], color='#808080', linewidth=2, label='Other Edges')
@@ -802,8 +802,8 @@ def create_single_model_prediction_plot(fold_predictions, output_path, title, ta
     # Collect all predictions for combined plot
     all_actual = []
     all_predicted = []
-    # Use single color for all points instead of different fold colors
-    single_color = '#1f77b4'  # Blue color for all points
+    # Use grayscale color for all points
+    single_color = '#666666'  # Medium gray for all points
     
     # Plot individual folds
     for fold_idx, fold_data in enumerate(fold_predictions):
@@ -838,7 +838,7 @@ def create_single_model_prediction_plot(fold_predictions, output_path, title, ta
                 
             # Always start from 0 for both axes
             min_val = 0
-            ax.plot([min_val, max_val], [min_val, max_val], 'r--', alpha=0.8, linewidth=2)
+            ax.plot([min_val, max_val], [min_val, max_val], 'k--', alpha=0.8, linewidth=2)  # Black dashed line
             
             # Set axis limits starting from 0
             margin = max_val * 0.05  # 5% margin
@@ -882,7 +882,7 @@ def create_single_model_prediction_plot(fold_predictions, output_path, title, ta
             
         # Always start from 0 for both axes
         min_val = 0
-        ax.plot([min_val, max_val], [min_val, max_val], 'r--', alpha=0.8, linewidth=2, label='Perfect Prediction')
+        ax.plot([min_val, max_val], [min_val, max_val], 'k--', alpha=0.8, linewidth=2, label='Perfect Prediction')  # Black dashed line
         
         # Set axis limits starting from 0
         margin = max_val * 0.05
@@ -931,9 +931,9 @@ def create_combined_prediction_comparison(predictions_dict, output_path, target_
                 overall_r2 = r2_score(all_actual, all_predicted) if len(all_actual) > 1 else 0
                 overall_rmse = np.sqrt(mean_squared_error(all_actual, all_predicted))
                 
-                # Scatter plot
-                ax.scatter(all_actual, all_predicted, alpha=0.6, s=40, 
-                          edgecolors='black', linewidth=0.3)
+                # Scatter plot - grayscale
+                ax.scatter(all_actual, all_predicted, alpha=0.6, s=40, c='#666666',
+                          edgecolors='black', linewidth=0.3)  # Medium gray
                 
                 # Perfect prediction line with outlier-robust axis limits
                 all_actual_array = np.array(all_actual)
@@ -950,7 +950,7 @@ def create_combined_prediction_comparison(predictions_dict, output_path, target_
                     
                 # Always start from 0 for both axes
                 min_val = 0
-                ax.plot([min_val, max_val], [min_val, max_val], 'r--', alpha=0.8, linewidth=2)
+                ax.plot([min_val, max_val], [min_val, max_val], 'k--', alpha=0.8, linewidth=2)  # Black dashed line
                 
                 # Set axis limits starting from 0
                 margin = max_val * 0.05  # 5% margin
@@ -1005,18 +1005,18 @@ def generate_feature_importance_report(importance_scores, feature_names, output_
     ax1.set_title(f'Top {top_n} Most Important Features')
     ax1.grid(True, alpha=0.3, axis='x')
     
-    # Color bars by importance level
-    colors = plt.cm.viridis(np.linspace(0, 1, len(bars)))
-    for bar, color in zip(bars, colors):
-        bar.set_color(color)
+    # Grayscale bars by importance level (darker = more important)
+    grayscale_values = np.linspace(0.8, 0.2, len(bars))  # Light to dark gray
+    for bar, gray_val in zip(bars, grayscale_values):
+        bar.set_color(str(gray_val))  # Convert to grayscale
     
-    # Distribution histogram
-    ax2.hist(importance_scores, bins=30, alpha=0.7, edgecolor='black', linewidth=0.5)
+    # Distribution histogram - grayscale
+    ax2.hist(importance_scores, bins=30, alpha=0.7, color='#666666', edgecolor='black', linewidth=0.5)
     ax2.set_xlabel('Importance Score')
     ax2.set_ylabel('Frequency')
     ax2.set_title('Feature Importance Distribution')
     ax2.grid(True, alpha=0.3)
-    ax2.axvline(np.mean(importance_scores), color='red', linestyle='--', 
+    ax2.axvline(np.mean(importance_scores), color='black', linestyle='--', linewidth=2,
                 label=f'Mean: {np.mean(importance_scores):.3f}')
     ax2.legend()
     

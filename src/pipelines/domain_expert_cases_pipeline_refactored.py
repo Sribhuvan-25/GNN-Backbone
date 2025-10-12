@@ -1405,12 +1405,12 @@ class DomainExpertCasesPipeline(MixedEmbeddingPipeline):
                 if all_predictions and all_targets:
                     # Create prediction vs actual plot
                     plt.figure(figsize=(10, 8))
-                    plt.scatter(all_targets, all_predictions, alpha=0.6)
+                    plt.scatter(all_targets, all_predictions, alpha=0.6, c='#666666', edgecolors='black', linewidth=0.5)
                     
                     # Add perfect prediction line
                     min_val = min(min(all_targets), min(all_predictions))
                     max_val = max(max(all_targets), max(all_predictions))
-                    plt.plot([min_val, max_val], [min_val, max_val], 'r--', alpha=0.8)
+                    plt.plot([min_val, max_val], [min_val, max_val], 'k--', alpha=0.8)
                     
                     # Calculate R2
                     from sklearn.metrics import r2_score
