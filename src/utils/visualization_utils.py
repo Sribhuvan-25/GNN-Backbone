@@ -213,7 +213,7 @@ def save_graph_visualization(G, node_colors, output_path, title="Graph Visualiza
     for node in G.nodes():
         # Get node name from the graph's node data
         node_name = G.nodes[node].get('name', f'node_{node}')
-        color = node_colors.get(node_name, '#B0C4DE')  # Use node name as key
+        color = node_colors.get(node_name, '#D3D3D3')  # Light gray fallback
         node_color_list.append(color)
     
     nx.draw_networkx_nodes(G, pos, node_color=node_color_list, 
@@ -334,14 +334,14 @@ def create_side_by_side_comparison(knn_graph_data, explainer_graph_data, node_fe
 
     fig, (ax1, ax2, ax3) = plt.subplots(1, 3, figsize=(45, 15))
 
-    # Enhanced color scheme: Protected nodes = pink, others = light blue-gray
+    # Grayscale color scheme with high contrast
     def get_node_colors_with_protection(node_list, protected_list=None):
         colors = []
         for node in node_list:
             if protected_list and node in protected_list:
-                colors.append('#FF69B4')  # Hot pink for protected/anchored nodes
+                colors.append('#2C2C2C')  # Dark charcoal for protected/anchored nodes
             else:
-                colors.append('#B0C4DE')  # Light steel blue for others
+                colors.append('#D3D3D3')  # Light gray for others
         return colors
 
     # Function to calculate node sizes based on abundance with better scaling
@@ -431,7 +431,7 @@ def create_side_by_side_comparison(knn_graph_data, explainer_graph_data, node_fe
 
     # Ensure arrays match graph size
     if len(original_node_colors) != num_graph_nodes:
-        original_node_colors = original_node_colors[:num_graph_nodes] + ['#B0C4DE'] * max(0, num_graph_nodes - len(original_node_colors))
+        original_node_colors = original_node_colors[:num_graph_nodes] + ['#D3D3D3'] * max(0, num_graph_nodes - len(original_node_colors))
     if len(original_node_sizes) != num_graph_nodes:
         original_node_sizes = original_node_sizes[:num_graph_nodes] + [800] * max(0, num_graph_nodes - len(original_node_sizes))
 
@@ -440,7 +440,7 @@ def create_side_by_side_comparison(knn_graph_data, explainer_graph_data, node_fe
                           node_size=original_node_sizes, alpha=0.9, edgecolors='black', linewidths=1.5)
 
     if original_G.edges():
-        nx.draw_networkx_edges(original_G, pos1, ax=ax1, alpha=0.6, width=original_edge_widths, edge_color='darkgray')
+        nx.draw_networkx_edges(original_G, pos1, ax=ax1, alpha=0.6, width=original_edge_widths, edge_color='#808080')  # Medium gray
 
         # Add edge weight labels
         edge_labels = {(u, v): f'{abs(original_G[u][v].get("weight", 0)):.2f}' for u, v in original_G.edges()}
@@ -498,7 +498,7 @@ def create_side_by_side_comparison(knn_graph_data, explainer_graph_data, node_fe
 
     # Ensure arrays match graph size
     if len(knn_node_colors) != num_knn_nodes:
-        knn_node_colors = knn_node_colors[:num_knn_nodes] + ['#B0C4DE'] * max(0, num_knn_nodes - len(knn_node_colors))
+        knn_node_colors = knn_node_colors[:num_knn_nodes] + ['#D3D3D3'] * max(0, num_knn_nodes - len(knn_node_colors))
     if len(knn_node_sizes) != num_knn_nodes:
         knn_node_sizes = knn_node_sizes[:num_knn_nodes] + [800] * max(0, num_knn_nodes - len(knn_node_sizes))
 
@@ -507,7 +507,7 @@ def create_side_by_side_comparison(knn_graph_data, explainer_graph_data, node_fe
                           node_size=knn_node_sizes, alpha=0.9, edgecolors='black', linewidths=1.5)
 
     if knn_G.edges():
-        nx.draw_networkx_edges(knn_G, pos2, ax=ax2, alpha=0.6, width=knn_edge_widths, edge_color='darkgray')
+        nx.draw_networkx_edges(knn_G, pos2, ax=ax2, alpha=0.6, width=knn_edge_widths, edge_color='#808080')  # Medium gray
 
         # Add edge weight labels
         edge_labels = {(u, v): f'{abs(knn_G[u][v].get("weight", 0)):.2f}' for u, v in knn_G.edges()}
@@ -580,7 +580,7 @@ def create_side_by_side_comparison(knn_graph_data, explainer_graph_data, node_fe
         # Draw Panel 3: Attention-Pruned Graph - ensure array lengths match
         num_nodes = len(explainer_G.nodes())
         if len(pruned_node_colors) != num_nodes:
-            pruned_node_colors = pruned_node_colors[:num_nodes] + ['#B0C4DE'] * max(0, num_nodes - len(pruned_node_colors))
+            pruned_node_colors = pruned_node_colors[:num_nodes] + ['#D3D3D3'] * max(0, num_nodes - len(pruned_node_colors))
         if len(pruned_node_sizes) != num_nodes:
             pruned_node_sizes = pruned_node_sizes[:num_nodes] + [800] * max(0, num_nodes - len(pruned_node_sizes))
 
@@ -599,19 +599,19 @@ def create_side_by_side_comparison(knn_graph_data, explainer_graph_data, node_fe
             top_10_edges = [edge for edge, weight in edge_weights_list[:10]]
             regular_edges = [edge for edge, weight in edge_weights_list[10:]]
             
-            # Draw regular edges (all except top 10) in gray
+            # Draw regular edges (all except top 10) in medium gray
             if regular_edges:
                 regular_widths = [pruned_edge_widths[list(explainer_G.edges()).index(edge)] 
                                  for edge in regular_edges if edge in explainer_G.edges()]
                 nx.draw_networkx_edges(explainer_G, pos3, edgelist=regular_edges, ax=ax3, 
-                                      alpha=0.6, width=regular_widths, edge_color='darkgray')
+                                      alpha=0.6, width=regular_widths, edge_color='#808080')  # Medium gray
             
-            # Draw top 10 edges in orange/gold to highlight them
+            # Draw top 10 edges in black to highlight them
             if top_10_edges:
                 top_widths = [pruned_edge_widths[list(explainer_G.edges()).index(edge)] 
                              for edge in top_10_edges if edge in explainer_G.edges()]
                 nx.draw_networkx_edges(explainer_G, pos3, edgelist=top_10_edges, ax=ax3, 
-                                      alpha=0.9, width=top_widths, edge_color='#FF8C00')  # Dark orange
+                                      alpha=0.9, width=top_widths, edge_color='#000000')  # Black for top edges
 
             # Add edge weight labels
             edge_labels = {(u, v): f'{abs(explainer_G[u][v].get("weight", 0)):.2f}' for u, v in explainer_G.edges()}
@@ -666,10 +666,10 @@ def create_side_by_side_comparison(knn_graph_data, explainer_graph_data, node_fe
     from matplotlib.patches import Patch
     from matplotlib.lines import Line2D
     legend_elements = [
-        Patch(facecolor='#FF69B4', label='Protected/Anchored Nodes'),
-        Patch(facecolor='#B0C4DE', label='Other Nodes'),
-        Line2D([0], [0], color='#FF8C00', linewidth=3, label='Top 10 Edges by Weight'),
-        Line2D([0], [0], color='darkgray', linewidth=2, label='Other Edges')
+        Patch(facecolor='#2C2C2C', edgecolor='black', label='Protected/Anchored Nodes'),
+        Patch(facecolor='#D3D3D3', edgecolor='black', label='Other Nodes'),
+        Line2D([0], [0], color='#000000', linewidth=3, label='Top 10 Edges by Weight'),
+        Line2D([0], [0], color='#808080', linewidth=2, label='Other Edges')
     ]
 
     fig.legend(handles=legend_elements, loc='lower center', bbox_to_anchor=(0.5, 0.02),
