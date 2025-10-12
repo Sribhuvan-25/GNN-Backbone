@@ -1592,7 +1592,7 @@ class MixedEmbeddingPipeline:
         # Add diagonal line
         min_val = min(min(all_targets), min(all_preds))
         max_val = max(max(all_targets), max(all_preds))
-        ax.plot([min_val, max_val], [min_val, max_val], 'r--', linewidth=2)
+        ax.plot([min_val, max_val], [min_val, max_val], 'k--', linewidth=2)
         
         ax.set_title(f'Best ML Model: {best_ml_model}\nR² = {best_r2:.4f}, MSE = {best_mse:.4f}')
         ax.set_xlabel('True Values')
@@ -1960,10 +1960,10 @@ class MixedEmbeddingPipeline:
         axes[0].scatter(all_targets, all_preds, alpha=0.6, edgecolor='k', facecolor='none')
         min_val = min(min(all_targets), min(all_preds))
         max_val = max(max(all_targets), max(all_preds))
-        axes[0].plot([min_val, max_val], [min_val, max_val], 'r--', alpha=0.8, linewidth=2)
+        axes[0].plot([min_val, max_val], [min_val, max_val], 'k--', alpha=0.8, linewidth=2)
         
         textstr = f"Overall R² = {overall_r2:.3f}\nRMSE = {overall_rmse:.3f}\nMAE = {overall_mae:.3f}\nMSE = {overall_mse:.3f}"
-        props = dict(boxstyle='round', facecolor='wheat', alpha=0.8)
+        props = dict(boxstyle='round', facecolor='#E8E8E8', alpha=0.8)
         axes[0].text(0.05, 0.95, textstr, transform=axes[0].transAxes, fontsize=12,
                     verticalalignment='top', bbox=props)
         
@@ -1974,8 +1974,8 @@ class MixedEmbeddingPipeline:
         
         # Plot 2: R² across folds
         fold_nums = range(1, len(fold_r2s) + 1)
-        axes[1].bar(fold_nums, fold_r2s, alpha=0.7, color='skyblue', edgecolor='navy')
-        axes[1].axhline(y=overall_r2, color='red', linestyle='--', linewidth=2, label=f'Overall R² = {overall_r2:.3f} (MSE: {overall_mse:.3f})')
+        axes[1].bar(fold_nums, fold_r2s, alpha=0.7, color='#808080', edgecolor='black')
+        axes[1].axhline(y=overall_r2, color='black', linestyle='--', linewidth=2, label=f'Overall R² = {overall_r2:.3f} (MSE: {overall_mse:.3f})')
         axes[1].set_xlabel('Fold Number')
         axes[1].set_ylabel('R² Score')
         axes[1].set_title(f'{model_type.upper()} R² Across Folds - {target_name} ({phase})')
@@ -2129,8 +2129,8 @@ class MixedEmbeddingPipeline:
         fig.suptitle(f'ML Models on {embeddings_source} Embeddings - {target_name}', fontsize=16)
         
         model_names = list(ml_results.keys())
-        # Extended color palette for more models
-        colors = ['skyblue', 'lightcoral', 'lightgreen', 'orange', 'purple', 'gold', 'pink', 'cyan']
+        # Grayscale palette for more models
+        colors = ['#2C2C2C', '#4D4D4D', '#666666', '#808080', '#999999', '#B3B3B3', '#CCCCCC', '#D9D9D9']
         
         # Plot 1: R² comparison across folds
         ax1 = axes[0, 0]
@@ -2196,12 +2196,12 @@ class MixedEmbeddingPipeline:
         ax3.scatter(all_targets, all_preds, alpha=0.6, edgecolor='k', facecolor='none')
         min_val = min(min(all_targets), min(all_preds))
         max_val = max(max(all_targets), max(all_preds))
-        ax3.plot([min_val, max_val], [min_val, max_val], 'r--', alpha=0.8, linewidth=2)
+        ax3.plot([min_val, max_val], [min_val, max_val], 'k--', alpha=0.8, linewidth=2)
         
         best_r2 = best_results['avg_metrics']['r2']
         best_mse = best_results['avg_metrics']['mse']
         textstr = f"Best Model: {best_model_name}\nR² = {best_r2:.3f}\nMSE = {best_mse:.3f}"
-        props = dict(boxstyle='round', facecolor='wheat', alpha=0.8)
+        props = dict(boxstyle='round', facecolor='#E8E8E8', alpha=0.8)
         ax3.text(0.05, 0.95, textstr, transform=ax3.transAxes, fontsize=12,
                 verticalalignment='top', bbox=props)
         
@@ -2274,7 +2274,7 @@ class MixedEmbeddingPipeline:
         ax1.scatter(all_targets, all_preds, alpha=0.6, edgecolor='k', facecolor='none')
         min_val = min(min(all_targets), min(all_preds))
         max_val = max(max(all_targets), max(all_preds))
-        ax1.plot([min_val, max_val], [min_val, max_val], 'r--', alpha=0.8, linewidth=2)
+        ax1.plot([min_val, max_val], [min_val, max_val], 'k--', alpha=0.8, linewidth=2)
         
         r2 = results['avg_metrics']['r2']
         rmse = results['avg_metrics']['rmse']
@@ -2282,7 +2282,7 @@ class MixedEmbeddingPipeline:
         mse = results['avg_metrics']['mse']
         
         textstr = f"R² = {r2:.3f}\nRMSE = {rmse:.3f}\nMAE = {mae:.3f}\nMSE = {mse:.3f}"
-        props = dict(boxstyle='round', facecolor='wheat', alpha=0.8)
+        props = dict(boxstyle='round', facecolor='#E8E8E8', alpha=0.8)
         ax1.text(0.05, 0.95, textstr, transform=ax1.transAxes, fontsize=12,
                 verticalalignment='top', bbox=props)
         
@@ -2294,8 +2294,8 @@ class MixedEmbeddingPipeline:
         # Plot 2: R² across folds
         ax2 = axes[0, 1]
         fold_nums = range(1, len(fold_r2s) + 1)
-        ax2.bar(fold_nums, fold_r2s, alpha=0.7, color='skyblue', edgecolor='navy')
-        ax2.axhline(y=r2, color='red', linestyle='--', linewidth=2, label=f'Overall R² = {r2:.3f} (MSE: {mse:.3f})')
+        ax2.bar(fold_nums, fold_r2s, alpha=0.7, color='#808080', edgecolor='black')
+        ax2.axhline(y=r2, color='black', linestyle='--', linewidth=2, label=f'Overall R² = {r2:.3f} (MSE: {mse:.3f})')
         ax2.set_xlabel('Fold Number')
         ax2.set_ylabel('R² Score')
         ax2.set_title('R² Score Across Folds')
@@ -2305,7 +2305,7 @@ class MixedEmbeddingPipeline:
         # Plot 3: Error distribution
         ax3 = axes[1, 0]
         errors = all_targets - all_preds
-        ax3.hist(errors, bins=20, alpha=0.7, color='lightcoral', edgecolor='darkred')
+        ax3.hist(errors, bins=20, alpha=0.7, color='#808080', edgecolor='black')
         ax3.axvline(x=0, color='black', linestyle='--', alpha=0.8)
         ax3.set_xlabel('Prediction Error')
         ax3.set_ylabel('Frequency')
@@ -2314,8 +2314,8 @@ class MixedEmbeddingPipeline:
         
         # Plot 4: MSE across folds (changed from RMSE to MSE)
         ax4 = axes[1, 1]
-        ax4.bar(fold_nums, fold_mses, alpha=0.7, color='lightgreen', edgecolor='darkgreen')
-        ax4.axhline(y=mse, color='red', linestyle='--', linewidth=2, label=f'Overall MSE = {mse:.3f}')
+        ax4.bar(fold_nums, fold_mses, alpha=0.7, color='#999999', edgecolor='black')
+        ax4.axhline(y=mse, color='black', linestyle='--', linewidth=2, label=f'Overall MSE = {mse:.3f}')
         ax4.set_xlabel('Fold Number')
         ax4.set_ylabel('MSE')
         ax4.set_title('MSE Across Folds')
@@ -2418,7 +2418,7 @@ class MixedEmbeddingPipeline:
             rmse_scores = [item['rmse'] for item in comparison_data]
             mae_scores = [item['mae'] for item in comparison_data]
             mse_scores = [item['mse'] for item in comparison_data]
-            colors = ['skyblue' if item['type'] == 'GNN' else 'orange' for item in comparison_data]
+            colors = ['#666666' if item['type'] == 'GNN' else '#B3B3B3' for item in comparison_data]
             
             # R² comparison
             bars1 = axes[0, 0].bar(range(len(models)), r2_scores, color=colors, alpha=0.7)
@@ -2474,8 +2474,8 @@ class MixedEmbeddingPipeline:
             
             # Add legend
             from matplotlib.patches import Patch
-            legend_elements = [Patch(facecolor='skyblue', alpha=0.7, label='GNN Models'),
-                             Patch(facecolor='orange', alpha=0.7, label='ML Models')]
+            legend_elements = [Patch(facecolor='#666666', alpha=0.7, label='GNN Models'),
+                             Patch(facecolor='#B3B3B3', alpha=0.7, label='ML Models')]
             axes[0, 0].legend(handles=legend_elements, loc='upper right')
             
             plt.tight_layout()

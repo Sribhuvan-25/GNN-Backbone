@@ -668,24 +668,24 @@ class AblationStudy:
         
         # 3. Statistical significance
         p_values = [r.p_value for r in sorted_results]
-        colors = ['red' if p < 0.001 else 'orange' if p < 0.01 else 'yellow' if p < 0.05 else 'gray' for p in p_values]
+        colors = ['#2C2C2C' if p < 0.001 else '#4D4D4D' if p < 0.01 else '#808080' if p < 0.05 else '#B3B3B3' for p in p_values]
         
         axes[1, 0].barh(component_names, [-np.log10(p) for p in p_values], color=colors)
         axes[1, 0].set_xlabel('-log10(p-value)')
         axes[1, 0].set_title('Statistical Significance')
-        axes[1, 0].axvline(x=-np.log10(0.05), color='red', linestyle='--', alpha=0.7, label='α = 0.05')
+        axes[1, 0].axvline(x=-np.log10(0.05), color='black', linestyle='--', alpha=0.7, label='α = 0.05')
         axes[1, 0].legend()
         
         # 4. Effect size vs significance
         effect_sizes_abs = [abs(r.effect_size) for r in self.results]
         p_values_all = [r.p_value for r in self.results]
         
-        scatter = axes[1, 1].scatter(effect_sizes_abs, [-np.log10(p) for p in p_values_all])
+        scatter = axes[1, 1].scatter(effect_sizes_abs, [-np.log10(p) for p in p_values_all], c='#666666')
         axes[1, 1].set_xlabel('|Effect Size|')
         axes[1, 1].set_ylabel('-log10(p-value)')
         axes[1, 1].set_title('Effect Size vs Statistical Significance')
-        axes[1, 1].axhline(y=-np.log10(0.05), color='red', linestyle='--', alpha=0.7)
-        axes[1, 1].axvline(x=0.5, color='orange', linestyle='--', alpha=0.7)
+        axes[1, 1].axhline(y=-np.log10(0.05), color='black', linestyle='--', alpha=0.7)
+        axes[1, 1].axvline(x=0.5, color='#666666', linestyle='--', alpha=0.7)
         
         # Add component labels to scatter plot
         for i, result in enumerate(self.results):
