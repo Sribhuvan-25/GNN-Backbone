@@ -9,6 +9,40 @@ from matplotlib.patches import Patch
 from sklearn.metrics import r2_score, mean_squared_error, mean_absolute_error
 
 
+def get_optimal_layout(G, seed=42, scale=2.0):
+    """
+    Get optimal layout for graph visualization with fallbacks.
+    
+    Args:
+        G: NetworkX graph
+        seed: Random seed for reproducibility
+        scale: Scale factor for layout spacing
+        
+    Returns:
+        dict: Node positions
+    """
+    # Try Kamada-Kawai first (best for showing natural clustering)
+    try:
+        if nx.is_connected(G):
+            # Set random seed before calling kamada_kawai_layout (it doesn't accept seed parameter)
+            np.random.seed(seed)
+            pos = nx.kamada_kawai_layout(G, scale=scale)
+            print("Using Kamada-Kawai layout")
+            return pos
+        else:
+            print("Graph is disconnected, using spring layout")
+            pos = nx.spring_layout(G, k=scale, iterations=150, seed=seed)
+            return pos
+    except Exception as e:
+        print(f"Kamada-Kawai failed ({e}), falling back to spring layout")
+        try:
+            pos = nx.spring_layout(G, k=scale, iterations=150, seed=seed)
+            return pos
+        except Exception as e2:
+            print(f"Spring layout failed ({e2}), using circular layout")
+            return nx.circular_layout(G, scale=scale)
+
+
 def adjust_color_brightness(hex_color, factor=0.8):
     """
     Adjust the brightness of a hex color.
@@ -103,30 +137,26 @@ def create_networkx_graph_from_edge_data(edge_index, edge_weight, node_features)
     """
     G = nx.Graph()
 
-    # First, find all unique node indices referenced in edges
-    edge_index_np = edge_index.cpu().numpy()
-    all_node_indices = np.unique(edge_index_np.flatten())
-
-    # Add all nodes with names, ensuring every node gets a proper name
-    for node_idx in all_node_indices:
-        if node_idx < len(node_features):
-            node_name = node_features[node_idx]
-        else:
-            # This shouldn't happen, but provide fallback
-            node_name = f"Unknown_Family_{node_idx}"
+    # For edge-only sparsification, include ALL nodes, not just those with edges
+    # This ensures isolated nodes (nodes with no edges) are still shown
+    for node_idx in range(len(node_features)):
+        node_name = node_features[node_idx]
         G.add_node(node_idx, name=node_name)
 
     # Add edges with weights
     # Handle None edge_weight gracefully
-    if edge_weight is not None:
-        edge_weight_np = edge_weight.cpu().numpy()
-    else:
-        edge_weight_np = np.ones(edge_index_np.shape[1])  # Default weights
+    if edge_index is not None and edge_index.shape[1] > 0:
+        edge_index_np = edge_index.cpu().numpy()
+        
+        if edge_weight is not None:
+            edge_weight_np = edge_weight.cpu().numpy()
+        else:
+            edge_weight_np = np.ones(edge_index_np.shape[1])  # Default weights
 
-    for i in range(edge_index_np.shape[1]):
-        src, dst = edge_index_np[:, i]
-        weight = edge_weight_np[i]
-        G.add_edge(src, dst, weight=weight)
+        for i in range(edge_index_np.shape[1]):
+            src, dst = edge_index_np[:, i]
+            weight = edge_weight_np[i]
+            G.add_edge(src, dst, weight=weight)
 
     return G
 
@@ -175,7 +205,7 @@ def save_graph_visualization(G, node_colors, output_path, title="Graph Visualiza
     plt.figure(figsize=figsize)
     
     # Calculate layout with improved spacing for less cluttered graphs
-    pos = nx.spring_layout(G, k=8, iterations=150, seed=42)
+    pos = get_optimal_layout(G, seed=42, scale=2.0)
     
     # Draw nodes with uniform size as requested
     # Convert node index to node name for color lookup
@@ -183,11 +213,11 @@ def save_graph_visualization(G, node_colors, output_path, title="Graph Visualiza
     for node in G.nodes():
         # Get node name from the graph's node data
         node_name = G.nodes[node].get('name', f'node_{node}')
-        color = node_colors.get(node_name, '#95A5A6')  # Use node name as key
+        color = node_colors.get(node_name, '#D3D3D3')  # Light gray fallback
         node_color_list.append(color)
     
     nx.draw_networkx_nodes(G, pos, node_color=node_color_list, 
-                          node_size=500, alpha=0.9, edgecolors='black', linewidths=0.5)
+                          node_size=500, alpha=0.9, edgecolors='black', linewidths=1.5)
     
     if show_edge_weights and G.edges():
         # Get edge weights for visualization
@@ -250,7 +280,7 @@ def save_graph_visualization(G, node_colors, output_path, title="Graph Visualiza
         stats_text += f"  |  Avg. Weight: {avg_weight:.3f}"
     
     plt.figtext(0.02, 0.02, stats_text, fontsize=10, style='italic', 
-                bbox=dict(boxstyle="round,pad=0.3", facecolor="lightgray", alpha=0.8))
+                bbox=dict(boxstyle="round,pad=0.3", facecolor="#E0E0E0", alpha=0.9))
     
     plt.axis('off')
     plt.tight_layout()
@@ -304,14 +334,14 @@ def create_side_by_side_comparison(knn_graph_data, explainer_graph_data, node_fe
 
     fig, (ax1, ax2, ax3) = plt.subplots(1, 3, figsize=(45, 15))
 
-    # Enhanced color scheme: Protected nodes = cyan, others = gray
+    # Grayscale color scheme with high contrast
     def get_node_colors_with_protection(node_list, protected_list=None):
         colors = []
         for node in node_list:
             if protected_list and node in protected_list:
-                colors.append('#00FFFF')  # Cyan for protected nodes
+                colors.append('#606060')  # Medium-dark gray for protected/anchored nodes (lightened)
             else:
-                colors.append('#808080')  # Gray for others
+                colors.append('#D3D3D3')  # Light gray for others
         return colors
 
     # Function to calculate node sizes based on abundance with better scaling
@@ -329,7 +359,7 @@ def create_side_by_side_comparison(knn_graph_data, explainer_graph_data, node_fe
                 if max_abundance > min_abundance:
                     normalized = (abundance - min_abundance) / (max_abundance - min_abundance)
                     # Use square root to make differences more visible
-                    size = 400 + (normalized ** 0.7 * 1200)  # Range: 400-1600
+                    size = 300 + (normalized ** 0.7 * 1200)  # Range: 300-1500
                 else:
                     size = 800  # All same abundance
                 sizes.append(size)
@@ -356,8 +386,8 @@ def create_side_by_side_comparison(knn_graph_data, explainer_graph_data, node_fe
             if max_weight > min_weight:
                 # Normalize to 0-1, then apply more sensitive scaling
                 normalized = (weight - min_weight) / (max_weight - min_weight)
-                # Use exponential scaling to amplify differences
-                width = 0.8 + (normalized ** 1.5 * 4.0)  # Range: 0.8-4.8
+                # Use exponential scaling to amplify differences (less aggressive than before)
+                width = 0.5 + (normalized ** 1.2 * 4.5)  # Range: 0.5-5.0
             else:
                 width = 2.0  # All weights are the same
             edge_widths.append(width)
@@ -385,7 +415,7 @@ def create_side_by_side_comparison(knn_graph_data, explainer_graph_data, node_fe
         )
         print(f"Panel 1 (k-NN fallback): {len(original_G.nodes())} nodes, {len(original_G.edges())} edges")
 
-    pos1 = nx.spring_layout(original_G, k=8, iterations=150, seed=42)
+    pos1 = get_optimal_layout(original_G, seed=42, scale=2.0)
 
     # Get full node names and colors - ensure arrays match graph size
     num_graph_nodes = len(original_G.nodes())
@@ -401,48 +431,48 @@ def create_side_by_side_comparison(knn_graph_data, explainer_graph_data, node_fe
 
     # Ensure arrays match graph size
     if len(original_node_colors) != num_graph_nodes:
-        original_node_colors = original_node_colors[:num_graph_nodes] + ['#808080'] * max(0, num_graph_nodes - len(original_node_colors))
+        original_node_colors = original_node_colors[:num_graph_nodes] + ['#D3D3D3'] * max(0, num_graph_nodes - len(original_node_colors))
     if len(original_node_sizes) != num_graph_nodes:
         original_node_sizes = original_node_sizes[:num_graph_nodes] + [800] * max(0, num_graph_nodes - len(original_node_sizes))
 
     # Draw Panel 1: Spearman Correlation Graph
     nx.draw_networkx_nodes(original_G, pos1, ax=ax1, node_color=original_node_colors,
-                          node_size=original_node_sizes, alpha=0.9, edgecolors='black', linewidths=1.0)
+                          node_size=original_node_sizes, alpha=0.9, edgecolors='black', linewidths=1.5)
 
     if original_G.edges():
-        nx.draw_networkx_edges(original_G, pos1, ax=ax1, alpha=0.6, width=original_edge_widths, edge_color='darkgray')
+        nx.draw_networkx_edges(original_G, pos1, ax=ax1, alpha=0.6, width=original_edge_widths, edge_color='#808080')  # Medium gray
 
         # Add edge weight labels
         edge_labels = {(u, v): f'{abs(original_G[u][v].get("weight", 0)):.2f}' for u, v in original_G.edges()}
-        nx.draw_networkx_edge_labels(original_G, pos1, edge_labels, ax=ax1, font_size=8)
+        nx.draw_networkx_edge_labels(original_G, pos1, edge_labels, ax=ax1, font_size=10)
 
-    # Add full family names as labels - use original_node_names directly by position
+    # Add full taxonomic names as labels - use original_node_names directly by position
     node_labels = {}
     for node_id in original_G.nodes():
         if node_id < len(original_node_names):
-            # Wrap long family names for better readability
-            family_name = original_node_names[node_id]
-            if len(family_name) > 18:
+            # Wrap long taxonomic names for better readability
+            taxon_name = original_node_names[node_id]
+            if len(taxon_name) > 18:
                 # Split long names into multiple lines
-                words = family_name.split('_')
+                words = taxon_name.split('_')
                 if len(words) > 1:
                     mid_point = len(words) // 2
                     line1 = '_'.join(words[:mid_point])
                     line2 = '_'.join(words[mid_point:])
-                    family_name = f"{line1}\n{line2}"
+                    taxon_name = f"{line1}\n{line2}"
                 else:
                     # If no underscore, just split at midpoint
-                    mid = len(family_name) // 2
-                    family_name = f"{family_name[:mid]}\n{family_name[mid:]}"
-            node_labels[node_id] = family_name
+                    mid = len(taxon_name) // 2
+                    taxon_name = f"{taxon_name[:mid]}\n{taxon_name[mid:]}"
+            node_labels[node_id] = taxon_name
         else:
             node_labels[node_id] = f'Node_{node_id}'
-    nx.draw_networkx_labels(original_G, pos1, labels=node_labels, ax=ax1, font_size=8, font_weight='bold')
+    nx.draw_networkx_labels(original_G, pos1, labels=node_labels, ax=ax1, font_size=10, font_weight='bold')
 
     ax1.set_title('Spearman Correlation Graph (Original)', fontsize=16, fontweight='bold', pad=20)
     ax1.text(0.02, 0.98, f"Nodes: {len(original_G.nodes())}\nEdges: {len(original_G.edges())}",
             transform=ax1.transAxes, fontsize=12, verticalalignment='top',
-            bbox=dict(boxstyle="round,pad=0.5", facecolor="lightblue", alpha=0.8))
+            bbox=dict(boxstyle="round,pad=0.5", facecolor="#E8E8E8", alpha=0.9))
 
     # Panel 2: k-NN Graph
     # IMPORTANT: Also use original node names for Panel 2, same reason as Panel 1
@@ -452,7 +482,7 @@ def create_side_by_side_comparison(knn_graph_data, explainer_graph_data, node_fe
         original_node_names  # Use original names, not current node_features
     )
     print(f"Panel 2 (k-NN): {len(knn_G.nodes())} nodes, {len(knn_G.edges())} edges")
-    pos2 = nx.spring_layout(knn_G, k=8, iterations=150, seed=42)
+    pos2 = get_optimal_layout(knn_G, seed=42, scale=2.0)
 
     # Get node data for k-NN graph - ensure arrays match graph size
     num_knn_nodes = len(knn_G.nodes())
@@ -468,48 +498,48 @@ def create_side_by_side_comparison(knn_graph_data, explainer_graph_data, node_fe
 
     # Ensure arrays match graph size
     if len(knn_node_colors) != num_knn_nodes:
-        knn_node_colors = knn_node_colors[:num_knn_nodes] + ['#808080'] * max(0, num_knn_nodes - len(knn_node_colors))
+        knn_node_colors = knn_node_colors[:num_knn_nodes] + ['#D3D3D3'] * max(0, num_knn_nodes - len(knn_node_colors))
     if len(knn_node_sizes) != num_knn_nodes:
         knn_node_sizes = knn_node_sizes[:num_knn_nodes] + [800] * max(0, num_knn_nodes - len(knn_node_sizes))
 
     # Draw Panel 2: k-NN Graph
     nx.draw_networkx_nodes(knn_G, pos2, ax=ax2, node_color=knn_node_colors,
-                          node_size=knn_node_sizes, alpha=0.9, edgecolors='black', linewidths=1.0)
+                          node_size=knn_node_sizes, alpha=0.9, edgecolors='black', linewidths=1.5)
 
     if knn_G.edges():
-        nx.draw_networkx_edges(knn_G, pos2, ax=ax2, alpha=0.6, width=knn_edge_widths, edge_color='darkgray')
+        nx.draw_networkx_edges(knn_G, pos2, ax=ax2, alpha=0.6, width=knn_edge_widths, edge_color='#808080')  # Medium gray
 
         # Add edge weight labels
         edge_labels = {(u, v): f'{abs(knn_G[u][v].get("weight", 0)):.2f}' for u, v in knn_G.edges()}
-        nx.draw_networkx_edge_labels(knn_G, pos2, edge_labels, ax=ax2, font_size=8)
+        nx.draw_networkx_edge_labels(knn_G, pos2, edge_labels, ax=ax2, font_size=10)
 
-    # Add full family names as labels - use original_node_names directly by position
+    # Add full taxonomic names as labels - use original_node_names directly by position
     node_labels = {}
     for node_id in knn_G.nodes():
         if node_id < len(original_node_names):
-            # Wrap long family names for better readability
-            family_name = original_node_names[node_id]
-            if len(family_name) > 18:
+            # Wrap long taxonomic names for better readability
+            taxon_name = original_node_names[node_id]
+            if len(taxon_name) > 18:
                 # Split long names into multiple lines
-                words = family_name.split('_')
+                words = taxon_name.split('_')
                 if len(words) > 1:
                     mid_point = len(words) // 2
                     line1 = '_'.join(words[:mid_point])
                     line2 = '_'.join(words[mid_point:])
-                    family_name = f"{line1}\n{line2}"
+                    taxon_name = f"{line1}\n{line2}"
                 else:
                     # If no underscore, just split at midpoint
-                    mid = len(family_name) // 2
-                    family_name = f"{family_name[:mid]}\n{family_name[mid:]}"
-            node_labels[node_id] = family_name
+                    mid = len(taxon_name) // 2
+                    taxon_name = f"{taxon_name[:mid]}\n{taxon_name[mid:]}"
+            node_labels[node_id] = taxon_name
         else:
             node_labels[node_id] = f'Node_{node_id}'
-    nx.draw_networkx_labels(knn_G, pos2, labels=node_labels, ax=ax2, font_size=8, font_weight='bold')
+    nx.draw_networkx_labels(knn_G, pos2, labels=node_labels, ax=ax2, font_size=10, font_weight='bold')
 
     ax2.set_title('k-NN Graph (Sparsified)', fontsize=16, fontweight='bold', pad=20)
     ax2.text(0.02, 0.98, f"Nodes: {len(knn_G.nodes())}\nEdges: {len(knn_G.edges())}",
             transform=ax2.transAxes, fontsize=12, verticalalignment='top',
-            bbox=dict(boxstyle="round,pad=0.5", facecolor="lightyellow", alpha=0.8))
+            bbox=dict(boxstyle="round,pad=0.5", facecolor="#D8D8D8", alpha=0.9))
     
     # Panel 3: Attention-Pruned Graph
     if explainer_graph_data and 'edge_index' in explainer_graph_data:
@@ -527,7 +557,7 @@ def create_side_by_side_comparison(knn_graph_data, explainer_graph_data, node_fe
             explainer_node_names
         )
         print(f"Panel 3 (Explainer): {len(explainer_G.nodes())} nodes, {len(explainer_G.edges())} edges")
-        pos3 = nx.spring_layout(explainer_G, k=8, iterations=150, seed=42)
+        pos3 = get_optimal_layout(explainer_G, seed=42, scale=2.0)
 
         # Get node data for pruned graph - extract actual node names from the explainer graph
         explainer_graph_node_features = []
@@ -550,21 +580,44 @@ def create_side_by_side_comparison(knn_graph_data, explainer_graph_data, node_fe
         # Draw Panel 3: Attention-Pruned Graph - ensure array lengths match
         num_nodes = len(explainer_G.nodes())
         if len(pruned_node_colors) != num_nodes:
-            pruned_node_colors = pruned_node_colors[:num_nodes] + ['#808080'] * max(0, num_nodes - len(pruned_node_colors))
+            pruned_node_colors = pruned_node_colors[:num_nodes] + ['#D3D3D3'] * max(0, num_nodes - len(pruned_node_colors))
         if len(pruned_node_sizes) != num_nodes:
             pruned_node_sizes = pruned_node_sizes[:num_nodes] + [800] * max(0, num_nodes - len(pruned_node_sizes))
 
         nx.draw_networkx_nodes(explainer_G, pos3, ax=ax3, node_color=pruned_node_colors,
-                              node_size=pruned_node_sizes, alpha=0.9, edgecolors='black', linewidths=1.0)
+                              node_size=pruned_node_sizes, alpha=0.9, edgecolors='black', linewidths=1.5)
 
         if explainer_G.edges():
-            nx.draw_networkx_edges(explainer_G, pos3, ax=ax3, alpha=0.6, width=pruned_edge_widths, edge_color='darkgray')
+            # Get all edges with their weights and sort by weight
+            edge_weights_list = []
+            for u, v in explainer_G.edges():
+                weight = abs(explainer_G[u][v].get("weight", 0))
+                edge_weights_list.append(((u, v), weight))
+            
+            # Sort edges by weight (descending) and get top 10
+            edge_weights_list.sort(key=lambda x: x[1], reverse=True)
+            top_10_edges = [edge for edge, weight in edge_weights_list[:10]]
+            regular_edges = [edge for edge, weight in edge_weights_list[10:]]
+            
+            # Draw regular edges (all except top 10) in medium gray
+            if regular_edges:
+                regular_widths = [pruned_edge_widths[list(explainer_G.edges()).index(edge)] 
+                                 for edge in regular_edges if edge in explainer_G.edges()]
+                nx.draw_networkx_edges(explainer_G, pos3, edgelist=regular_edges, ax=ax3, 
+                                      alpha=0.6, width=regular_widths, edge_color='#808080')  # Medium gray
+            
+            # Draw top 10 edges in black to highlight them
+            if top_10_edges:
+                top_widths = [pruned_edge_widths[list(explainer_G.edges()).index(edge)] 
+                             for edge in top_10_edges if edge in explainer_G.edges()]
+                nx.draw_networkx_edges(explainer_G, pos3, edgelist=top_10_edges, ax=ax3, 
+                                      alpha=0.9, width=top_widths, edge_color='#000000')  # Black for top edges
 
             # Add edge weight labels
             edge_labels = {(u, v): f'{abs(explainer_G[u][v].get("weight", 0)):.2f}' for u, v in explainer_G.edges()}
-            nx.draw_networkx_edge_labels(explainer_G, pos3, edge_labels, ax=ax3, font_size=8)
+            nx.draw_networkx_edge_labels(explainer_G, pos3, edge_labels, ax=ax3, font_size=10)
 
-        # Add full family names as labels - use stored node names from graph
+        # Add full taxonomic names as labels - use stored node names from graph
         node_labels = {}
         for node_id in explainer_G.nodes():
             # Try to get name from graph first, then fall back to explainer_node_names
@@ -577,29 +630,29 @@ def create_side_by_side_comparison(knn_graph_data, explainer_graph_data, node_fe
                     if idx < len(explainer_node_names):
                         node_name = explainer_node_names[idx]
 
-            # Wrap long family names for better readability
-            family_name = node_name or f"Node_{node_id}"
-            if len(family_name) > 18:
+            # Wrap long taxonomic names for better readability
+            taxon_name = node_name or f"Node_{node_id}"
+            if len(taxon_name) > 18:
                 # Split long names into multiple lines
-                words = family_name.split('_')
+                words = taxon_name.split('_')
                 if len(words) > 1:
                     mid_point = len(words) // 2
                     line1 = '_'.join(words[:mid_point])
                     line2 = '_'.join(words[mid_point:])
-                    family_name = f"{line1}\n{line2}"
+                    taxon_name = f"{line1}\n{line2}"
                 else:
                     # If no underscore, just split at midpoint
-                    mid = len(family_name) // 2
-                    family_name = f"{family_name[:mid]}\n{family_name[mid:]}"
-            node_labels[node_id] = family_name
-        nx.draw_networkx_labels(explainer_G, pos3, labels=node_labels, ax=ax3, font_size=8, font_weight='bold')
+                    mid = len(taxon_name) // 2
+                    taxon_name = f"{taxon_name[:mid]}\n{taxon_name[mid:]}"
+            node_labels[node_id] = taxon_name
+        nx.draw_networkx_labels(explainer_G, pos3, labels=node_labels, ax=ax3, font_size=10, font_weight='bold')
 
         pruning_type = explainer_graph_data.get('pruning_type', 'attention_based')
         title_text = "Attention-Pruned Graph" if pruning_type == 'attention_based' else "Explainer-Pruned Graph"
         ax3.set_title(title_text, fontsize=16, fontweight='bold', pad=20)
         ax3.text(0.02, 0.98, f"Nodes: {len(explainer_G.nodes())}\nEdges: {len(explainer_G.edges())}",
                 transform=ax3.transAxes, fontsize=12, verticalalignment='top',
-                bbox=dict(boxstyle="round,pad=0.5", facecolor="lightcoral", alpha=0.8))
+                bbox=dict(boxstyle="round,pad=0.5", facecolor="#C8C8C8", alpha=0.9))
 
     # Remove axes
     ax1.axis('off')
@@ -611,13 +664,16 @@ def create_side_by_side_comparison(knn_graph_data, explainer_graph_data, node_fe
 
     # Add enhanced legend
     from matplotlib.patches import Patch
+    from matplotlib.lines import Line2D
     legend_elements = [
-        Patch(facecolor='#00FFFF', label='Protected/Anchored Nodes'),
-        Patch(facecolor='#808080', label='Other Nodes')
+        Patch(facecolor='#606060', edgecolor='black', label='Protected/Anchored Nodes'),
+        Patch(facecolor='#D3D3D3', edgecolor='black', label='Other Nodes'),
+        Line2D([0], [0], color='#000000', linewidth=3, label='Top 10 Edges by Weight'),
+        Line2D([0], [0], color='#808080', linewidth=2, label='Other Edges')
     ]
 
     fig.legend(handles=legend_elements, loc='lower center', bbox_to_anchor=(0.5, 0.02),
-              ncol=2, fontsize=14, framealpha=0.9)
+              ncol=4, fontsize=14, framealpha=0.9)
 
     plt.tight_layout()
     plt.subplots_adjust(bottom=0.1, top=0.92)
@@ -746,8 +802,8 @@ def create_single_model_prediction_plot(fold_predictions, output_path, title, ta
     # Collect all predictions for combined plot
     all_actual = []
     all_predicted = []
-    # Use single color for all points instead of different fold colors
-    single_color = '#1f77b4'  # Blue color for all points
+    # Use grayscale color for all points
+    single_color = '#666666'  # Medium gray for all points
     
     # Plot individual folds
     for fold_idx, fold_data in enumerate(fold_predictions):
@@ -782,7 +838,7 @@ def create_single_model_prediction_plot(fold_predictions, output_path, title, ta
                 
             # Always start from 0 for both axes
             min_val = 0
-            ax.plot([min_val, max_val], [min_val, max_val], 'r--', alpha=0.8, linewidth=2)
+            ax.plot([min_val, max_val], [min_val, max_val], 'k--', alpha=0.8, linewidth=2)  # Black dashed line
             
             # Set axis limits starting from 0
             margin = max_val * 0.05  # 5% margin
@@ -826,7 +882,7 @@ def create_single_model_prediction_plot(fold_predictions, output_path, title, ta
             
         # Always start from 0 for both axes
         min_val = 0
-        ax.plot([min_val, max_val], [min_val, max_val], 'r--', alpha=0.8, linewidth=2, label='Perfect Prediction')
+        ax.plot([min_val, max_val], [min_val, max_val], 'k--', alpha=0.8, linewidth=2, label='Perfect Prediction')  # Black dashed line
         
         # Set axis limits starting from 0
         margin = max_val * 0.05
@@ -875,9 +931,9 @@ def create_combined_prediction_comparison(predictions_dict, output_path, target_
                 overall_r2 = r2_score(all_actual, all_predicted) if len(all_actual) > 1 else 0
                 overall_rmse = np.sqrt(mean_squared_error(all_actual, all_predicted))
                 
-                # Scatter plot
-                ax.scatter(all_actual, all_predicted, alpha=0.6, s=40, 
-                          edgecolors='black', linewidth=0.3)
+                # Scatter plot - grayscale
+                ax.scatter(all_actual, all_predicted, alpha=0.6, s=40, c='#666666',
+                          edgecolors='black', linewidth=0.3)  # Medium gray
                 
                 # Perfect prediction line with outlier-robust axis limits
                 all_actual_array = np.array(all_actual)
@@ -894,7 +950,7 @@ def create_combined_prediction_comparison(predictions_dict, output_path, target_
                     
                 # Always start from 0 for both axes
                 min_val = 0
-                ax.plot([min_val, max_val], [min_val, max_val], 'r--', alpha=0.8, linewidth=2)
+                ax.plot([min_val, max_val], [min_val, max_val], 'k--', alpha=0.8, linewidth=2)  # Black dashed line
                 
                 # Set axis limits starting from 0
                 margin = max_val * 0.05  # 5% margin
@@ -949,18 +1005,18 @@ def generate_feature_importance_report(importance_scores, feature_names, output_
     ax1.set_title(f'Top {top_n} Most Important Features')
     ax1.grid(True, alpha=0.3, axis='x')
     
-    # Color bars by importance level
-    colors = plt.cm.viridis(np.linspace(0, 1, len(bars)))
-    for bar, color in zip(bars, colors):
-        bar.set_color(color)
+    # Grayscale bars by importance level (darker = more important)
+    grayscale_values = np.linspace(0.8, 0.2, len(bars))  # Light to dark gray
+    for bar, gray_val in zip(bars, grayscale_values):
+        bar.set_color(str(gray_val))  # Convert to grayscale
     
-    # Distribution histogram
-    ax2.hist(importance_scores, bins=30, alpha=0.7, edgecolor='black', linewidth=0.5)
+    # Distribution histogram - grayscale
+    ax2.hist(importance_scores, bins=30, alpha=0.7, color='#666666', edgecolor='black', linewidth=0.5)
     ax2.set_xlabel('Importance Score')
     ax2.set_ylabel('Frequency')
     ax2.set_title('Feature Importance Distribution')
     ax2.grid(True, alpha=0.3)
-    ax2.axvline(np.mean(importance_scores), color='red', linestyle='--', 
+    ax2.axvline(np.mean(importance_scores), color='black', linestyle='--', linewidth=2,
                 label=f'Mean: {np.mean(importance_scores):.3f}')
     ax2.legend()
     

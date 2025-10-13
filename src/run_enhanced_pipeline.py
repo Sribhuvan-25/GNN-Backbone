@@ -53,6 +53,8 @@ def main():
     parser.add_argument('--genus_filter_mode', default='standard',
                         choices=['strict', 'standard', 'permissive'],
                         help='Genus filtering mode (default: standard). Only used when --graph_mode genus')
+    parser.add_argument('--importance_threshold', type=float, default=0.8,
+                        help='Threshold for explainer edge importance (default: 0.8 = keep top 80%% of edges)')
 
     args = parser.parse_args()
 
@@ -108,12 +110,14 @@ Key Features Enabled:
             'hidden_dim': 64,
             'dropout_rate': 0.3,
             'batch_size': 8,
-            'learning_rate': 0.001,
-            'patience': 20 if not args.quick else 5,
+            'learning_rate': 0.003,
+            'patience': 25 if not args.quick else 5,
+            'importance_threshold': args.importance_threshold,
             'graph_mode': args.graph_mode,
             'genus_filter_mode': args.genus_filter_mode,
-            'graph_construction_method': args.graph_method,  # User-selected graph construction method
-            'use_node_pruning': True  # ✅ ENABLE ATTENTION-BASED NODE PRUNING
+            'graph_construction_method': args.graph_method,
+            'use_node_pruning': False,
+            'weight_decay': 1e-4
         }
         
         print("Initializing enhanced pipeline...")
@@ -258,11 +262,14 @@ def run_all_cases(args):
                 'hidden_dim': 64,
                 'dropout_rate': 0.3,
                 'batch_size': 8,
-                'learning_rate': 0.001,
-                'patience': 20 if not args.quick else 5,
+                'learning_rate': 0.003,
+                'patience': 25 if not args.quick else 5,
+                'importance_threshold': args.importance_threshold,
                 'graph_mode': args.graph_mode,
                 'genus_filter_mode': args.genus_filter_mode,
-                'graph_construction_method': args.graph_method
+                'graph_construction_method': args.graph_method,
+                'use_node_pruning': False,
+                'weight_decay': 1e-4
             }
 
             start_time = time.time()
