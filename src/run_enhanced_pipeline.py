@@ -5,7 +5,7 @@ Run Enhanced Edge-Based Sparsification Pipeline
 This script demonstrates how to run the enhanced domain expert pipeline
 with comprehensive validation framework including:
 - Edge-based sparsification using GNNExplainer (NO node pruning)
-- Family-level microbial analysis only
+- Genus-level microbial analysis (higher taxonomic resolution)
 - Statistical validation with significance testing
 - Enhanced Graph Transformer architecture
 - Baseline comparisons (PageRank, Integrated Gradients, etc.)
@@ -48,8 +48,8 @@ def main():
     parser.add_argument('--graph_method', default='paper_correlation',
                         choices=['original', 'paper_correlation', 'hybrid'],
                         help='Graph construction method (default: paper_correlation)')
-    parser.add_argument('--importance_threshold', type=float, default=0.8,
-                        help='Threshold for explainer edge importance (default: 0.2 = keep top 20%% of edges)')
+    parser.add_argument('--importance_threshold', type=float, default=0.1,
+                        help='Threshold for explainer edge importance (default: 0.1 = keep top 10%% of edges)')
 
     args = parser.parse_args()
 
@@ -78,13 +78,13 @@ Epochs: {epochs}
 Folds: {folds}
 Nested CV: {nested_cv}
 Data: {args.data_path}
-Graph Mode: family (family-level analysis only)
+Graph Mode: genus (genus-level analysis for higher taxonomic resolution)
 Sparsification: Edge-based using GNNExplainer
 {'='*80}
 
 Key Features Enabled:
 ✅ Edge-based sparsification with GNNExplainer (NO node pruning)
-✅ Family-level microbial analysis only
+✅ Genus-level microbial analysis (higher taxonomic resolution)
 ✅ Statistical validation with significance testing
 ✅ Enhanced Graph Transformer with proper architecture
 ✅ Comprehensive baseline comparisons
@@ -121,7 +121,7 @@ Key Features Enabled:
             'num_folds': folds,
             'use_nested_cv': nested_cv,
             'save_dir': f'enhanced_results_{args.case}',
-            'k_neighbors': 10,
+            'k_neighbors': 5,           # Reduced for focused analysis
             'hidden_dim': 64,
             'dropout_rate': 0.3,        # CHANGE TO 0.2
             'batch_size': 8,            # CHANGE TO 16
@@ -199,7 +199,7 @@ Key Features Enabled:
         print(f"\n🎉 Enhanced edge-based sparsification pipeline completed successfully!")
         print(f"📁 Check results directory: {pipeline.save_dir}")
         print(f"📊 Validation results include statistical tests and biological pathway analysis")
-        print(f"🔬 Analysis performed at family-level with edge-based graph sparsification")
+        print(f"🔬 Analysis performed at genus-level with edge-based graph sparsification")
         
         if args.quick:
             print(f"\n💡 For full research results, run without --quick flag")
@@ -226,7 +226,7 @@ def run_all_cases(args):
     print("="*80)
     print("Features enabled:")
     print("✓ Edge-based sparsification using GNNExplainer (NO node pruning)")
-    print("✓ Family-level microbial analysis only")
+    print("✓ Genus-level microbial analysis (higher taxonomic resolution)")
     print("✓ Spearman correlation graph initialization")
     print("✓ Protected anchored features during edge sparsification")
     print("✓ Working transformer models")

@@ -141,14 +141,14 @@ class DomainExpertCasesPipeline(MixedEmbeddingPipeline):
                  learning_rate=0.001, weight_decay=1e-4,
                  num_epochs=200, patience=20, num_folds=5,
                  save_dir='./domain_expert_results',
-                 importance_threshold=0.2,
+                 importance_threshold=0.1,
                  use_fast_correlation=False,
-                 graph_mode='family', family_filter_mode='strict',
+                 graph_mode='genus', family_filter_mode='strict',
                  use_nested_cv=True, use_node_pruning=False,
                  graph_construction_method='original'):
         """
         Initialize the Domain Expert Cases Pipeline.
-        
+
         Args:
             data_path (str): Path to the microbial abundance dataset
             case_type (str): Type of case study ('case1', 'case2', 'case3', 'case4', 'case5')
@@ -165,29 +165,29 @@ class DomainExpertCasesPipeline(MixedEmbeddingPipeline):
             save_dir (str): Directory to save results
             importance_threshold (float): Threshold for edge importance filtering in GNNExplainer
             use_fast_correlation (bool): Use fast correlation computation
-            graph_mode (str): Graph construction mode ('family' - family-level nodes only)
-            family_filter_mode (str): Family filtering mode ('strict' or 'relaxed')
+            graph_mode (str): Graph construction mode ('genus' - genus-level nodes, or 'family' - family-level nodes)
+            family_filter_mode (str): Taxonomic filtering mode ('strict', 'relaxed', or 'permissive')
             use_nested_cv (bool): Enable nested cross-validation for hyperparameter tuning
             use_node_pruning (bool): MUST be False - always use edge-only sparsification (not node pruning)
             graph_construction_method (str): Graph construction method ('original', 'paper_correlation', or 'hybrid')
         """
-        
+
         # Initialize case implementations to get feature groups and logic
         self.case_impl = CaseImplementations()
         self.case_type = case_type
-        
+
         # Get case-specific anchored features
         anchored_features = self.case_impl.get_case_features(case_type)
         self.anchored_features = anchored_features
-        
+
         # Set case-specific save directory
         case_save_dir = self._get_case_save_directory(case_type, save_dir)
-        
+
         # Store the graph construction method
         self.graph_construction_method = graph_construction_method
 
         # Initialize parent class with case-specific save directory
-        # NOTE: Only family-level analysis, edge-based sparsification only (no node pruning)
+        # NOTE: Genus-level analysis (default), edge-based sparsification only (no node pruning)
         super().__init__(
             data_path=data_path,
             k_neighbors=k_neighbors,
@@ -1892,7 +1892,7 @@ def run_all_cases(data_path="../Data/New_Data.csv", save_dir="./refactored_domai
     # Base configuration for all cases
     base_config = {
         'data_path': data_path,
-        'k_neighbors': 10,
+        'k_neighbors': 5,           # Reduced for focused analysis
         'mantel_threshold': 0.05,
         'hidden_dim': 32,
         'dropout_rate': 0.3,
@@ -1902,9 +1902,9 @@ def run_all_cases(data_path="../Data/New_Data.csv", save_dir="./refactored_domai
         'num_epochs': 5,  # Reduced from 300 for reasonable runtime
         'patience': 30,
         'num_folds': 3,
-        'importance_threshold': 0.2,
+        'importance_threshold': 0.1,  # Keep only top 10% of edges
         'use_fast_correlation': False,
-        'graph_mode': 'family',
+        'graph_mode': 'genus',
         'family_filter_mode': 'strict',
         'use_nested_cv': True,
         'graph_construction_method': 'paper_correlation'  # Use enhanced correlation method

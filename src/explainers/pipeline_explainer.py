@@ -175,9 +175,9 @@ def create_edge_pruned_graph_pipeline(pipeline, explainer, combined_edge_importa
     """Create edge-pruned graph for the pipeline (original method)"""
     
     # Adaptive thresholding based on graph mode and data
-    if pipeline.graph_mode == 'family':
-        # For family mode, use much lower threshold or percentile-based selection
-        print("Using adaptive thresholding for family mode...")
+    if pipeline.graph_mode in ['family', 'genus']:
+        # For family/genus mode, use much lower threshold or percentile-based selection
+        print(f"Using adaptive thresholding for {pipeline.graph_mode} mode...")
         
         if len(non_zero_importance) > 0:
             # Simple mapping: importance_threshold directly controls percentage of edges to keep
@@ -394,9 +394,9 @@ def create_edge_pruned_graph_pipeline(pipeline, explainer, combined_edge_importa
     """Create edge-pruned graph for the pipeline (original method)"""
     
     # Adaptive thresholding based on graph mode and data
-    if pipeline.graph_mode == 'family':
-        # For family mode, use much lower threshold or percentile-based selection
-        print("Using adaptive thresholding for family mode...")
+    if pipeline.graph_mode in ['family', 'genus']:
+        # For family/genus mode, use much lower threshold or percentile-based selection
+        print(f"Using adaptive thresholding for {pipeline.graph_mode} mode...")
         
         if len(non_zero_importance) > 0:
             # Simple mapping: importance_threshold directly controls percentage of edges to keep
