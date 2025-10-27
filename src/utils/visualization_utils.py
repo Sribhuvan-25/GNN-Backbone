@@ -265,7 +265,7 @@ def save_graph_visualization(G, node_colors, output_path, title="Graph Visualiza
         truncated_labels = {k: (v[:15] + '...' if len(v) > 18 else v) 
                            for k, v in node_labels.items()}
         
-        nx.draw_networkx_labels(G, pos, labels=truncated_labels, font_size=9, font_weight='bold')
+        nx.draw_networkx_labels(G, pos, labels=truncated_labels, font_size=11, font_weight='bold')
     
     plt.title(title, fontsize=16, fontweight='bold', pad=20)
     
@@ -467,7 +467,7 @@ def create_side_by_side_comparison(knn_graph_data, explainer_graph_data, node_fe
             node_labels[node_id] = family_name
         else:
             node_labels[node_id] = f'Node_{node_id}'
-    nx.draw_networkx_labels(original_G, pos1, labels=node_labels, ax=ax1, font_size=10, font_weight='bold')
+    nx.draw_networkx_labels(original_G, pos1, labels=node_labels, ax=ax1, font_size=12, font_weight='bold')
 
     ax1.set_title('Spearman Correlation Graph (Original)', fontsize=16, fontweight='bold', pad=20)
     ax1.text(0.02, 0.98, f"Nodes: {len(original_G.nodes())}\nEdges: {len(original_G.edges())}",
@@ -534,7 +534,7 @@ def create_side_by_side_comparison(knn_graph_data, explainer_graph_data, node_fe
             node_labels[node_id] = family_name
         else:
             node_labels[node_id] = f'Node_{node_id}'
-    nx.draw_networkx_labels(knn_G, pos2, labels=node_labels, ax=ax2, font_size=10, font_weight='bold')
+    nx.draw_networkx_labels(knn_G, pos2, labels=node_labels, ax=ax2, font_size=12, font_weight='bold')
 
     ax2.set_title('k-NN Graph (Sparsified)', fontsize=16, fontweight='bold', pad=20)
     ax2.text(0.02, 0.98, f"Nodes: {len(knn_G.nodes())}\nEdges: {len(knn_G.edges())}",
@@ -645,7 +645,7 @@ def create_side_by_side_comparison(knn_graph_data, explainer_graph_data, node_fe
                     mid = len(family_name) // 2
                     family_name = f"{family_name[:mid]}\n{family_name[mid:]}"
             node_labels[node_id] = family_name
-        nx.draw_networkx_labels(explainer_G, pos3, labels=node_labels, ax=ax3, font_size=10, font_weight='bold')
+        nx.draw_networkx_labels(explainer_G, pos3, labels=node_labels, ax=ax3, font_size=12, font_weight='bold')
 
         pruning_type = explainer_graph_data.get('pruning_type', 'attention_based')
         title_text = "Attention-Pruned Graph" if pruning_type == 'attention_based' else "Explainer-Pruned Graph"
