@@ -229,14 +229,20 @@ class DomainExpertCasesPipeline(MixedEmbeddingPipeline):
         if use_node_pruning:
             raise ValueError("use_node_pruning MUST be False. Only edge-based sparsification is supported.")
         print(f"✅ Explainer mode: Edge-based sparsification (use_node_pruning={use_node_pruning})")
-        
+
         # Define protected nodes for this domain expert case
-        self.dataset.protected_nodes = self._get_protected_nodes_for_case(case_type)
-        if self.dataset.protected_nodes:
-            print(f"DEBUG: Protected nodes for {case_type} case: {self.dataset.protected_nodes}")
-            print(f"DEBUG: Available node names: {self.dataset.node_feature_names}")
+        # Check if dataset already has protected_nodes set from anchored features
+        if hasattr(self.dataset, 'protected_nodes') and self.dataset.protected_nodes:
+            print(f"✅ Using protected nodes from anchored features: {len(self.dataset.protected_nodes)} nodes")
+            print(f"   Protected nodes: {self.dataset.protected_nodes}")
         else:
-            print(f"DEBUG: No protected nodes defined for {case_type}")
+            # Fallback to pipeline-defined protected nodes if dataset didn't set them
+            self.dataset.protected_nodes = self._get_protected_nodes_for_case(case_type)
+            if self.dataset.protected_nodes:
+                print(f"DEBUG: Protected nodes for {case_type} case: {self.dataset.protected_nodes}")
+                print(f"DEBUG: Available node names: {self.dataset.node_feature_names}")
+            else:
+                print(f"DEBUG: No protected nodes defined for {case_type}")
         
         # Setup hyperparameter grids for production use
         self._setup_hyperparameter_grids()

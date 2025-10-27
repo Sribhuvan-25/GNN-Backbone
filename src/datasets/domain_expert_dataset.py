@@ -230,6 +230,14 @@ class AnchoredMicrobialGNNDataset(MicrobialGNNDataset):
         print(f"Final feature count: {df_tax_rel_filtered.shape[1]} {tax_level}")
         print(f"Final feature set: Filtered + Case-specific anchors")
 
+        # IMPORTANT: Store the matched anchored features as protected nodes
+        # This ensures they are:
+        # 1. Never removed during graph pruning operations
+        # 2. Visually distinguished in graph visualizations (darker color)
+        self.protected_nodes = matched_taxa
+        print(f"\n✅ Protected nodes set for {self.case_type}: {len(self.protected_nodes)} {tax_level}")
+        print(f"   Protected {tax_level}: {self.protected_nodes}")
+
         return df_tax_rel_filtered
     
     def get_feature_info(self):

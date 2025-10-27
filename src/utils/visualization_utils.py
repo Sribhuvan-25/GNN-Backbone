@@ -11,7 +11,8 @@ from sklearn.metrics import r2_score, mean_squared_error, mean_absolute_error
 
 def get_optimal_layout(G, seed=42, scale=2.0):
     """
-    Get optimal layout for graph visualization with fallbacks.
+    Get optimal layout for graph visualization with proper clustering.
+    Uses Kamada-Kawai layout which naturally shows clustering patterns.
 
     Args:
         G: NetworkX graph
@@ -21,26 +22,47 @@ def get_optimal_layout(G, seed=42, scale=2.0):
     Returns:
         dict: Node positions
     """
-    # Try Kamada-Kawai first (best for showing natural clustering)
+    # Check if graph is empty
+    if len(G.nodes()) == 0:
+        return {}
+
+    # Try Kamada-Kawai first - it naturally shows clustering patterns
     try:
         if nx.is_connected(G):
             # Set random seed before calling kamada_kawai_layout (it doesn't accept seed parameter)
             np.random.seed(seed)
             pos = nx.kamada_kawai_layout(G, scale=scale)
-            print("Using Kamada-Kawai layout")
+            print("Using Kamada-Kawai layout (shows natural clustering)")
             return pos
         else:
-            print("Graph is disconnected, using spring layout")
-            pos = nx.spring_layout(G, k=scale, iterations=150, seed=seed)
+            # For disconnected graphs, use spring layout with optimized parameters
+            print("Graph is disconnected, using spring layout with clustering optimization")
+            pos = nx.spring_layout(G, k=0.5, iterations=100, seed=seed, scale=scale)
             return pos
     except Exception as e:
-        print(f"Kamada-Kawai failed ({e}), falling back to spring layout")
+        print(f"Kamada-Kawai failed ({e}), trying spring layout")
         try:
-            pos = nx.spring_layout(G, k=scale, iterations=150, seed=seed)
+            # Fallback to spring layout with moderate parameters
+            pos = nx.spring_layout(G, k=0.5, iterations=100, seed=seed, scale=scale)
+            print("Using spring layout as fallback")
             return pos
         except Exception as e2:
-            print(f"Spring layout failed ({e2}), using circular layout")
-            return nx.circular_layout(G, scale=scale)
+            print(f"Spring layout failed ({e2}), using spectral layout")
+            try:
+                # Spectral layout - better than circular for showing structure
+                if nx.is_connected(G):
+                    pos = nx.spectral_layout(G, scale=scale)
+                else:
+                    # For disconnected graphs, use spring layout with more iterations
+                    pos = nx.spring_layout(G, k=1.0, iterations=200, seed=seed, scale=scale)
+                print("Using spectral/spring layout (fallback)")
+                return pos
+            except Exception as e3:
+                # Absolute last resort - use random layout (better than circular/shell)
+                print(f"All layouts failed ({e3}), using random layout as final fallback")
+                np.random.seed(seed)
+                pos = nx.random_layout(G, scale=scale)
+                return pos
 
 
 def adjust_color_brightness(hex_color, factor=0.8):
@@ -123,7 +145,8 @@ def get_functional_group_colors(node_features, acetoclastic_features, hydrogenot
     return node_colors
 
 
-def create_networkx_graph_from_edge_data(edge_index, edge_weight, node_features):
+def create_networkx_graph_from_edge_data(edge_index, edge_weight, node_features,
+                                         include_isolated_nodes=False):
     """
     Create a NetworkX graph from PyTorch Geometric edge data.
 
@@ -131,23 +154,24 @@ def create_networkx_graph_from_edge_data(edge_index, edge_weight, node_features)
         edge_index: Tensor of shape (2, num_edges) containing edge indices
         edge_weight: Tensor of edge weights
         node_features: List of node feature names
+        include_isolated_nodes: If True, include nodes without edges; if False, only include connected nodes
 
     Returns:
         nx.Graph: NetworkX graph object
     """
     G = nx.Graph()
 
-    # For edge-only sparsification, include ALL nodes, not just those with edges
-    # This ensures isolated nodes (nodes with no edges) are still shown
-    for node_idx in range(len(node_features)):
-        node_name = node_features[node_idx]
-        G.add_node(node_idx, name=node_name)
+    if include_isolated_nodes:
+        # Include ALL nodes, even those without edges
+        for node_idx in range(len(node_features)):
+            node_name = node_features[node_idx]
+            G.add_node(node_idx, name=node_name)
 
     # Add edges with weights
     # Handle None edge_weight gracefully
     if edge_index is not None and edge_index.shape[1] > 0:
         edge_index_np = edge_index.cpu().numpy()
-        
+
         if edge_weight is not None:
             edge_weight_np = edge_weight.cpu().numpy()
         else:
@@ -156,6 +180,14 @@ def create_networkx_graph_from_edge_data(edge_index, edge_weight, node_features)
         for i in range(edge_index_np.shape[1]):
             src, dst = edge_index_np[:, i]
             weight = edge_weight_np[i]
+
+            # Add nodes if not already added (when include_isolated_nodes=False)
+            if not include_isolated_nodes:
+                if src not in G:
+                    G.add_node(src, name=node_features[src])
+                if dst not in G:
+                    G.add_node(dst, name=node_features[dst])
+
             G.add_edge(src, dst, weight=weight)
 
     return G
@@ -222,32 +254,22 @@ def save_graph_visualization(G, node_colors, output_path, title="Graph Visualiza
     if show_edge_weights and G.edges():
         # Get edge weights for visualization
         edge_weights = [G[u][v].get('weight', 1.0) for u, v in G.edges()]
-        
+
         if len(edge_weights) > 0:
             # Normalize edge weights for visualization
             max_weight = max(edge_weights)
             min_weight = min(edge_weights)
-            
+
             if max_weight > min_weight:
-                # Create different edge categories based on weight ranges
+                # Create different edge widths based on weight ranges
                 normalized_weights = [(w - min_weight) / (max_weight - min_weight) for w in edge_weights]
-                
-                # Draw all edges with uniform thickness and color
-                nx.draw_networkx_edges(G, pos, alpha=0.4, width=0.8, edge_color='gray')
-                
-                # Add edge weight labels (absolute values)
-                edge_labels = {}
-                for (u, v), weight in zip(G.edges(), edge_weights):
-                    edge_labels[(u, v)] = f'{abs(weight):.2f}'
-                
-                # Draw edge labels with smaller font to reduce clutter
-                nx.draw_networkx_edge_labels(G, pos, edge_labels, font_size=8)
+                edge_widths = [0.5 + norm_w * 4.5 for norm_w in normalized_weights]  # Range: 0.5-5.0
+
+                # Draw edges with varying thickness based on weights
+                nx.draw_networkx_edges(G, pos, alpha=0.4, width=edge_widths, edge_color='gray')
             else:
                 # All edges have the same weight - draw with uniform style
                 nx.draw_networkx_edges(G, pos, alpha=0.4, width=0.8, edge_color='gray')
-                # Still show the weight values even if they're all the same
-                edge_labels = {(u, v): f'{abs(edge_weights[0]):.2f}' for u, v in G.edges()}
-                nx.draw_networkx_edge_labels(G, pos, edge_labels, font_size=8)
         else:
             # No edges
             pass
@@ -400,20 +422,23 @@ def create_side_by_side_comparison(knn_graph_data, explainer_graph_data, node_fe
 
     if 'original_edge_index' in knn_graph_data:
         # Use original correlation data if available
+        # include_isolated_nodes=False to filter out nodes without edges
         original_G = create_networkx_graph_from_edge_data(
             knn_graph_data['original_edge_index'],
             knn_graph_data.get('original_edge_weight', None),
-            original_node_names  # Use original names, not current node_features
+            original_node_names,  # Use original names, not current node_features
+            include_isolated_nodes=False  # Filter isolated nodes for cleaner visualization
         )
-        print(f"Panel 1 (Spearman): {len(original_G.nodes())} nodes, {len(original_G.edges())} edges")
+        print(f"Panel 1 (Spearman): {len(original_G.nodes())} nodes, {len(original_G.edges())} edges (isolated nodes removed)")
     else:
         # Fallback to k-NN graph for Panel 1
         original_G = create_networkx_graph_from_edge_data(
             knn_graph_data['edge_index'],
             knn_graph_data.get('edge_weight', None),
-            original_node_names  # Use original names, not current node_features
+            original_node_names,  # Use original names, not current node_features
+            include_isolated_nodes=False  # Filter isolated nodes for cleaner visualization
         )
-        print(f"Panel 1 (k-NN fallback): {len(original_G.nodes())} nodes, {len(original_G.edges())} edges")
+        print(f"Panel 1 (k-NN fallback): {len(original_G.nodes())} nodes, {len(original_G.edges())} edges (isolated nodes removed)")
 
     pos1 = get_optimal_layout(original_G, seed=42, scale=2.0)
 
@@ -441,10 +466,6 @@ def create_side_by_side_comparison(knn_graph_data, explainer_graph_data, node_fe
 
     if original_G.edges():
         nx.draw_networkx_edges(original_G, pos1, ax=ax1, alpha=0.6, width=original_edge_widths, edge_color='#808080')  # Medium gray
-
-        # Add edge weight labels
-        edge_labels = {(u, v): f'{abs(original_G[u][v].get("weight", 0)):.2f}' for u, v in original_G.edges()}
-        nx.draw_networkx_edge_labels(original_G, pos1, edge_labels, ax=ax1, font_size=10)
 
     # Add full family names as labels - use original_node_names directly by position
     node_labels = {}
@@ -479,9 +500,10 @@ def create_side_by_side_comparison(knn_graph_data, explainer_graph_data, node_fe
     knn_G = create_networkx_graph_from_edge_data(
         knn_graph_data['edge_index'],
         knn_graph_data.get('edge_weight', None),
-        original_node_names  # Use original names, not current node_features
+        original_node_names,  # Use original names, not current node_features
+        include_isolated_nodes=False  # Filter isolated nodes for cleaner visualization
     )
-    print(f"Panel 2 (k-NN): {len(knn_G.nodes())} nodes, {len(knn_G.edges())} edges")
+    print(f"Panel 2 (k-NN): {len(knn_G.nodes())} nodes, {len(knn_G.edges())} edges (isolated nodes removed)")
     pos2 = get_optimal_layout(knn_G, seed=42, scale=2.0)
 
     # Get node data for k-NN graph - ensure arrays match graph size
@@ -508,10 +530,6 @@ def create_side_by_side_comparison(knn_graph_data, explainer_graph_data, node_fe
 
     if knn_G.edges():
         nx.draw_networkx_edges(knn_G, pos2, ax=ax2, alpha=0.6, width=knn_edge_widths, edge_color='#808080')  # Medium gray
-
-        # Add edge weight labels
-        edge_labels = {(u, v): f'{abs(knn_G[u][v].get("weight", 0)):.2f}' for u, v in knn_G.edges()}
-        nx.draw_networkx_edge_labels(knn_G, pos2, edge_labels, ax=ax2, font_size=10)
 
     # Add full family names as labels - use original_node_names directly by position
     node_labels = {}
@@ -551,12 +569,16 @@ def create_side_by_side_comparison(knn_graph_data, explainer_graph_data, node_fe
             print("Warning: No pruned_node_names found, using fallback")
             explainer_node_names = node_features
 
+        # Filter isolated nodes from explainer graph for cleaner visualization
         explainer_G = create_networkx_graph_from_edge_data(
             explainer_graph_data['edge_index'],
             explainer_graph_data.get('edge_weight', None),
-            explainer_node_names
+            explainer_node_names,
+            include_isolated_nodes=False  # Filter isolated nodes for cleaner visualization
         )
-        print(f"Panel 3 (Explainer): {len(explainer_G.nodes())} nodes, {len(explainer_G.edges())} edges")
+        print(f"Panel 3 (Explainer): {len(explainer_G.nodes())} nodes, {len(explainer_G.edges())} edges (isolated nodes removed)")
+
+        # Get layout - ensure it doesn't use circular layout
         pos3 = get_optimal_layout(explainer_G, seed=42, scale=2.0)
 
         # Get node data for pruned graph - extract actual node names from the explainer graph
@@ -608,14 +630,10 @@ def create_side_by_side_comparison(knn_graph_data, explainer_graph_data, node_fe
             
             # Draw top 10 edges in black to highlight them
             if top_10_edges:
-                top_widths = [pruned_edge_widths[list(explainer_G.edges()).index(edge)] 
+                top_widths = [pruned_edge_widths[list(explainer_G.edges()).index(edge)]
                              for edge in top_10_edges if edge in explainer_G.edges()]
-                nx.draw_networkx_edges(explainer_G, pos3, edgelist=top_10_edges, ax=ax3, 
+                nx.draw_networkx_edges(explainer_G, pos3, edgelist=top_10_edges, ax=ax3,
                                       alpha=0.9, width=top_widths, edge_color='#000000')  # Black for top edges
-
-            # Add edge weight labels
-            edge_labels = {(u, v): f'{abs(explainer_G[u][v].get("weight", 0)):.2f}' for u, v in explainer_G.edges()}
-            nx.draw_networkx_edge_labels(explainer_G, pos3, edge_labels, ax=ax3, font_size=10)
 
         # Add full family names as labels - use stored node names from graph
         node_labels = {}
