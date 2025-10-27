@@ -48,8 +48,8 @@ def main():
     parser.add_argument('--graph_method', default='paper_correlation',
                         choices=['original', 'paper_correlation', 'hybrid'],
                         help='Graph construction method (default: paper_correlation)')
-    parser.add_argument('--importance_threshold', type=float, default=0.1,
-                        help='Threshold for explainer edge importance (default: 0.1 = keep top 10%% of edges)')
+    parser.add_argument('--importance_threshold', type=float, default=0.30,
+                        help='Threshold for explainer edge importance (default: 0.30 = keep top 30%% of edges)')
 
     args = parser.parse_args()
 

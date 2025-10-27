@@ -222,9 +222,9 @@ def apply_genus_filtering(df_genus_rel, filter_mode='relaxed'):
     # Set ULTRA-FOCUSED thresholds for genus level
     # Based on empirical testing with 833 total genera
     if filter_mode == 'strict':
-        # Target: ~70 genera (highly focused on most informative)
-        prevalence_threshold = 0.60  # 60% of samples
-        abundance_threshold = 0.10   # 10% mean abundance
+        # Target: ~48 genera (maximum focus on core informative genera)
+        prevalence_threshold = 0.70  # 70% of samples
+        abundance_threshold = 0.12   # 12% mean abundance
         use_intersection = False     # UNION (either criterion)
     elif filter_mode == 'relaxed':
         # Target: ~85-100 genera (balanced focus)

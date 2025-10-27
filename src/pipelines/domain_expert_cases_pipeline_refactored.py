@@ -141,7 +141,7 @@ class DomainExpertCasesPipeline(MixedEmbeddingPipeline):
                  learning_rate=0.001, weight_decay=1e-4,
                  num_epochs=200, patience=20, num_folds=5,
                  save_dir='./domain_expert_results',
-                 importance_threshold=0.1,
+                 importance_threshold=0.30,
                  use_fast_correlation=False,
                  graph_mode='genus', family_filter_mode='strict',
                  use_nested_cv=True, use_node_pruning=False,
@@ -1902,7 +1902,7 @@ def run_all_cases(data_path="../Data/New_Data.csv", save_dir="./refactored_domai
         'num_epochs': 5,  # Reduced from 300 for reasonable runtime
         'patience': 30,
         'num_folds': 3,
-        'importance_threshold': 0.1,  # Keep only top 10% of edges
+        'importance_threshold': 0.30,  # Keep top 30% of edges
         'use_fast_correlation': False,
         'graph_mode': 'genus',
         'family_filter_mode': 'strict',

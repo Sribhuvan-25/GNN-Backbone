@@ -134,7 +134,36 @@ class AnchoredMicrobialGNNDataset(MicrobialGNNDataset):
             df_tax_rel_filtered = self._add_anchored_features(df_tax_rel, df_tax_rel_filtered)
 
         return df_tax_rel_filtered, list(df_tax_rel_filtered.columns)
-    
+
+    def _process_genera(self):
+        """
+        Override genus processing to add anchored features support.
+        This mirrors _process_families() but is called when graph_mode='genus'.
+
+        Returns:
+            tuple: (genus_dataframe, feature_names_list)
+        """
+        # Call the parent class method to do standard genus processing
+        df_genus_rel_filtered, selected_genera = super()._process_genera()
+
+        # Now add anchored features if specified
+        if self.anchored_features and self.case_type:
+            # Get the full unfiltered genus data to add anchored features
+            # We need to reconstruct df_genus_rel from the raw data
+            from utils.taxonomy_utils import (
+                aggregate_otus_to_genera,
+                convert_to_relative_abundance_genus
+            )
+
+            df_genus, _ = aggregate_otus_to_genera(self.df, self.otu_cols)
+            df_genus_rel = convert_to_relative_abundance_genus(df_genus)
+
+            # Add anchored features
+            df_genus_rel_filtered = self._add_anchored_features(df_genus_rel, df_genus_rel_filtered)
+            selected_genera = list(df_genus_rel_filtered.columns)
+
+        return df_genus_rel_filtered, selected_genera
+
     def _add_anchored_features(self, df_tax_rel, df_tax_rel_filtered):
         """
         Add case-specific anchored features to the filtered features.

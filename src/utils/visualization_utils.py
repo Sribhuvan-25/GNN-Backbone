@@ -12,12 +12,12 @@ from sklearn.metrics import r2_score, mean_squared_error, mean_absolute_error
 def get_optimal_layout(G, seed=42, scale=2.0):
     """
     Get optimal layout for graph visualization with fallbacks.
-    
+
     Args:
         G: NetworkX graph
         seed: Random seed for reproducibility
         scale: Scale factor for layout spacing
-        
+
     Returns:
         dict: Node positions
     """

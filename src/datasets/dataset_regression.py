@@ -420,9 +420,9 @@ class MicrobialGNNDataset:
         # These thresholds focus on only the most informative genera
         # Based on empirical testing with 833 total genera
         if self.family_filter_mode == 'strict':
-            # Target: ~70 genera (highly focused on most informative)
-            prevalence_threshold = 0.60  # 60% of samples (~32 samples)
-            abundance_threshold = 0.10   # 10% mean abundance
+            # Target: ~48 genera (maximum focus on core informative genera)
+            prevalence_threshold = 0.70  # 70% of samples (~38 samples)
+            abundance_threshold = 0.12   # 12% mean abundance
             use_intersection = False     # UNION (either criterion)
             target_min_genera = 30       # Only warn if critically low
         elif self.family_filter_mode == 'relaxed':
@@ -629,7 +629,8 @@ class MicrobialGNNDataset:
         print(f"Feature names: {len(self.node_feature_names)} families")
 
         # Initialize paper-style correlation graph builder
-        correlation_threshold = 0.6 if len(self.node_feature_names) <= 50 else 0.5
+        # Use stricter thresholds to reduce clutter
+        correlation_threshold = 0.7 if len(self.node_feature_names) <= 50 else 0.6
         builder = PaperStyleCorrelationGraph(
             correlation_threshold=correlation_threshold,
             significance_threshold=0.05,
