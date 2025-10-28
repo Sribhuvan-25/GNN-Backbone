@@ -219,22 +219,22 @@ def apply_genus_filtering(df_genus_rel, filter_mode='relaxed'):
     prevalence = presence_count / df_genus_rel.shape[0]
     mean_abund = df_genus_rel.mean(axis=0)
 
-    # Set ULTRA-FOCUSED thresholds for genus level
+    # Set thresholds for genus level with two target ranges
     # Based on empirical testing with 833 total genera
     if filter_mode == 'strict':
-        # Target: ~48 genera (maximum focus on core informative genera)
-        prevalence_threshold = 0.70  # 70% of samples
-        abundance_threshold = 0.12   # 12% mean abundance
+        # Target: 20-40 genera (ultra-focused on most abundant/prevalent)
+        prevalence_threshold = 0.75  # 75% of samples (~41 samples)
+        abundance_threshold = 0.15   # 15% mean abundance
         use_intersection = False     # UNION (either criterion)
     elif filter_mode == 'relaxed':
-        # Target: ~85-100 genera (balanced focus)
-        prevalence_threshold = 0.55  # 55% of samples
-        abundance_threshold = 0.08   # 8% mean abundance
+        # Target: 50-100 genera (balanced approach)
+        prevalence_threshold = 0.50  # 50% of samples (~27 samples)
+        abundance_threshold = 0.05   # 5% mean abundance
         use_intersection = False     # UNION (either criterion)
     elif filter_mode == 'permissive':
-        # Target: ~100-120 genera (moderate focus)
-        prevalence_threshold = 0.50  # 50% of samples
-        abundance_threshold = 0.07   # 7% mean abundance
+        # Target: 100-150 genera (maximum coverage for comparison)
+        prevalence_threshold = 0.40  # 40% of samples (~22 samples)
+        abundance_threshold = 0.03   # 3% mean abundance
         use_intersection = False     # UNION (either criterion)
     else:
         raise ValueError(f"Invalid filter_mode: {filter_mode}")

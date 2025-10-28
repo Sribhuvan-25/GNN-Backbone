@@ -684,6 +684,26 @@ class MixedEmbeddingPipeline:
             all_preds = np.vstack(all_preds).flatten()
             all_targets = np.vstack(all_targets).flatten()
             
+            # Inverse transform predictions and targets back to original scale for metrics
+            if hasattr(self.dataset, 'target_scaler'):
+                # Create dummy arrays with correct shape for all targets
+                n_samples = len(all_preds)
+                n_targets = len(self.target_names)
+                dummy_preds = np.zeros((n_samples, n_targets))
+                dummy_targets = np.zeros((n_samples, n_targets))
+                
+                # Fill in the predictions/targets for the current target_idx
+                dummy_preds[:, target_idx] = all_preds
+                dummy_targets[:, target_idx] = all_targets
+                
+                # Inverse transform and extract the relevant column
+                all_preds = self.dataset.target_scaler.inverse_transform(dummy_preds)[:, target_idx]
+                all_targets = self.dataset.target_scaler.inverse_transform(dummy_targets)[:, target_idx]
+                # Recalculate metrics with original scale
+                mse = mean_squared_error(all_targets, all_preds)
+                r2 = r2_score(all_targets, all_preds)
+                print(f"  Metrics recalculated in original scale: R² = {r2:.4f}, MSE = {mse:.4f}")
+            
             # Calculate additional metrics
             rmse = np.sqrt(mse)
             mae = mean_absolute_error(all_targets, all_preds)
@@ -929,6 +949,23 @@ class MixedEmbeddingPipeline:
             # Calculate metrics
             all_preds = np.vstack(all_preds).flatten()
             all_targets = np.vstack(all_targets).flatten()
+            
+            # Inverse transform predictions and targets back to original scale for metrics
+            if hasattr(self.dataset, 'target_scaler'):
+                # Create dummy arrays with correct shape for all targets
+                n_samples = len(all_preds)
+                n_targets = len(self.target_names)
+                dummy_preds = np.zeros((n_samples, n_targets))
+                dummy_targets = np.zeros((n_samples, n_targets))
+                
+                # Fill in the predictions/targets for the current target_idx
+                dummy_preds[:, target_idx] = all_preds
+                dummy_targets[:, target_idx] = all_targets
+                
+                # Inverse transform and extract the relevant column
+                all_preds = self.dataset.target_scaler.inverse_transform(dummy_preds)[:, target_idx]
+                all_targets = self.dataset.target_scaler.inverse_transform(dummy_targets)[:, target_idx]
+                print(f"    Inverse transformed to original scale for metrics")
             
             mse = mean_squared_error(all_targets, all_preds)
             rmse = np.sqrt(mse)
@@ -1523,7 +1560,8 @@ class MixedEmbeddingPipeline:
             pipeline=self,  # Pass self as pipeline
             model=model,
             target_idx=target_idx,
-            importance_threshold=self.importance_threshold
+            importance_threshold=self.importance_threshold,
+            target_name=self.target_names[target_idx]  # Pass target name for storage
         )
         
         print(f"GNNExplainer edge sparsification complete: {len(edge_sparsified_data_list)} samples created")

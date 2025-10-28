@@ -48,8 +48,8 @@ def main():
     parser.add_argument('--graph_method', default='paper_correlation',
                         choices=['original', 'paper_correlation', 'hybrid'],
                         help='Graph construction method (default: paper_correlation)')
-    parser.add_argument('--importance_threshold', type=float, default=0.30,
-                        help='Threshold for explainer edge importance (default: 0.30 = keep top 30%% of edges)')
+    parser.add_argument('--importance_threshold', type=float, default=0.5,
+                        help='Threshold for explainer edge importance (default: 0.5 = keep top 50%% of edges)')
 
     args = parser.parse_args()
 
@@ -121,16 +121,17 @@ Key Features Enabled:
             'num_folds': folds,
             'use_nested_cv': nested_cv,
             'save_dir': f'enhanced_results_{args.case}',
-            'k_neighbors': 5,           # Reduced for focused analysis
+            'k_neighbors': 10,              # Increased for better connectivity
             'hidden_dim': 64,
-            'dropout_rate': 0.3,        # CHANGE TO 0.2
-            'batch_size': 8,            # CHANGE TO 16
-            'learning_rate': 0.003,     # CHANGE TO 0.01
-            'patience': 25 if not args.quick else 5,  # CHANGE TO 50
-            'importance_threshold': args.importance_threshold,
+            'dropout_rate': 0.2,            # Reduced for limited data
+            'batch_size': 16,               # Larger for stable batch norm
+            'learning_rate': 0.001,         # Lower for stability
+            'patience': 30 if not args.quick else 5,  # More patience for convergence
+            'importance_threshold': 0.5,    # Keep 50% of edges (was 30%)
             'graph_construction_method': args.graph_method,
             'use_node_pruning': False,
-            'weight_decay': 1e-4        # CHANGE TO 1e-5
+            'weight_decay': 1e-4,
+            'family_filter_mode': 'strict',
         }
         
         print("Initializing enhanced pipeline...")

@@ -7,6 +7,7 @@ from scipy.spatial.distance import pdist, squareform
 from scipy.stats import pearsonr
 from torch_geometric.data import Data
 import networkx as nx
+from sklearn.preprocessing import StandardScaler
 
 # Import paper-style correlation graph builder
 try:
@@ -232,6 +233,15 @@ class MicrobialGNNDataset:
         if len(self.target_df) != len(original_indices):
             self.df = self.df.loc[self.target_df.index]
         
+        # Standardize targets to zero mean and unit variance
+        # This is critical for genus-level analysis to match feature scale
+        self.target_scaler = StandardScaler()
+        self.target_df[self.target_cols] = self.target_scaler.fit_transform(
+            self.target_df[self.target_cols]
+        )
+        print(f"Targets standardized: mean=0, std=1")
+        print(f"  Original scale stored in target_scaler for inverse transform")
+        
     def _create_node_features(self):
         """Create node features from input data"""
         # Extract feature data based on graph mode
@@ -249,8 +259,11 @@ class MicrobialGNNDataset:
         # Apply variance stabilization if needed
         # For microbial data, double square root transformation is common
         # Adjust this based on your data characteristics
-        if df_features.min().min() >= 0:  # Check if all values are non-negative
-            df_features = df_features.apply(lambda x: np.sqrt(np.sqrt(x + 1e-10)))
+        # DISABLED: Double sqrt was too aggressive for genus-level sparse data
+        # Keeping relative abundances as-is to preserve discriminative power
+        # if df_features.min().min() >= 0:  # Check if all values are non-negative
+        #     df_features = df_features.apply(lambda x: np.sqrt(np.sqrt(x + 1e-10)))
+        print("Feature transformation: DISABLED (keeping relative abundances as-is)")
 
         # Convert to numpy array with shape [num_features, num_samples]
         feature_matrix = df_features.values.T.astype(np.float32)
@@ -422,25 +435,24 @@ class MicrobialGNNDataset:
         prevalence = presence_count / df_genus_rel.shape[0]
         mean_abund = df_genus_rel.mean(axis=0)
 
-        # Set ULTRA-FOCUSED thresholds for genus level
-        # These thresholds focus on only the most informative genera
+        # Set thresholds for genus level with two target ranges
         # Based on empirical testing with 833 total genera
         if self.family_filter_mode == 'strict':
-            # Target: ~48 genera (maximum focus on core informative genera)
-            prevalence_threshold = 0.70  # 70% of samples (~38 samples)
-            abundance_threshold = 0.12   # 12% mean abundance
+            # Target: 20-40 genera (ultra-focused on most abundant/prevalent)
+            prevalence_threshold = 0.75  # 75% of samples (~41 samples)
+            abundance_threshold = 0.15   # 15% mean abundance
             use_intersection = False     # UNION (either criterion)
-            target_min_genera = 30       # Only warn if critically low
+            target_min_genera = 20       # Minimum acceptable
         elif self.family_filter_mode == 'relaxed':
-            # Target: ~85-100 genera (balanced focus)
-            prevalence_threshold = 0.55  # 55% of samples (~30 samples)
-            abundance_threshold = 0.08   # 8% mean abundance
+            # Target: 50-100 genera (balanced approach)
+            prevalence_threshold = 0.50  # 50% of samples (~27 samples)
+            abundance_threshold = 0.05   # 5% mean abundance
             use_intersection = False     # UNION (either criterion)
             target_min_genera = 30
         elif self.family_filter_mode == 'permissive':
-            # Target: ~100-120 genera (moderate focus)
-            prevalence_threshold = 0.50  # 50% of samples (~27 samples)
-            abundance_threshold = 0.07   # 7% mean abundance
+            # Target: 100-150 genera (maximum coverage for comparison)
+            prevalence_threshold = 0.40  # 40% of samples (~22 samples)
+            abundance_threshold = 0.03   # 3% mean abundance
             use_intersection = False     # UNION (either criterion)
             target_min_genera = 30
         else:
@@ -635,8 +647,8 @@ class MicrobialGNNDataset:
         print(f"Feature names: {len(self.node_feature_names)} families")
 
         # Initialize paper-style correlation graph builder
-        # Use stricter thresholds to reduce clutter
-        correlation_threshold = 0.7 if len(self.node_feature_names) <= 50 else 0.6
+        # Use lower thresholds for sparser genus-level data
+        correlation_threshold = 0.4 if len(self.node_feature_names) <= 80 else 0.5
         builder = PaperStyleCorrelationGraph(
             correlation_threshold=correlation_threshold,
             significance_threshold=0.05,
@@ -1176,14 +1188,20 @@ class MicrobialGNNDataset:
         except Exception as e:
             print(f"Warning: k-NN graph visualization failed: {e}")
 
-    def visualize_graphs(self, save_dir='graph_visualizations'):
+    def visualize_graphs(self, save_dir='graph_visualizations', target_name=None):
         """Disabled - only enhanced graph comparison is generated now.
 
         This method used to create extra graph files but has been disabled to only generate
         the 4 required files: 3 individual stage graphs + 1 comprehensive comparison.
         The enhanced visualization is handled by create_enhanced_graph_comparison().
+
+        Args:
+            save_dir: Directory to save visualizations
+            target_name: Target name for accessing target-specific explainer data
         """
         print(f"Graph visualization skipped - using enhanced comparison instead in {save_dir}")
+        if target_name:
+            print(f"  Target-specific visualization for: {target_name}")
         # No-op to prevent extra file generation
     
     def _get_node_labels(self, G, graph_type):

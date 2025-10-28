@@ -551,10 +551,11 @@ class DomainExpertCasesPipeline(MixedEmbeddingPipeline):
         """Create final comprehensive graph visualizations for the target."""
         try:
             print(f"Creating final graph visualizations for {target_name}...")
-            
-            # Create graphs directory
-            graphs_dir = os.path.join(self.save_dir, 'graphs')
+
+            # Create target-specific graphs directory
+            graphs_dir = os.path.join(self.save_dir, 'graphs', target_name)
             os.makedirs(graphs_dir, exist_ok=True)
+            print(f"Saving graphs to: {graphs_dir}")
             
             # Ensure the dataset has the original graph data for comparison
             if not hasattr(self.dataset, 'original_graph_data') or self.dataset.original_graph_data is None:
@@ -672,10 +673,11 @@ class DomainExpertCasesPipeline(MixedEmbeddingPipeline):
         
         print(f"Generating explainer graphs for {target_name}...")
         print(f"DEBUG: Received knn_results with keys: {list(knn_results.keys()) if knn_results else 'None'}")
-        
-        # Create graphs directory
-        graphs_dir = os.path.join(self.save_dir, f'{target_name}_graphs')
+
+        # Create target-specific graphs directory (consistent with other visualization methods)
+        graphs_dir = os.path.join(self.save_dir, 'graphs', target_name)
         os.makedirs(graphs_dir, exist_ok=True)
+        print(f"Explainer graphs will be saved to: {graphs_dir}")
         
         try:
             from explainers.pipeline_explainer import create_explainer_sparsified_graph
@@ -749,8 +751,10 @@ class DomainExpertCasesPipeline(MixedEmbeddingPipeline):
                 
                 # Create enhanced graph visualization using visualization utilities
                 try:
-                    graphs_dir = os.path.join(self.save_dir, 'graphs')
+                    # Create target-specific graphs directory
+                    graphs_dir = os.path.join(self.save_dir, 'graphs', target_name)
                     os.makedirs(graphs_dir, exist_ok=True)
+                    print(f"Creating graphs for {target_name} in: {graphs_dir}")
                     
                     # Ensure the dataset has the original graph data for comparison
                     if not hasattr(self.dataset, 'original_graph_data') or self.dataset.original_graph_data is None:
@@ -933,10 +937,18 @@ class DomainExpertCasesPipeline(MixedEmbeddingPipeline):
             if hasattr(self.dataset, 'original_graph_data') and self.dataset.original_graph_data:
                 knn_graph_data = self.dataset.original_graph_data
             
-            # Get explainer graph data
+            # Get explainer graph data (now stored as dictionary keyed by target_name)
             explainer_graph_data = None
             if hasattr(self.dataset, 'explainer_sparsified_graph_data') and self.dataset.explainer_sparsified_graph_data:
-                explainer_graph_data = self.dataset.explainer_sparsified_graph_data
+                # Access explainer data by target name
+                if isinstance(self.dataset.explainer_sparsified_graph_data, dict):
+                    explainer_graph_data = self.dataset.explainer_sparsified_graph_data.get(target_name, None)
+                    if explainer_graph_data is None:
+                        print(f"Warning: No explainer graph data found for target '{target_name}'")
+                        print(f"Available targets: {list(self.dataset.explainer_sparsified_graph_data.keys())}")
+                else:
+                    # Fallback for old single-target format
+                    explainer_graph_data = self.dataset.explainer_sparsified_graph_data
             
             # Get abundance data for node sizing
             abundance_data = {}

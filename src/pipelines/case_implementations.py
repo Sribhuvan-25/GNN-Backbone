@@ -361,8 +361,14 @@ class CaseImplementations:
         
         # Generate feature importance reports if available
         if hasattr(pipeline.dataset, 'explainer_sparsified_graph_data'):
-            explainer_data = pipeline.dataset.explainer_sparsified_graph_data
-            if 'attention_scores' in explainer_data:
+            # Handle dictionary structure (keyed by target_name)
+            if isinstance(pipeline.dataset.explainer_sparsified_graph_data, dict):
+                explainer_data = pipeline.dataset.explainer_sparsified_graph_data.get(target_name, None)
+            else:
+                # Fallback for old single-target format
+                explainer_data = pipeline.dataset.explainer_sparsified_graph_data
+
+            if explainer_data and 'attention_scores' in explainer_data:
                 importance_path = os.path.join(pipeline.save_dir, f'{case_type}_feature_importance.png')
                 generate_feature_importance_report(
                     explainer_data['attention_scores'],

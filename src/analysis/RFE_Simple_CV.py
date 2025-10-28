@@ -60,7 +60,7 @@ CASE_FEATURES = {
 
 def create_directories():
     """Create directories for organizing outputs for all cases"""
-    cases = ['case1', 'case2', 'case3']
+    cases = ['case3']
     base_directories = ['plots', 'metrics', 'selected_features']
     
     # Create main directory
