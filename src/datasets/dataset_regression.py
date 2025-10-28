@@ -73,9 +73,15 @@ class MicrobialGNNDataset:
         
         # Store original data list for reset capability (after data_list is created)
         self.original_data_list = [data.clone() for data in self.data_list]
-        
+
         # Store original graph data for visualization
+        # Store BOTH the full Spearman correlation graph AND the k-NN sparsified graph
         self.original_graph_data = {
+            # Full Spearman correlation graph (before k-NN sparsification)
+            'original_edge_index': self.full_edge_index.clone(),
+            'original_edge_weight': self.full_edge_weight.clone(),
+            'original_edge_type': self.full_edge_type.clone(),
+            # k-NN sparsified graph (after k-NN sparsification)
             'edge_index': self.edge_index.clone(),
             'edge_weight': self.edge_weight.clone(),
             'edge_type': self.edge_type.clone(),
