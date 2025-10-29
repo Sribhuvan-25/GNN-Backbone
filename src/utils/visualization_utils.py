@@ -856,28 +856,21 @@ def create_single_model_prediction_plot(fold_predictions, output_path, title, ta
             ax.scatter(actual, predicted, alpha=0.7, s=50, c=single_color, 
                       edgecolors='black', linewidth=0.5)
             
-            # Perfect prediction line with outlier-robust axis limits
+            # Perfect prediction line - show ALL validation points
             actual_array = np.array(actual)
             predicted_array = np.array(predicted)
             
-            # Handle extreme outliers (especially for RGGC models)
-            # Use percentile-based bounds to avoid extreme axis ranges
-            all_values = np.concatenate([actual_array, predicted_array])
-            q1, q99 = np.percentile(all_values, [1, 99])  # Use 1st and 99th percentiles
+            # Always use actual min/max to show ALL validation points (no percentile clipping)
+            min_val = 0  # Start from 0 for these metrics
+            max_val = max(actual_array.max(), predicted_array.max())
             
-            # Set axis range starting from 0 (no negative values)
-            # If range is still reasonable, use actual min/max, otherwise use percentiles
-            if (q99 - q1) < 1e6 and (q99 - q1) > 0:
-                max_val = max(actual_array.max(), predicted_array.max())
-            else:
-                max_val = q99
-                
-            # Always start from 0 for both axes
-            min_val = 0
-            ax.plot([min_val, max_val], [min_val, max_val], 'k--', alpha=0.8, linewidth=2)  # Black dashed line
-            
-            # Set axis limits starting from 0
+            # Add reasonable margin
             margin = max_val * 0.05  # 5% margin
+            
+            # Draw perfect prediction line
+            ax.plot([min_val, max_val], [min_val, max_val], 'k--', alpha=0.8, linewidth=2)
+            
+            # Set axis limits to show ALL points
             ax.set_xlim(0, max_val + margin)
             ax.set_ylim(0, max_val + margin)
             
@@ -898,30 +891,26 @@ def create_single_model_prediction_plot(fold_predictions, output_path, title, ta
         ax.scatter(all_actual, all_predicted, alpha=0.7, s=30, c=single_color, 
                   edgecolors='black', linewidth=0.3)
         
-        # Overall metrics
+        # Overall metrics - calculated from ALL validation points across ALL folds
         overall_r2 = r2_score(all_actual, all_predicted) if len(all_actual) > 1 else 0
         overall_rmse = np.sqrt(mean_squared_error(all_actual, all_predicted))
         overall_mae = mean_absolute_error(all_actual, all_predicted)
         
-        # Perfect prediction line with outlier-robust limits
+        # Perfect prediction line - show ALL validation points (no percentile clipping)
         all_actual_array = np.array(all_actual)
         all_predicted_array = np.array(all_predicted)
-        all_values = np.concatenate([all_actual_array, all_predicted_array])
         
-        # Set axis range starting from 0 for combined plot
-        # Use percentile-based bounds for extreme outliers
-        q1, q99 = np.percentile(all_values, [1, 99])
-        if (q99 - q1) < 1e6 and (q99 - q1) > 0:
-            max_val = max(all_actual_array.max(), all_predicted_array.max())
-        else:
-            max_val = q99
-            
-        # Always start from 0 for both axes
-        min_val = 0
-        ax.plot([min_val, max_val], [min_val, max_val], 'k--', alpha=0.8, linewidth=2, label='Perfect Prediction')  # Black dashed line
+        # Always use actual min/max to show ALL validation points from ALL folds
+        min_val = 0  # Start from 0 for these metrics
+        max_val = max(all_actual_array.max(), all_predicted_array.max())
         
-        # Set axis limits starting from 0
-        margin = max_val * 0.05
+        # Add reasonable margin
+        margin = max_val * 0.05  # 5% margin
+        
+        # Draw perfect prediction line
+        ax.plot([min_val, max_val], [min_val, max_val], 'k--', alpha=0.8, linewidth=2, label='Perfect Prediction')
+        
+        # Set axis limits to show ALL points from ALL folds
         ax.set_xlim(0, max_val + margin)
         ax.set_ylim(0, max_val + margin)
         
@@ -971,25 +960,21 @@ def create_combined_prediction_comparison(predictions_dict, output_path, target_
                 ax.scatter(all_actual, all_predicted, alpha=0.6, s=40, c='#666666',
                           edgecolors='black', linewidth=0.3)  # Medium gray
                 
-                # Perfect prediction line with outlier-robust axis limits
+                # Perfect prediction line - show ALL validation points
                 all_actual_array = np.array(all_actual)
                 all_predicted_array = np.array(all_predicted)
-                all_values = np.concatenate([all_actual_array, all_predicted_array])
                 
-                # Set axis range starting from 0 for model comparison
-                # Use percentile-based bounds for extreme outliers (RGGC models)
-                q1, q99 = np.percentile(all_values, [1, 99])
-                if (q99 - q1) < 1e6 and (q99 - q1) > 0:
-                    max_val = max(all_actual_array.max(), all_predicted_array.max())
-                else:
-                    max_val = q99
-                    
-                # Always start from 0 for both axes
-                min_val = 0
-                ax.plot([min_val, max_val], [min_val, max_val], 'k--', alpha=0.8, linewidth=2)  # Black dashed line
+                # Always use actual min/max to show ALL validation points (no percentile clipping)
+                min_val = 0  # Start from 0 for these metrics
+                max_val = max(all_actual_array.max(), all_predicted_array.max())
                 
-                # Set axis limits starting from 0
+                # Add reasonable margin
                 margin = max_val * 0.05  # 5% margin
+                
+                # Draw perfect prediction line
+                ax.plot([min_val, max_val], [min_val, max_val], 'k--', alpha=0.8, linewidth=2)
+                
+                # Set axis limits to show ALL points
                 ax.set_xlim(0, max_val + margin)
                 ax.set_ylim(0, max_val + margin)
                 
