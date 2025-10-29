@@ -1356,11 +1356,27 @@ class DomainExpertCasesPipeline(MixedEmbeddingPipeline):
                                 ml_pipeline.fit(X_train, y_train)
                                 y_pred = ml_pipeline.predict(X_test)
                                 
-                                # Calculate metrics
+                                # Calculate metrics (in normalized scale)
                                 mse = mean_squared_error(y_test, y_pred)
                                 rmse = np.sqrt(mse)
                                 r2 = r2_score(y_test, y_pred)
                                 mae = mean_absolute_error(y_test, y_pred)
+                                
+                                # Inverse transform predictions and targets back to original scale for plotting
+                                # The target_scaler was fit on all targets, so we need to reshape for inverse transform
+                                y_test_reshaped = y_test.reshape(-1, 1)
+                                y_pred_reshaped = y_pred.reshape(-1, 1)
+                                
+                                # Create a full-size array with zeros for all targets, then fill the target column
+                                n_targets = len(self.dataset.target_cols)
+                                y_test_full = np.zeros((len(y_test), n_targets))
+                                y_pred_full = np.zeros((len(y_pred), n_targets))
+                                y_test_full[:, target_idx] = y_test
+                                y_pred_full[:, target_idx] = y_pred
+                                
+                                # Inverse transform
+                                y_test_original = self.dataset.target_scaler.inverse_transform(y_test_full)[:, target_idx]
+                                y_pred_original = self.dataset.target_scaler.inverse_transform(y_pred_full)[:, target_idx]
                                 
                                 ml_fold_results.append({
                                     'fold': fold + 1,
@@ -1368,8 +1384,8 @@ class DomainExpertCasesPipeline(MixedEmbeddingPipeline):
                                     'rmse': rmse,
                                     'r2': r2,
                                     'mae': mae,
-                                    'predictions': y_pred,
-                                    'targets': y_test
+                                    'predictions': y_pred_original,  # Store in original scale
+                                    'targets': y_test_original       # Store in original scale
                                 })
                             
                             # Store results for this ML model
@@ -1701,14 +1717,24 @@ class DomainExpertCasesPipeline(MixedEmbeddingPipeline):
                 for model_key, model_data in results['ml_training'].items():
                     if 'fold_results' in model_data:
                         fold_predictions = []
-                        for fold_result in model_data['fold_results']:
+                        for fold_idx, fold_result in enumerate(model_data['fold_results']):
                             if 'predictions' in fold_result and 'targets' in fold_result:
+                                # DEBUG: Check data being passed to plotting
+                                print(f"\nDEBUG PREPARE {model_key}_ml Fold {fold_idx + 1}:")
+                                print(f"  targets type: {type(fold_result['targets'])}, len: {len(fold_result['targets'])}")
+                                print(f"  predictions type: {type(fold_result['predictions'])}, len: {len(fold_result['predictions'])}")
+                                if hasattr(fold_result['targets'], 'shape'):
+                                    print(f"  targets shape: {fold_result['targets'].shape}")
+                                if hasattr(fold_result['predictions'], 'shape'):
+                                    print(f"  predictions shape: {fold_result['predictions'].shape}")
+                                
                                 fold_predictions.append({
                                     'actual': fold_result['targets'],
                                     'predicted': fold_result['predictions']
                                 })
                         
                         if fold_predictions:
+                            print(f"DEBUG PREPARE: {model_key}_ml has {len(fold_predictions)} fold_predictions ready")
                             model_predictions[f"{model_key}_ml"] = {
                                 'fold_predictions': fold_predictions
                             }

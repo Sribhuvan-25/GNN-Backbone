@@ -852,6 +852,20 @@ def create_single_model_prediction_plot(fold_predictions, output_path, title, ta
             r2 = r2_score(actual, predicted) if len(actual) > 1 else 0
             rmse = np.sqrt(mean_squared_error(actual, predicted))
             
+            # DEBUG: Check what we're actually plotting (should be in ORIGINAL scale)
+            print(f"\nDEBUG SCATTER Fold {fold_idx + 1}:")
+            print(f"  actual type: {type(actual)}, len: {len(actual)}")
+            print(f"  predicted type: {type(predicted)}, len: {len(predicted)}")
+            if hasattr(actual, 'shape'):
+                print(f"  actual shape: {actual.shape}")
+            if hasattr(predicted, 'shape'):
+                print(f"  predicted shape: {predicted.shape}")
+            print(f"  First 5 actual values: {actual[:5] if len(actual) >= 5 else actual}")
+            print(f"  First 5 predicted values: {predicted[:5] if len(predicted) >= 5 else predicted}")
+            print(f"  Min/Max actual: {np.min(actual):.2f} / {np.max(actual):.2f}")
+            print(f"  Min/Max predicted: {np.min(predicted):.2f} / {np.max(predicted):.2f}")
+            print(f"  Unique predicted values: {len(np.unique(predicted)) if hasattr(np.unique(predicted), '__len__') else 'N/A'}")
+            
             # Scatter plot with single color
             ax.scatter(actual, predicted, alpha=0.7, s=50, c=single_color, 
                       edgecolors='black', linewidth=0.5)
@@ -876,7 +890,7 @@ def create_single_model_prediction_plot(fold_predictions, output_path, title, ta
             
             ax.set_xlabel(f'Actual {target_name}')
             ax.set_ylabel(f'Predicted {target_name}')
-            ax.set_title(f'Fold {fold_idx + 1}\nR² = {r2:.3f}, MSE = {rmse**2:.3f}')
+            ax.set_title(f'Fold {fold_idx + 1} (n={len(actual)})\nR² = {r2:.3f}, MSE = {rmse**2:.3f}')
             ax.grid(True, alpha=0.3)
             
             # Add data to combined plot
@@ -886,6 +900,13 @@ def create_single_model_prediction_plot(fold_predictions, output_path, title, ta
     # Combined plot (all folds)
     if len(fold_predictions) > 0:
         ax = axes[5]  # Last subplot
+        
+        # DEBUG: Check combined data before plotting
+        print(f"\nDEBUG SCATTER Combined:")
+        print(f"  all_actual type: {type(all_actual)}, len: {len(all_actual)}")
+        print(f"  all_predicted type: {type(all_predicted)}, len: {len(all_predicted)}")
+        print(f"  First 5 actual values: {all_actual[:5] if len(all_actual) >= 5 else all_actual}")
+        print(f"  First 5 predicted values: {all_predicted[:5] if len(all_predicted) >= 5 else all_predicted}")
         
         # Use single color for all points (no fold-based coloring)
         ax.scatter(all_actual, all_predicted, alpha=0.7, s=30, c=single_color, 
@@ -916,7 +937,7 @@ def create_single_model_prediction_plot(fold_predictions, output_path, title, ta
         
         ax.set_xlabel(f'Actual {target_name}')
         ax.set_ylabel(f'Predicted {target_name}')
-        ax.set_title(f'Combined (All Folds)\nR² = {overall_r2:.3f}, MSE = {overall_rmse**2:.3f}, MAE = {overall_mae:.3f}')
+        ax.set_title(f'Combined (All Folds) (n={len(all_actual)})\nR² = {overall_r2:.3f}, MSE = {overall_rmse**2:.3f}, MAE = {overall_mae:.3f}')
         ax.grid(True, alpha=0.3)
         ax.legend(fontsize=8, loc='upper left')
     
@@ -980,7 +1001,7 @@ def create_combined_prediction_comparison(predictions_dict, output_path, target_
                 
                 ax.set_xlabel(f'Actual {target_name}')
                 ax.set_ylabel(f'Predicted {target_name}')
-                ax.set_title(f'{model_name.upper()}\nR² = {overall_r2:.3f}, MSE = {overall_rmse**2:.3f}')
+                ax.set_title(f'{model_name.upper()} (n={len(all_actual)})\nR² = {overall_r2:.3f}, MSE = {overall_rmse**2:.3f}')
                 ax.grid(True, alpha=0.3)
     
     plt.suptitle(f'Model Comparison - {target_name} Predictions', fontsize=16, fontweight='bold')
