@@ -1523,7 +1523,8 @@ class MixedEmbeddingPipeline:
             pipeline=self,  # Pass self as pipeline
             model=model,
             target_idx=target_idx,
-            importance_threshold=self.importance_threshold
+            importance_threshold=self.importance_threshold,
+            target_name=self.target_names[target_idx]  # Pass target name for storage
         )
         
         print(f"GNNExplainer edge sparsification complete: {len(edge_sparsified_data_list)} samples created")

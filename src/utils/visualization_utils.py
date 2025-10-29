@@ -123,7 +123,7 @@ def get_functional_group_colors(node_features, acetoclastic_features, hydrogenot
     return node_colors
 
 
-def create_networkx_graph_from_edge_data(edge_index, edge_weight, node_features):
+def create_networkx_graph_from_edge_data(edge_index, edge_weight, node_features, include_isolated_nodes=True):
     """
     Create a NetworkX graph from PyTorch Geometric edge data.
 
@@ -131,23 +131,24 @@ def create_networkx_graph_from_edge_data(edge_index, edge_weight, node_features)
         edge_index: Tensor of shape (2, num_edges) containing edge indices
         edge_weight: Tensor of edge weights
         node_features: List of node feature names
+        include_isolated_nodes: If False, only include nodes that have edges; if True, include all nodes
 
     Returns:
         nx.Graph: NetworkX graph object
     """
     G = nx.Graph()
 
-    # For edge-only sparsification, include ALL nodes, not just those with edges
-    # This ensures isolated nodes (nodes with no edges) are still shown
-    for node_idx in range(len(node_features)):
-        node_name = node_features[node_idx]
-        G.add_node(node_idx, name=node_name)
+    if include_isolated_nodes:
+        # Include ALL nodes, even those without edges
+        for node_idx in range(len(node_features)):
+            node_name = node_features[node_idx]
+            G.add_node(node_idx, name=node_name)
 
     # Add edges with weights
     # Handle None edge_weight gracefully
     if edge_index is not None and edge_index.shape[1] > 0:
         edge_index_np = edge_index.cpu().numpy()
-        
+
         if edge_weight is not None:
             edge_weight_np = edge_weight.cpu().numpy()
         else:
@@ -156,6 +157,14 @@ def create_networkx_graph_from_edge_data(edge_index, edge_weight, node_features)
         for i in range(edge_index_np.shape[1]):
             src, dst = edge_index_np[:, i]
             weight = edge_weight_np[i]
+
+            # If not including isolated nodes, add nodes only when they have edges
+            if not include_isolated_nodes:
+                if src not in G:
+                    G.add_node(src, name=node_features[src])
+                if dst not in G:
+                    G.add_node(dst, name=node_features[dst])
+
             G.add_edge(src, dst, weight=weight)
 
     return G
@@ -289,11 +298,226 @@ def save_graph_visualization(G, node_colors, output_path, title="Graph Visualiza
     
     print(f"Graph visualization saved: {output_path}")
 
+def save_standalone_explainer_graph(explainer_graph_data, node_features, output_dir,
+                                   protected_nodes=None, abundance_data=None):
+    """
+    Save a standalone visualization of the explainer sparsified graph.
+
+    Args:
+        explainer_graph_data: Dictionary with explainer graph data
+        node_features: List of node feature names
+        output_dir: Directory to save visualization
+        protected_nodes: List of protected node names
+        abundance_data: Dictionary with abundance data for node sizing
+    """
+    print(f"\n📊 Creating standalone explainer sparsified graph visualization...")
+
+    # Get the actual pruned node names from explainer data
+    explainer_node_names = explainer_graph_data.get('pruned_node_names', node_features)
+
+    # Ensure we have valid node names
+    if not explainer_node_names or len(explainer_node_names) == 0:
+        print("Warning: No pruned_node_names found, using fallback")
+        explainer_node_names = node_features
+
+    # Create NetworkX graph
+    explainer_G = create_networkx_graph_from_edge_data(
+        explainer_graph_data['edge_index'],
+        explainer_graph_data.get('edge_weight', None),
+        explainer_node_names
+    )
+
+    print(f"Standalone explainer graph: {len(explainer_G.nodes())} nodes, {len(explainer_G.edges())} edges")
+
+    # Create figure
+    fig, ax = plt.subplots(1, 1, figsize=(20, 20))
+
+    # Get layout
+    pos = get_optimal_layout(explainer_G, seed=42, scale=2.5)
+
+    # Get node colors with protection highlighting
+    def get_node_colors_with_protection(node_list, protected_list=None):
+        colors = []
+        for node in node_list:
+            if protected_list and node in protected_list:
+                colors.append('#606060')  # Medium-dark gray for protected/anchored nodes
+            else:
+                colors.append('#D3D3D3')  # Light gray for others
+        return colors
+
+    # Get node data
+    explainer_graph_node_features = []
+    for node_id in sorted(explainer_G.nodes()):
+        node_name = explainer_G.nodes[node_id].get('name', f'Node_{node_id}')
+        explainer_graph_node_features.append(node_name)
+
+    node_colors = get_node_colors_with_protection(explainer_graph_node_features, protected_nodes)
+
+    # Get node sizes from abundance
+    def get_node_sizes_from_abundance(node_list, abundance_dict=None):
+        if abundance_dict and len(abundance_dict) > 0:
+            sizes = []
+            abundances = [abundance_dict.get(node, 0.01) for node in node_list]
+            min_abundance = min(abundances)
+            max_abundance = max(abundances)
+
+            for node in node_list:
+                abundance = abundance_dict.get(node, 0.01)
+                if max_abundance > min_abundance:
+                    normalized = (abundance - min_abundance) / (max_abundance - min_abundance)
+                    size = 400 + (normalized ** 0.7 * 1600)  # Range: 400-2000
+                else:
+                    size = 1000
+                sizes.append(size)
+            return sizes
+        else:
+            return [1000] * len(node_list)
+
+    # For pruned nodes, get abundance data
+    pruned_abundance_data = {}
+    if abundance_data:
+        for node_name in explainer_graph_node_features:
+            if node_name in abundance_data:
+                pruned_abundance_data[node_name] = abundance_data[node_name]
+
+    node_sizes = get_node_sizes_from_abundance(explainer_graph_node_features, pruned_abundance_data)
+
+    # Draw nodes
+    nx.draw_networkx_nodes(explainer_G, pos, ax=ax, node_color=node_colors,
+                          node_size=node_sizes, alpha=0.9, edgecolors='black', linewidths=2.0)
+
+    # Draw edges with highlighting for top edges
+    if explainer_G.edges():
+        # Get edge widths
+        def get_edge_widths_from_correlations(graph):
+            if not graph.edges():
+                return []
+
+            edge_weights = [abs(graph[u][v].get('weight', 0.5)) for u, v in graph.edges()]
+            if len(edge_weights) == 0:
+                return []
+
+            min_weight = min(edge_weights)
+            max_weight = max(edge_weights)
+
+            edge_widths = []
+            for weight in edge_weights:
+                if max_weight > min_weight:
+                    normalized = (weight - min_weight) / (max_weight - min_weight)
+                    width = 1.0 + (normalized ** 1.2 * 6.0)  # Range: 1.0-7.0
+                else:
+                    width = 3.0
+                edge_widths.append(width)
+
+            return edge_widths
+
+        edge_widths = get_edge_widths_from_correlations(explainer_G)
+
+        # Sort edges by weight and highlight top 10
+        edge_weights_list = []
+        for u, v in explainer_G.edges():
+            weight = abs(explainer_G[u][v].get("weight", 0))
+            edge_weights_list.append(((u, v), weight))
+
+        edge_weights_list.sort(key=lambda x: x[1], reverse=True)
+        top_10_edges = [edge for edge, weight in edge_weights_list[:10]]
+        regular_edges = [edge for edge, weight in edge_weights_list[10:]]
+
+        # Draw regular edges in gray
+        if regular_edges:
+            regular_widths = [edge_widths[list(explainer_G.edges()).index(edge)]
+                             for edge in regular_edges if edge in explainer_G.edges()]
+            nx.draw_networkx_edges(explainer_G, pos, edgelist=regular_edges, ax=ax,
+                                  alpha=0.6, width=regular_widths, edge_color='#808080')
+
+        # Draw top 10 edges in black
+        if top_10_edges:
+            top_widths = [edge_widths[list(explainer_G.edges()).index(edge)]
+                         for edge in top_10_edges if edge in explainer_G.edges()]
+            nx.draw_networkx_edges(explainer_G, pos, edgelist=top_10_edges, ax=ax,
+                                  alpha=0.9, width=top_widths, edge_color='#000000')
+
+        # Add edge weight labels
+        edge_labels = {(u, v): f'{abs(explainer_G[u][v].get("weight", 0)):.2f}'
+                      for u, v in explainer_G.edges()}
+        nx.draw_networkx_edge_labels(explainer_G, pos, edge_labels, ax=ax, font_size=11)
+
+    # Add node labels with wrapping
+    node_labels = {}
+    for node_id in explainer_G.nodes():
+        node_name = explainer_G.nodes[node_id].get('name', None)
+        if not node_name and explainer_node_names:
+            node_list = list(explainer_G.nodes())
+            if node_id in node_list:
+                idx = node_list.index(node_id)
+                if idx < len(explainer_node_names):
+                    node_name = explainer_node_names[idx]
+
+        family_name = node_name or f"Node_{node_id}"
+        if len(family_name) > 18:
+            words = family_name.split('_')
+            if len(words) > 1:
+                mid_point = len(words) // 2
+                line1 = '_'.join(words[:mid_point])
+                line2 = '_'.join(words[mid_point:])
+                family_name = f"{line1}\n{line2}"
+            else:
+                mid = len(family_name) // 2
+                family_name = f"{family_name[:mid]}\n{family_name[mid:]}"
+        node_labels[node_id] = family_name
+
+    nx.draw_networkx_labels(explainer_G, pos, labels=node_labels, ax=ax,
+                           font_size=13, font_weight='bold')
+
+    # Title and stats
+    pruning_type = explainer_graph_data.get('pruning_type', 'edge_based')
+    title_text = "Explainer Sparsified Graph"
+    if pruning_type == 'attention_based':
+        title_text = "Attention-Pruned Graph"
+    elif pruning_type == 'edge_based':
+        title_text = "Explainer Edge-Sparsified Graph"
+
+    ax.set_title(title_text, fontsize=20, fontweight='bold', pad=30)
+
+    # Add statistics box
+    stats_text = f"Nodes: {len(explainer_G.nodes())}\nEdges: {len(explainer_G.edges())}"
+    if explainer_G.edges():
+        avg_weight = np.mean([explainer_G[u][v].get('weight', 1.0) for u, v in explainer_G.edges()])
+        stats_text += f"\nAvg. Weight: {avg_weight:.3f}"
+    stats_text += f"\nMethod: {pruning_type}"
+
+    ax.text(0.02, 0.98, stats_text,
+            transform=ax.transAxes, fontsize=14, verticalalignment='top',
+            bbox=dict(boxstyle="round,pad=0.8", facecolor="#E8E8E8", alpha=0.95))
+
+    # Add legend
+    from matplotlib.patches import Patch
+    from matplotlib.lines import Line2D
+    legend_elements = [
+        Patch(facecolor='#606060', edgecolor='black', label='Protected/Anchored Nodes'),
+        Patch(facecolor='#D3D3D3', edgecolor='black', label='Other Nodes'),
+        Line2D([0], [0], color='#000000', linewidth=3, label='Top 10 Edges by Weight'),
+        Line2D([0], [0], color='#808080', linewidth=2, label='Other Edges')
+    ]
+
+    ax.legend(handles=legend_elements, loc='upper right', fontsize=12, framealpha=0.95)
+
+    ax.axis('off')
+    plt.tight_layout()
+
+    # Save
+    output_path = os.path.join(output_dir, 'explainer_sparsified_graph_standalone.png')
+    plt.savefig(output_path, dpi=300, bbox_inches='tight', facecolor='white')
+    plt.close()
+
+    print(f"✅ Standalone explainer sparsified graph saved: {output_path}")
+
 def create_enhanced_graph_comparison(knn_graph_data, explainer_graph_data, node_features,
                                    output_dir, functional_groups=None, protected_nodes=None, abundance_data=None):
     """
     Create side-by-side comparison of k-NN and explainer graphs with enhanced edge weight visualization.
-    Only generates the 4 required files: 3 individual stage graphs + 1 comprehensive comparison.
+    Generates the 4 required files: 3 individual stage graphs + 1 comprehensive comparison.
+    Also creates a standalone explainer sparsified graph if data is available.
 
     Args:
         knn_graph_data: Dictionary with k-NN graph data (edge_index, edge_weight, etc.)
@@ -307,12 +531,22 @@ def create_enhanced_graph_comparison(knn_graph_data, explainer_graph_data, node_
     import os
     os.makedirs(output_dir, exist_ok=True)
 
-    # Only create the three-panel comparison with individual saves
+    # Create the three-panel comparison with individual saves
     # This generates exactly 4 files: 3 individual + 1 comprehensive
     create_side_by_side_comparison(
         knn_graph_data, explainer_graph_data, node_features,
         output_dir, functional_groups, protected_nodes, abundance_data
     )
+
+    # Also create a standalone explainer sparsified graph visualization if data is available
+    if explainer_graph_data and 'edge_index' in explainer_graph_data:
+        try:
+            save_standalone_explainer_graph(
+                explainer_graph_data, node_features, output_dir,
+                protected_nodes, abundance_data
+            )
+        except Exception as e:
+            print(f"Warning: Failed to save standalone explainer graph: {e}")
 
 def create_side_by_side_comparison(knn_graph_data, explainer_graph_data, node_features,
                                  output_dir, functional_groups=None, protected_nodes=None, abundance_data=None):
@@ -327,10 +561,21 @@ def create_side_by_side_comparison(knn_graph_data, explainer_graph_data, node_fe
     if knn_graph_data.get('edge_index') is not None:
         knn_edges = knn_graph_data['edge_index'].shape[1]
         print(f"k-NN graph: {knn_edges} edges")
-    if explainer_graph_data and explainer_graph_data.get('edge_index') is not None:
-        explainer_edges = explainer_graph_data['edge_index'].shape[1]
-        pruned_nodes = len(explainer_graph_data.get('pruned_node_names', []))
-        print(f"Explainer graph: {explainer_edges} edges, {pruned_nodes} pruned nodes")
+
+    print(f"🎯 EXPLAINER DATA CHECK:")
+    print(f"   explainer_graph_data is None: {explainer_graph_data is None}")
+    print(f"   explainer_graph_data type: {type(explainer_graph_data)}")
+    if explainer_graph_data:
+        print(f"   explainer_graph_data keys: {list(explainer_graph_data.keys()) if isinstance(explainer_graph_data, dict) else 'not a dict'}")
+        print(f"   has edge_index: {'edge_index' in explainer_graph_data if isinstance(explainer_graph_data, dict) else False}")
+        if explainer_graph_data.get('edge_index') is not None:
+            explainer_edges = explainer_graph_data['edge_index'].shape[1]
+            pruned_nodes = len(explainer_graph_data.get('pruned_node_names', []))
+            print(f"   Explainer graph: {explainer_edges} edges, {pruned_nodes} pruned nodes")
+        else:
+            print(f"   ❌ edge_index is None or missing!")
+    else:
+        print(f"   ❌ explainer_graph_data is None or empty!")
 
     fig, (ax1, ax2, ax3) = plt.subplots(1, 3, figsize=(45, 15))
 
@@ -403,7 +648,8 @@ def create_side_by_side_comparison(knn_graph_data, explainer_graph_data, node_fe
         original_G = create_networkx_graph_from_edge_data(
             knn_graph_data['original_edge_index'],
             knn_graph_data.get('original_edge_weight', None),
-            original_node_names  # Use original names, not current node_features
+            original_node_names,  # Use original names, not current node_features
+            include_isolated_nodes=True  # Show ALL nodes for proper comparison across panels
         )
         print(f"Panel 1 (Spearman): {len(original_G.nodes())} nodes, {len(original_G.edges())} edges")
     else:
@@ -411,7 +657,8 @@ def create_side_by_side_comparison(knn_graph_data, explainer_graph_data, node_fe
         original_G = create_networkx_graph_from_edge_data(
             knn_graph_data['edge_index'],
             knn_graph_data.get('edge_weight', None),
-            original_node_names  # Use original names, not current node_features
+            original_node_names,  # Use original names, not current node_features
+            include_isolated_nodes=True  # Show ALL nodes for proper comparison across panels
         )
         print(f"Panel 1 (k-NN fallback): {len(original_G.nodes())} nodes, {len(original_G.edges())} edges")
 
@@ -479,7 +726,8 @@ def create_side_by_side_comparison(knn_graph_data, explainer_graph_data, node_fe
     knn_G = create_networkx_graph_from_edge_data(
         knn_graph_data['edge_index'],
         knn_graph_data.get('edge_weight', None),
-        original_node_names  # Use original names, not current node_features
+        original_node_names,  # Use original names, not current node_features
+        include_isolated_nodes=True  # Show ALL nodes for proper comparison across panels
     )
     print(f"Panel 2 (k-NN): {len(knn_G.nodes())} nodes, {len(knn_G.edges())} edges")
     pos2 = get_optimal_layout(knn_G, seed=42, scale=2.0)
@@ -554,7 +802,8 @@ def create_side_by_side_comparison(knn_graph_data, explainer_graph_data, node_fe
         explainer_G = create_networkx_graph_from_edge_data(
             explainer_graph_data['edge_index'],
             explainer_graph_data.get('edge_weight', None),
-            explainer_node_names
+            explainer_node_names,
+            include_isolated_nodes=True  # Show ALL nodes for proper comparison across panels
         )
         print(f"Panel 3 (Explainer): {len(explainer_G.nodes())} nodes, {len(explainer_G.edges())} edges")
         pos3 = get_optimal_layout(explainer_G, seed=42, scale=2.0)
@@ -593,24 +842,24 @@ def create_side_by_side_comparison(knn_graph_data, explainer_graph_data, node_fe
             for u, v in explainer_G.edges():
                 weight = abs(explainer_G[u][v].get("weight", 0))
                 edge_weights_list.append(((u, v), weight))
-            
+
             # Sort edges by weight (descending) and get top 10
             edge_weights_list.sort(key=lambda x: x[1], reverse=True)
             top_10_edges = [edge for edge, weight in edge_weights_list[:10]]
             regular_edges = [edge for edge, weight in edge_weights_list[10:]]
-            
+
             # Draw regular edges (all except top 10) in medium gray
             if regular_edges:
-                regular_widths = [pruned_edge_widths[list(explainer_G.edges()).index(edge)] 
+                regular_widths = [pruned_edge_widths[list(explainer_G.edges()).index(edge)]
                                  for edge in regular_edges if edge in explainer_G.edges()]
-                nx.draw_networkx_edges(explainer_G, pos3, edgelist=regular_edges, ax=ax3, 
+                nx.draw_networkx_edges(explainer_G, pos3, edgelist=regular_edges, ax=ax3,
                                       alpha=0.6, width=regular_widths, edge_color='#808080')  # Medium gray
-            
+
             # Draw top 10 edges in black to highlight them
             if top_10_edges:
-                top_widths = [pruned_edge_widths[list(explainer_G.edges()).index(edge)] 
+                top_widths = [pruned_edge_widths[list(explainer_G.edges()).index(edge)]
                              for edge in top_10_edges if edge in explainer_G.edges()]
-                nx.draw_networkx_edges(explainer_G, pos3, edgelist=top_10_edges, ax=ax3, 
+                nx.draw_networkx_edges(explainer_G, pos3, edgelist=top_10_edges, ax=ax3,
                                       alpha=0.9, width=top_widths, edge_color='#000000')  # Black for top edges
 
             # Add edge weight labels
@@ -653,6 +902,17 @@ def create_side_by_side_comparison(knn_graph_data, explainer_graph_data, node_fe
         ax3.text(0.02, 0.98, f"Nodes: {len(explainer_G.nodes())}\nEdges: {len(explainer_G.edges())}",
                 transform=ax3.transAxes, fontsize=12, verticalalignment='top',
                 bbox=dict(boxstyle="round,pad=0.5", facecolor="#C8C8C8", alpha=0.9))
+    else:
+        # No explainer data available - show placeholder message
+        print("⚠️ Warning: No explainer graph data available for Panel 3")
+        ax3.text(0.5, 0.5, 'Explainer Graph\nNot Available\n\n(Run explainer generation first)',
+                ha='center', va='center', fontsize=14, fontweight='bold',
+                transform=ax3.transAxes,
+                bbox=dict(boxstyle="round,pad=1.0", facecolor="#F0F0F0", edgecolor='black', linewidth=2))
+        ax3.set_title('Explainer-Pruned Graph', fontsize=16, fontweight='bold', pad=20)
+        ax3.text(0.02, 0.98, "Data not available",
+                transform=ax3.transAxes, fontsize=12, verticalalignment='top',
+                bbox=dict(boxstyle="round,pad=0.5", facecolor="#E0E0E0", alpha=0.9))
 
     # Remove axes
     ax1.axis('off')
