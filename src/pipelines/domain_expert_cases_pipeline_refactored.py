@@ -545,10 +545,11 @@ class DomainExpertCasesPipeline(MixedEmbeddingPipeline):
         """Create final comprehensive graph visualizations for the target."""
         try:
             print(f"Creating final graph visualizations for {target_name}...")
-            
-            # Create graphs directory
-            graphs_dir = os.path.join(self.save_dir, 'graphs')
+
+            # Create target-specific graphs directory
+            graphs_dir = os.path.join(self.save_dir, 'graphs', target_name)
             os.makedirs(graphs_dir, exist_ok=True)
+            print(f"Saving graphs to: {graphs_dir}")
             
             # Ensure the dataset has the original graph data for comparison
             if not hasattr(self.dataset, 'original_graph_data') or self.dataset.original_graph_data is None:
@@ -666,10 +667,11 @@ class DomainExpertCasesPipeline(MixedEmbeddingPipeline):
         
         print(f"Generating explainer graphs for {target_name}...")
         print(f"DEBUG: Received knn_results with keys: {list(knn_results.keys()) if knn_results else 'None'}")
-        
-        # Create graphs directory
-        graphs_dir = os.path.join(self.save_dir, f'{target_name}_graphs')
+
+        # Create target-specific graphs directory (consistent with other visualization methods)
+        graphs_dir = os.path.join(self.save_dir, 'graphs', target_name)
         os.makedirs(graphs_dir, exist_ok=True)
+        print(f"Explainer graphs will be saved to: {graphs_dir}")
         
         try:
             from explainers.pipeline_explainer import create_explainer_sparsified_graph
@@ -743,8 +745,10 @@ class DomainExpertCasesPipeline(MixedEmbeddingPipeline):
                 
                 # Create enhanced graph visualization using visualization utilities
                 try:
-                    graphs_dir = os.path.join(self.save_dir, 'graphs')
+                    # Create target-specific graphs directory
+                    graphs_dir = os.path.join(self.save_dir, 'graphs', target_name)
                     os.makedirs(graphs_dir, exist_ok=True)
+                    print(f"Creating graphs for {target_name} in: {graphs_dir}")
                     
                     # Ensure the dataset has the original graph data for comparison
                     if not hasattr(self.dataset, 'original_graph_data') or self.dataset.original_graph_data is None:
@@ -918,19 +922,51 @@ class DomainExpertCasesPipeline(MixedEmbeddingPipeline):
         """Create enhanced graph comparison using visualization utilities."""
         try:
             from utils.visualization_utils import create_enhanced_graph_comparison
-            
+
             # Get functional groups for coloring
             functional_groups = self._get_functional_groups_for_case()
-            
+
             # Get k-NN graph data
             knn_graph_data = None
             if hasattr(self.dataset, 'original_graph_data') and self.dataset.original_graph_data:
                 knn_graph_data = self.dataset.original_graph_data
-            
-            # Get explainer graph data
+
+            # Get explainer graph data (now stored as dictionary keyed by target_name)
+            # IMPORTANT: Skip explainer lookup for case-level summaries (they use synthetic keys like "case3_summary")
             explainer_graph_data = None
-            if hasattr(self.dataset, 'explainer_sparsified_graph_data') and self.dataset.explainer_sparsified_graph_data:
-                explainer_graph_data = self.dataset.explainer_sparsified_graph_data
+
+            # Check if this is a case-level summary (not a real target)
+            is_case_summary = 'summary' in target_name.lower() or target_name not in ['ACE-km', 'H2-km']
+
+            if is_case_summary:
+                print(f"\n📊 VISUALIZATION: Skipping explainer data for case-level summary '{target_name}'")
+                print(f"   Case-level visualizations only show k-NN graphs (explainer is target-specific)")
+                explainer_graph_data = None  # Explicitly set to None for case summaries
+            elif hasattr(self.dataset, 'explainer_sparsified_graph_data') and self.dataset.explainer_sparsified_graph_data:
+                print(f"\n🔍 VISUALIZATION: Looking for explainer data for target: '{target_name}'")
+                print(f"   dataset.explainer_sparsified_graph_data exists: {self.dataset.explainer_sparsified_graph_data is not None}")
+                print(f"   Type: {type(self.dataset.explainer_sparsified_graph_data)}")
+                # Access explainer data by target name
+                if isinstance(self.dataset.explainer_sparsified_graph_data, dict):
+                    print(f"   Dictionary detected with keys: {list(self.dataset.explainer_sparsified_graph_data.keys())}")
+                    explainer_graph_data = self.dataset.explainer_sparsified_graph_data.get(target_name, None)
+                    if explainer_graph_data is None:
+                        print(f"❌ Warning: No explainer graph data found for target '{target_name}'")
+                        print(f"   Available targets: {list(self.dataset.explainer_sparsified_graph_data.keys())}")
+                    else:
+                        print(f"✅ Found explainer data for '{target_name}'!")
+                        print(f"   Data keys: {list(explainer_graph_data.keys()) if isinstance(explainer_graph_data, dict) else 'Not a dict'}")
+                        print(f"   Has edge_index: {'edge_index' in explainer_graph_data if isinstance(explainer_graph_data, dict) else False}")
+                        if isinstance(explainer_graph_data, dict) and 'edge_index' in explainer_graph_data:
+                            print(f"   edge_index shape: {explainer_graph_data['edge_index'].shape}")
+                else:
+                    # Fallback for old single-target format
+                    print(f"   Using old single-target format")
+                    explainer_graph_data = self.dataset.explainer_sparsified_graph_data
+            else:
+                print(f"\n❌ VISUALIZATION: No explainer_sparsified_graph_data attribute found or it's empty!")
+                print(f"   hasattr: {hasattr(self.dataset, 'explainer_sparsified_graph_data')}")
+                print(f"   Value: {self.dataset.explainer_sparsified_graph_data if hasattr(self.dataset, 'explainer_sparsified_graph_data') else 'N/A'}")
             
             # Get abundance data for node sizing
             abundance_data = {}
@@ -941,6 +977,16 @@ class DomainExpertCasesPipeline(MixedEmbeddingPipeline):
 
             # Create enhanced comparison
             if knn_graph_data:
+                # DEBUG: Check what explainer_graph_data actually contains
+                print(f"📊 About to call create_enhanced_graph_comparison with:")
+                print(f"   - knn_graph_data: {'Present' if knn_graph_data else 'MISSING'}")
+                print(f"   - explainer_graph_data: {'Present' if explainer_graph_data else 'MISSING'}")
+                if explainer_graph_data:
+                    print(f"   - explainer keys: {list(explainer_graph_data.keys())}")
+                    print(f"   - has edge_index: {'edge_index' in explainer_graph_data}")
+                    if 'edge_index' in explainer_graph_data:
+                        print(f"   - edge_index shape: {explainer_graph_data['edge_index'].shape}")
+
                 create_enhanced_graph_comparison(
                     knn_graph_data=knn_graph_data,
                     explainer_graph_data=explainer_graph_data,

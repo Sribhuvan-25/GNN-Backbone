@@ -24,7 +24,11 @@ def create_explainer_sparsified_graph(pipeline, model, target_idx=0, importance_
     Returns:
         List of sparsified graph data objects
     """
-    print(f"\nCreating explainer-based sparsified graph...")
+    # Ensure target_name is set for proper storage
+    if target_name is None:
+        target_name = pipeline.dataset.target_names[target_idx] if hasattr(pipeline.dataset, 'target_names') else f"target_{target_idx}"
+
+    print(f"\nCreating explainer-based sparsified graph for target: {target_name}...")
     print(f"Graph mode: {pipeline.graph_mode}")
     print(f"Current number of nodes: {len(pipeline.dataset.node_feature_names)}")
     print(f"Original importance threshold: {importance_threshold}")
@@ -116,7 +120,7 @@ def create_explainer_sparsified_graph(pipeline, model, target_idx=0, importance_
     print(f"Model type: {type(model).__name__}")
     
     # Always use edge-based sparsification (original approach)
-    return create_edge_pruned_graph_pipeline(pipeline, explainer, combined_edge_importance, importance_threshold, non_zero_importance)
+    return create_edge_pruned_graph_pipeline(pipeline, explainer, combined_edge_importance, importance_threshold, non_zero_importance, target_name)
 
 # COMMENTED OUT - Using edge-based sparsification only
 # def create_node_pruned_graph_pipeline(pipeline, explainer, combined_edge_importance, importance_threshold, target_name=None):
@@ -171,7 +175,7 @@ def create_explainer_sparsified_graph(pipeline, model, target_idx=0, importance_
 #     
 #     return new_data_list
 
-def create_edge_pruned_graph_pipeline(pipeline, explainer, combined_edge_importance, importance_threshold, non_zero_importance):
+def create_edge_pruned_graph_pipeline(pipeline, explainer, combined_edge_importance, importance_threshold, non_zero_importance, target_name=None):
     """Create edge-pruned graph for the pipeline (original method)"""
     
     # Adaptive thresholding based on graph mode and data
@@ -262,17 +266,35 @@ def create_edge_pruned_graph_pipeline(pipeline, explainer, combined_edge_importa
         num_edges = new_edge_index.shape[1] if new_edge_index.dim() > 1 else 0
     
     print(f"Explainer sparsified graph has {num_edges//2} undirected edges")
-    
-    # Store sparsified graph data for visualization
-    pipeline.dataset.explainer_sparsified_graph_data = {
-        'edge_index': new_edge_index.clone(),
-        'edge_weight': new_edge_weight.clone(),
-        'edge_type': new_edge_type.clone(),
+
+    # Store sparsified graph data for visualization (per target)
+    # Initialize dictionary if it doesn't exist
+    if not hasattr(pipeline.dataset, 'explainer_sparsified_graph_data') or pipeline.dataset.explainer_sparsified_graph_data is None:
+        pipeline.dataset.explainer_sparsified_graph_data = {}
+
+    # Store graph data with target_name as key
+    graph_key = target_name if target_name else "default"
+
+    # CRITICAL DEBUG: Check edge data before storing
+    print(f"\n🔍 DEBUG: About to store explainer data for '{graph_key}'")
+    print(f"   edge_index shape: {new_edge_index.shape if new_edge_index is not None and hasattr(new_edge_index, 'shape') else 'None or invalid'}")
+    print(f"   edge_weight shape: {new_edge_weight.shape if new_edge_weight is not None and hasattr(new_edge_weight, 'shape') else 'None or invalid'}")
+    print(f"   Number of nodes: {len(pipeline.dataset.node_feature_names)}")
+
+    pipeline.dataset.explainer_sparsified_graph_data[graph_key] = {
+        'edge_index': new_edge_index.clone() if new_edge_index.numel() > 0 else new_edge_index,
+        'edge_weight': new_edge_weight.clone() if new_edge_weight.numel() > 0 else new_edge_weight,
+        'edge_type': new_edge_type.clone() if new_edge_type.numel() > 0 else new_edge_type,
         'pruning_type': 'edge_based',
-        'pruned_node_names': pipeline.dataset.node_feature_names,  # Keep ALL nodes for edge-only sparsification
-        'kept_nodes': list(range(len(pipeline.dataset.node_feature_names)))  # All nodes are kept
+        'pruned_node_names': pipeline.dataset.node_feature_names.copy(),  # Keep ALL nodes for edge-only sparsification
+        'kept_nodes': list(range(len(pipeline.dataset.node_feature_names))),  # All nodes are kept
+        'target_name': target_name
     }
-    
+    print(f"✅ Stored explainer graph data with key: '{graph_key}'")
+    print(f"   Available keys now: {list(pipeline.dataset.explainer_sparsified_graph_data.keys())}")
+    print(f"   Stored edge_index has 'edge_index' key: {'edge_index' in pipeline.dataset.explainer_sparsified_graph_data[graph_key]}")
+    print(f"   Stored data edge_index shape: {pipeline.dataset.explainer_sparsified_graph_data[graph_key]['edge_index'].shape}")
+
     # Create new data objects with sparsified graph
     new_data_list = []
     feature_matrix_samples = pipeline.dataset.feature_matrix.T
@@ -292,9 +314,11 @@ def create_edge_pruned_graph_pipeline(pipeline, explainer, combined_edge_importa
         
         new_data_list.append(data)
     
-    # Visualize both original and sparsified graphs
-    pipeline.dataset.visualize_graphs(save_dir=f"{pipeline.save_dir}/graphs")
-    
+    # Visualize both original and sparsified graphs (with target-specific path)
+    target_graph_dir = f"{pipeline.save_dir}/graphs/{graph_key}" if target_name else f"{pipeline.save_dir}/graphs"
+    print(f"Saving explainer-pruned graph visualization to: {target_graph_dir}")
+    pipeline.dataset.visualize_graphs(save_dir=target_graph_dir, target_name=graph_key)
+
     return new_data_list 
 
 def is_gat_model(model):
@@ -367,30 +391,36 @@ def create_attention_pruned_graph_pipeline(pipeline, explainer, model, importanc
         new_data_list.append(data)
     
     print(f"Attention-pruned graph created with {len(kept_nodes)} nodes and {pruned_data.edge_index.shape[1]} edges")
-    
-    # Store for visualization with actual edge weights and attention information
-    pipeline.dataset.explainer_sparsified_graph_data = {
+
+    # Store for visualization with actual edge weights and attention information (per target)
+    if not hasattr(pipeline.dataset, 'explainer_sparsified_graph_data') or pipeline.dataset.explainer_sparsified_graph_data is None:
+        pipeline.dataset.explainer_sparsified_graph_data = {}
+
+    graph_key = target_name if target_name else "default"
+    pipeline.dataset.explainer_sparsified_graph_data[graph_key] = {
         'edge_index': pruned_data.edge_index.clone(),
         'edge_weight': getattr(pruned_data, 'edge_weight', torch.ones(pruned_data.edge_index.shape[1])),
         'edge_type': getattr(pruned_data, 'edge_type', torch.ones(pruned_data.edge_index.shape[1], dtype=torch.long)),
         'pruning_type': 'attention_based',
         'kept_nodes': kept_nodes,
         'pruned_node_names': pruned_node_names,
-        'attention_scores': attention_scores
+        'attention_scores': attention_scores,
+        'target_name': target_name
     }
-    
+
     # Update pipeline dataset node names to reflect pruning
     pipeline.dataset.node_feature_names = pruned_node_names
-    
-    # Visualize graphs with attention information
-    pipeline.dataset.visualize_graphs(save_dir=f"{pipeline.save_dir}/graphs")
+
+    # Visualize graphs with attention information (with target-specific path)
+    target_graph_dir = f"{pipeline.save_dir}/graphs/{graph_key}" if target_name else f"{pipeline.save_dir}/graphs"
+    pipeline.dataset.visualize_graphs(save_dir=target_graph_dir, target_name=graph_key)
     
     return new_data_list
 
 
 # COMMENTED OUT - Using edge-based sparsification only
 # def create_unified_pruned_graph_pipeline(pipeline, explainer, model, importance_threshold, combined_edge_importance, target_name=None):
-def create_edge_pruned_graph_pipeline(pipeline, explainer, combined_edge_importance, importance_threshold, non_zero_importance):
+def create_edge_pruned_graph_pipeline(pipeline, explainer, combined_edge_importance, importance_threshold, non_zero_importance, target_name=None):
     """Create edge-pruned graph for the pipeline (original method)"""
     
     # Adaptive thresholding based on graph mode and data
@@ -481,17 +511,35 @@ def create_edge_pruned_graph_pipeline(pipeline, explainer, combined_edge_importa
         num_edges = new_edge_index.shape[1] if new_edge_index.dim() > 1 else 0
     
     print(f"Explainer sparsified graph has {num_edges//2} undirected edges")
-    
-    # Store sparsified graph data for visualization
-    pipeline.dataset.explainer_sparsified_graph_data = {
-        'edge_index': new_edge_index.clone(),
-        'edge_weight': new_edge_weight.clone(),
-        'edge_type': new_edge_type.clone(),
+
+    # Store sparsified graph data for visualization (per target)
+    # Initialize dictionary if it doesn't exist
+    if not hasattr(pipeline.dataset, 'explainer_sparsified_graph_data') or pipeline.dataset.explainer_sparsified_graph_data is None:
+        pipeline.dataset.explainer_sparsified_graph_data = {}
+
+    # Store graph data with target_name as key
+    graph_key = target_name if target_name else "default"
+
+    # CRITICAL DEBUG: Check edge data before storing
+    print(f"\n🔍 DEBUG: About to store explainer data for '{graph_key}'")
+    print(f"   edge_index shape: {new_edge_index.shape if new_edge_index is not None and hasattr(new_edge_index, 'shape') else 'None or invalid'}")
+    print(f"   edge_weight shape: {new_edge_weight.shape if new_edge_weight is not None and hasattr(new_edge_weight, 'shape') else 'None or invalid'}")
+    print(f"   Number of nodes: {len(pipeline.dataset.node_feature_names)}")
+
+    pipeline.dataset.explainer_sparsified_graph_data[graph_key] = {
+        'edge_index': new_edge_index.clone() if new_edge_index.numel() > 0 else new_edge_index,
+        'edge_weight': new_edge_weight.clone() if new_edge_weight.numel() > 0 else new_edge_weight,
+        'edge_type': new_edge_type.clone() if new_edge_type.numel() > 0 else new_edge_type,
         'pruning_type': 'edge_based',
-        'pruned_node_names': pipeline.dataset.node_feature_names,  # Keep ALL nodes for edge-only sparsification
-        'kept_nodes': list(range(len(pipeline.dataset.node_feature_names)))  # All nodes are kept
+        'pruned_node_names': pipeline.dataset.node_feature_names.copy(),  # Keep ALL nodes for edge-only sparsification
+        'kept_nodes': list(range(len(pipeline.dataset.node_feature_names))),  # All nodes are kept
+        'target_name': target_name
     }
-    
+    print(f"✅ Stored explainer graph data with key: '{graph_key}'")
+    print(f"   Available keys now: {list(pipeline.dataset.explainer_sparsified_graph_data.keys())}")
+    print(f"   Stored edge_index has 'edge_index' key: {'edge_index' in pipeline.dataset.explainer_sparsified_graph_data[graph_key]}")
+    print(f"   Stored data edge_index shape: {pipeline.dataset.explainer_sparsified_graph_data[graph_key]['edge_index'].shape}")
+
     # Create new data objects with sparsified graph
     new_data_list = []
     feature_matrix_samples = pipeline.dataset.feature_matrix.T
@@ -511,9 +559,11 @@ def create_edge_pruned_graph_pipeline(pipeline, explainer, combined_edge_importa
         
         new_data_list.append(data)
     
-    # Visualize both original and sparsified graphs
-    pipeline.dataset.visualize_graphs(save_dir=f"{pipeline.save_dir}/graphs")
-    
+    # Visualize both original and sparsified graphs (with target-specific path)
+    target_graph_dir = f"{pipeline.save_dir}/graphs/{graph_key}" if target_name else f"{pipeline.save_dir}/graphs"
+    print(f"Saving explainer-pruned graph visualization to: {target_graph_dir}")
+    pipeline.dataset.visualize_graphs(save_dir=target_graph_dir, target_name=graph_key)
+
     return new_data_list 
 
 def is_gat_model(model):
@@ -586,23 +636,29 @@ def create_attention_pruned_graph_pipeline(pipeline, explainer, model, importanc
         new_data_list.append(data)
     
     print(f"Attention-pruned graph created with {len(kept_nodes)} nodes and {pruned_data.edge_index.shape[1]} edges")
-    
-    # Store for visualization with actual edge weights and attention information
-    pipeline.dataset.explainer_sparsified_graph_data = {
+
+    # Store for visualization with actual edge weights and attention information (per target)
+    if not hasattr(pipeline.dataset, 'explainer_sparsified_graph_data') or pipeline.dataset.explainer_sparsified_graph_data is None:
+        pipeline.dataset.explainer_sparsified_graph_data = {}
+
+    graph_key = target_name if target_name else "default"
+    pipeline.dataset.explainer_sparsified_graph_data[graph_key] = {
         'edge_index': pruned_data.edge_index.clone(),
         'edge_weight': getattr(pruned_data, 'edge_weight', torch.ones(pruned_data.edge_index.shape[1])),
         'edge_type': getattr(pruned_data, 'edge_type', torch.ones(pruned_data.edge_index.shape[1], dtype=torch.long)),
         'pruning_type': 'attention_based',
         'kept_nodes': kept_nodes,
         'pruned_node_names': pruned_node_names,
-        'attention_scores': attention_scores
+        'attention_scores': attention_scores,
+        'target_name': target_name
     }
-    
+
     # Update pipeline dataset node names to reflect pruning
     pipeline.dataset.node_feature_names = pruned_node_names
-    
-    # Visualize graphs with attention information
-    pipeline.dataset.visualize_graphs(save_dir=f"{pipeline.save_dir}/graphs")
+
+    # Visualize graphs with attention information (with target-specific path)
+    target_graph_dir = f"{pipeline.save_dir}/graphs/{graph_key}" if target_name else f"{pipeline.save_dir}/graphs"
+    pipeline.dataset.visualize_graphs(save_dir=target_graph_dir, target_name=graph_key)
     
     return new_data_list
 

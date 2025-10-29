@@ -111,8 +111,10 @@ class MicrobialGNNDataset:
             # Recreate data list from scratch
             self.data_list = self._create_data_objects()
         
-        # Reset explainer data
-        self.explainer_sparsified_graph_data = None
+        # DO NOT reset explainer data - preserve it across resets for multi-target visualization
+        # Multiple targets (ACE-km, H2-km) store explainer data with different keys in the same dictionary
+        # Resetting would wipe out previously generated explainer data for earlier targets
+        # self.explainer_sparsified_graph_data = None  # ❌ REMOVED - causes loss of explainer data
         
         # Reset graph data to original k-NN graph
         if hasattr(self, 'original_graph_data') and self.original_graph_data:
@@ -1055,14 +1057,20 @@ class MicrobialGNNDataset:
         except Exception as e:
             print(f"Warning: k-NN graph visualization failed: {e}")
 
-    def visualize_graphs(self, save_dir='graph_visualizations'):
+    def visualize_graphs(self, save_dir='graph_visualizations', target_name=None):
         """Disabled - only enhanced graph comparison is generated now.
 
         This method used to create extra graph files but has been disabled to only generate
         the 4 required files: 3 individual stage graphs + 1 comprehensive comparison.
         The enhanced visualization is handled by create_enhanced_graph_comparison().
+
+        Args:
+            save_dir: Directory to save visualizations
+            target_name: Target name for accessing target-specific explainer data
         """
         print(f"Graph visualization skipped - using enhanced comparison instead in {save_dir}")
+        if target_name:
+            print(f"  Target-specific visualization for: {target_name}")
         # No-op to prevent extra file generation
     
     def _get_node_labels(self, G, graph_type):
