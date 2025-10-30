@@ -595,8 +595,46 @@ class MixedEmbeddingPipeline:
         
         mse = mean_squared_error(all_targets, all_preds)
         r2 = r2_score(all_targets, all_preds)
-        
+
         return mse, r2
+
+    def _verify_metrics_consistency(self, fold_results, reported_r2, reported_mse, context=""):
+        """
+        Verify that reported metrics match combined fold predictions.
+        This ensures we're calculating metrics correctly from all validation predictions.
+
+        Args:
+            fold_results: List of fold results with 'predictions' and 'targets'
+            reported_r2: Reported R² metric
+            reported_mse: Reported MSE metric
+            context: Description of where this verification is happening
+        """
+        # Combine all predictions and targets
+        all_preds = []
+        all_targets = []
+        for fold in fold_results:
+            all_preds.extend(fold['predictions'])
+            all_targets.extend(fold['targets'])
+
+        # Calculate metrics from combined data
+        combined_r2 = r2_score(all_targets, all_preds)
+        combined_mse = mean_squared_error(all_targets, all_preds)
+
+        # Check if they match (within tolerance)
+        r2_diff = abs(combined_r2 - reported_r2)
+        mse_diff = abs(combined_mse - reported_mse)
+
+        if r2_diff > 0.0001 or mse_diff > 0.0001:
+            print(f"\n⚠️  METRICS MISMATCH WARNING ({context}):")
+            print(f"   Combined R²:  {combined_r2:.6f}")
+            print(f"   Reported R²:  {reported_r2:.6f}")
+            print(f"   Difference:   {r2_diff:.6f}")
+            print(f"   Combined MSE: {combined_mse:.6f}")
+            print(f"   Reported MSE: {reported_mse:.6f}")
+            print(f"   Difference:   {mse_diff:.6f}")
+            print(f"   Total validation samples: {len(all_preds)}")
+        else:
+            print(f"\n✅ Metrics verified ({context}): R² = {combined_r2:.4f}, MSE = {combined_mse:.4f}, n = {len(all_preds)}")
 
     def train_gnn_model_nested(self, model_type, target_idx, data_list=None):
         """Train GNN model with nested cross-validation for hyperparameter tuning"""
@@ -716,30 +754,16 @@ class MixedEmbeddingPipeline:
         print(f"\n{'='*60}")
         print(f"COMPREHENSIVE NESTED CV SUMMARY")
         print(f"{'='*60}")
-        
-        r2_scores = [r['r2'] for r in outer_results]
-        mse_scores = [r['mse'] for r in outer_results]
-        rmse_scores = [r['rmse'] for r in outer_results]
-        mae_scores = [r['mae'] for r in outer_results]
-        
-        avg_r2 = np.mean(r2_scores)
-        avg_mse = np.mean(mse_scores)
-        avg_rmse = np.mean(rmse_scores)
-        avg_mae = np.mean(mae_scores)
-        std_r2 = np.std(r2_scores)
-        std_mse = np.std(mse_scores)
-        std_rmse = np.std(rmse_scores)
-        std_mae = np.std(mae_scores)
-        
+
         print(f"Model: {model_type.upper()}")
         print(f"Target: {target_name}")
         print(f"Phase: {phase}")
         print(f"Number of outer folds: {self.num_folds}")
-        
+
         print(f"\nFold-by-Fold Results:")
         print(f"{'Fold':<6} {'R²':<10} {'MSE':<10} {'RMSE':<10} {'MAE':<10} {'Best hidden_dim':<15} {'Best k_neighbors':<15}")
         print(f"{'-'*80}")
-        
+
         for result in outer_results:
             fold = result['fold']
             r2 = result['r2']
@@ -750,12 +774,38 @@ class MixedEmbeddingPipeline:
             hidden_dim = best_params.get('hidden_dim', 'N/A')
             k_neighbors = best_params.get('k_neighbors', 'N/A')
             print(f"{fold:<6} {r2:<10.4f} {mse:<10.4f} {rmse:<10.4f} {mae:<10.4f} {hidden_dim:<15} {k_neighbors:<15}")
-        
-        print(f"\nOverall Performance:")
-        print(f"  R² = {avg_r2:.4f} ± {std_r2:.4f}")
-        print(f"  MSE = {avg_mse:.4f} ± {std_mse:.4f}")
-        print(f"  RMSE = {avg_rmse:.4f} ± {std_rmse:.4f}")
-        print(f"  MAE = {avg_mae:.4f} ± {std_mae:.4f}")
+
+        # ✓ CORRECT: Combine all predictions from all folds
+        all_combined_preds = []
+        all_combined_targets = []
+        for result in outer_results:
+            all_combined_preds.extend(result['predictions'])
+            all_combined_targets.extend(result['targets'])
+
+        all_combined_preds = np.array(all_combined_preds)
+        all_combined_targets = np.array(all_combined_targets)
+
+        # ✓ CORRECT: Calculate metrics from combined predictions
+        combined_r2 = r2_score(all_combined_targets, all_combined_preds)
+        combined_mse = mean_squared_error(all_combined_targets, all_combined_preds)
+        combined_rmse = np.sqrt(combined_mse)
+        combined_mae = mean_absolute_error(all_combined_targets, all_combined_preds)
+
+        print(f"\nOverall Performance (from ALL combined validation predictions):")
+        print(f"  R² = {combined_r2:.4f}")
+        print(f"  MSE = {combined_mse:.4f}")
+        print(f"  RMSE = {combined_rmse:.4f}")
+        print(f"  MAE = {combined_mae:.4f}")
+        print(f"  Total validation samples: {len(all_combined_preds)}")
+
+        # Optional: Also show fold-level statistics for reference
+        r2_scores = [r['r2'] for r in outer_results]
+        mse_scores = [r['mse'] for r in outer_results]
+        std_r2 = np.std(r2_scores)
+        std_mse = np.std(mse_scores)
+        print(f"\nFold-level variability (for reference only):")
+        print(f"  R² std across folds: {std_r2:.4f}")
+        print(f"  MSE std across folds: {std_mse:.4f}")
         
         # Show hyperparameter selection frequency
         print(f"\nHyperparameter Selection Frequency:")
@@ -785,24 +835,30 @@ class MixedEmbeddingPipeline:
         
         # Save detailed metrics including hyperparameter selection
         self.save_detailed_metrics(outer_results, model_type, target_name, phase)
-        
+
+        # ✓ VERIFICATION: Ensure metrics are calculated correctly
+        self._verify_metrics_consistency(outer_results, combined_r2, combined_mse, "Nested CV GNN")
+
         return {
             'model': best_model,
             'fold_results': outer_results,
+            'best_hyperparams': best_hyperparams,
+            # ✓ CORRECT: Use combined metrics (calculated from all validation predictions)
             'avg_metrics': {
-                'r2': avg_r2,
-                'mse': avg_mse,
-                'rmse': avg_rmse,
-                'mae': avg_mae,
-                'std_r2': std_r2,
-                'std_mse': std_mse,
-                'std_rmse': std_rmse,
-                'std_mae': std_mae
+                'r2': combined_r2,
+                'mse': combined_mse,
+                'rmse': combined_rmse,
+                'mae': combined_mae,
+                # Keep fold-level statistics for reporting variance
+                'fold_r2_std': std_r2,
+                'fold_mse_std': std_mse
             },
             'model_type': model_type,
             'target_name': target_name,
             'target_idx': target_idx,
-            'phase': phase
+            'phase': phase,
+            # Additional info for debugging/verification
+            'total_val_samples': len(all_combined_preds)
         }
 
     def train_gnn_model(self, model_type, target_idx, data_list=None):
@@ -1117,35 +1173,45 @@ class MixedEmbeddingPipeline:
                 
                 print(f"    Fold {fold_num}: MSE: {mse:.4f}, RMSE: {rmse:.4f}, R²: {r2:.4f}, MAE: {mae:.4f}")
             
-            # Calculate overall metrics from all validation samples combined
+            # ✓ CORRECT: Calculate overall metrics from all validation samples combined
             all_fold_preds = []
             all_fold_targets = []
             for fold_result in fold_results:
                 all_fold_preds.extend(fold_result['predictions'])
                 all_fold_targets.extend(fold_result['targets'])
-            
+
             all_fold_preds = np.array(all_fold_preds)
             all_fold_targets = np.array(all_fold_targets)
-            
-            # Calculate fold-wise metrics for mean ± std
-            fold_mse_scores = [fold_result['mse'] for fold_result in fold_results]
-            fold_rmse_scores = [fold_result['rmse'] for fold_result in fold_results]
+
+            # ✓ CORRECT: Calculate combined metrics from all validation predictions
+            combined_r2 = r2_score(all_fold_targets, all_fold_preds)
+            combined_mse = mean_squared_error(all_fold_targets, all_fold_preds)
+            combined_rmse = np.sqrt(combined_mse)
+            combined_mae = mean_absolute_error(all_fold_targets, all_fold_preds)
+
+            # Calculate fold-level statistics for reporting variance
             fold_r2_scores = [fold_result['r2'] for fold_result in fold_results]
-            fold_mae_scores = [fold_result['mae'] for fold_result in fold_results]
-            
-            # Calculate mean ± std
+            fold_mse_scores = [fold_result['mse'] for fold_result in fold_results]
+            fold_r2_std = np.std(fold_r2_scores)
+            fold_mse_std = np.std(fold_mse_scores)
+
+            # Store combined metrics (not averaged)
             avg_metrics = {
-                'mse': np.mean(fold_mse_scores),
-                'rmse': np.mean(fold_rmse_scores),
-                'r2': np.mean(fold_r2_scores),
-                'mae': np.mean(fold_mae_scores),
-                'std_mse': np.std(fold_mse_scores),
-                'std_rmse': np.std(fold_rmse_scores),
-                'std_r2': np.std(fold_r2_scores),
-                'std_mae': np.std(fold_mae_scores)
+                'r2': combined_r2,
+                'mse': combined_mse,
+                'rmse': combined_rmse,
+                'mae': combined_mae,
+                # Keep fold-level statistics for reporting variance
+                'fold_r2_std': fold_r2_std,
+                'fold_mse_std': fold_mse_std
             }
-            
-            print(f"    Overall - MSE: {avg_metrics['mse']:.4f} ± {avg_metrics['std_mse']:.4f}, RMSE: {avg_metrics['rmse']:.4f} ± {avg_metrics['std_rmse']:.4f}, R²: {avg_metrics['r2']:.4f} ± {avg_metrics['std_r2']:.4f}, MAE: {avg_metrics['mae']:.4f} ± {avg_metrics['std_mae']:.4f}")
+
+            print(f"    Overall (from ALL combined validation predictions) - R²: {combined_r2:.4f}, MSE: {combined_mse:.4f}, RMSE: {combined_rmse:.4f}, MAE: {combined_mae:.4f}")
+            print(f"    Fold-level variability: R² std = {fold_r2_std:.4f}, MSE std = {fold_mse_std:.4f}")
+            print(f"    Total validation samples: {len(all_fold_preds)}")
+
+            # ✓ VERIFICATION: Ensure ML metrics are calculated correctly
+            self._verify_metrics_consistency(fold_results, combined_r2, combined_mse, f"ML {model_name}")
             
             # Train final model on all data
             final_model = Pipeline([
@@ -1631,77 +1697,42 @@ class MixedEmbeddingPipeline:
             for phase in ['knn', 'explainer']:
                 if phase in target_results:
                     for model_type, results in target_results[phase].items():
-                        # Check if std metrics are available
-                        if 'std_r2' in results['avg_metrics']:
-                            summary_data.append({
-                                'target': target_name,
-                                'phase': phase,
-                                'model_type': model_type,
-                                'model_category': 'GNN',
-                                'mse': results['avg_metrics']['mse'],
-                                'rmse': results['avg_metrics']['rmse'],
-                                'r2': results['avg_metrics']['r2'],
-                                'mae': results['avg_metrics']['mae'],
-                                'std_mse': results['avg_metrics']['std_mse'],
-                                'std_rmse': results['avg_metrics']['std_rmse'],
-                                'std_r2': results['avg_metrics']['std_r2'],
-                                'std_mae': results['avg_metrics']['std_mae']
-                            })
-                        else:
-                            # Fallback for non-nested CV results
-                            summary_data.append({
-                                'target': target_name,
-                                'phase': phase,
-                                'model_type': model_type,
-                                'model_category': 'GNN',
-                                'mse': results['avg_metrics']['mse'],
-                                'rmse': results['avg_metrics']['rmse'],
-                                'r2': results['avg_metrics']['r2'],
-                                'mae': results['avg_metrics']['mae'],
-                                'std_mse': 'N/A',
-                                'std_rmse': 'N/A',
-                                'std_r2': 'N/A',
-                                'std_mae': 'N/A'
-                            })
-            
+                        # Check if fold-level statistics are available (new format)
+                        has_fold_stats = 'fold_r2_std' in results['avg_metrics']
+                        summary_data.append({
+                            'target': target_name,
+                            'phase': phase,
+                            'model_type': model_type,
+                            'model_category': 'GNN',
+                            'mse': results['avg_metrics']['mse'],
+                            'rmse': results['avg_metrics']['rmse'],
+                            'r2': results['avg_metrics']['r2'],
+                            'mae': results['avg_metrics']['mae'],
+                            # Use new fold-level statistics keys
+                            'fold_r2_std': results['avg_metrics'].get('fold_r2_std', 'N/A'),
+                            'fold_mse_std': results['avg_metrics'].get('fold_mse_std', 'N/A')
+                        })
+
             # ML results
             if 'ml_models' in target_results:
                 for model_type, results in target_results['ml_models'].items():
                     # Debug: Print what's available in ML results
                     print(f"DEBUG: ML model {model_type} avg_metrics keys: {list(results['avg_metrics'].keys())}")
-                    
-                    # Check if std metrics are available
-                    if 'std_r2' in results['avg_metrics']:
-                        summary_data.append({
-                            'target': target_name,
-                            'phase': 'embeddings',
-                            'model_type': model_type,
-                            'model_category': 'ML',
-                            'mse': results['avg_metrics']['mse'],
-                            'rmse': results['avg_metrics']['rmse'],
-                            'r2': results['avg_metrics']['r2'],
-                            'mae': results['avg_metrics']['mae'],
-                            'std_mse': results['avg_metrics'].get('std_mse', 'N/A'),
-                            'std_rmse': results['avg_metrics'].get('std_rmse', 'N/A'),
-                            'std_r2': results['avg_metrics'].get('std_r2', 'N/A'),
-                            'std_mae': results['avg_metrics'].get('std_mae', 'N/A')
-                        })
-                    else:
-                        # Fallback for non-nested CV results
-                        summary_data.append({
-                            'target': target_name,
-                            'phase': 'embeddings',
-                            'model_type': model_type,
-                            'model_category': 'ML',
-                            'mse': results['avg_metrics']['mse'],
-                            'rmse': results['avg_metrics']['rmse'],
-                            'r2': results['avg_metrics']['r2'],
-                            'mae': results['avg_metrics']['mae'],
-                            'std_mse': 'N/A',
-                            'std_rmse': 'N/A',
-                            'std_r2': 'N/A',
-                            'std_mae': 'N/A'
-                        })
+
+                    # Use new fold-level statistics format
+                    summary_data.append({
+                        'target': target_name,
+                        'phase': 'embeddings',
+                        'model_type': model_type,
+                        'model_category': 'ML',
+                        'mse': results['avg_metrics']['mse'],
+                        'rmse': results['avg_metrics']['rmse'],
+                        'r2': results['avg_metrics']['r2'],
+                        'mae': results['avg_metrics']['mae'],
+                        # Use new fold-level statistics keys
+                        'fold_r2_std': results['avg_metrics'].get('fold_r2_std', 'N/A'),
+                        'fold_mse_std': results['avg_metrics'].get('fold_mse_std', 'N/A')
+                    })
         
         summary_df = pd.DataFrame(summary_data)
         summary_df.to_csv(f"{self.save_dir}/results_summary.csv", index=False)
