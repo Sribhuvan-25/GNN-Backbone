@@ -252,39 +252,46 @@ class DomainExpertCasesPipeline(MixedEmbeddingPipeline):
         self._log_initialization_info()
     
     def _get_protected_nodes_for_case(self, case_type):
-        """Define protected nodes (families) that should never be removed during pruning for each domain expert case."""
+        """
+        Define protected nodes (GENUS-level) that should never be removed during pruning.
+
+        CRITICAL: Returns GENUS names (not family names) to match graph_mode='genus'.
+        This is a fallback method - primary protection comes from anchored_features in case_implementations.py
+        """
         if case_type == 'case1' or case_type == 'case1_h2_hydrogenotrophic_only':
-            # Key hydrogenotrophic methanogen families that must be preserved
+            # Key hydrogenotrophic methanogen GENERA that must be preserved
             return [
-                'Methanoregulaceae',      # d__Archaea;p__Halobacterota;c__Methanomicrobia;o__Methanomicrobiales;f__Methanoregulaceae;g__Methanolinea
-                'Methanobacteriaceae',    # d__Archaea;p__Euryarchaeota;c__Methanobacteria;o__Methanobacteriales;f__Methanobacteriaceae;g__Methanobacterium
-                'Methanospirillaceae'     # d__Archaea;p__Halobacterota;c__Methanomicrobia;o__Methanomicrobiales;f__Methanospirillaceae;g__Methanospirillum
+                'Methanolinea',           # d__Archaea;p__Halobacterota;c__Methanomicrobia;o__Methanomicrobiales;f__Methanoregulaceae;g__Methanolinea
+                'Methanobacterium',       # d__Archaea;p__Euryarchaeota;c__Methanobacteria;o__Methanobacteriales;f__Methanobacteriaceae;g__Methanobacterium
+                'Methanospirillum'        # d__Archaea;p__Halobacterota;c__Methanomicrobia;o__Methanomicrobiales;f__Methanospirillaceae;g__Methanospirillum
             ]
         elif case_type == 'case2' or case_type == 'case2_ace_acetoclastic_only':
-            # Key acetoclastic methanogen families that must be preserved  
+            # Key acetoclastic methanogen GENERA that must be preserved
             return [
-                'Methanosaetaceae'        # d__Archaea;p__Halobacterota;c__Methanosarcinia;o__Methanosarciniales;f__Methanosaetaceae;g__Methanosaeta
+                'Methanosaeta'            # d__Archaea;p__Halobacterota;c__Methanosarcinia;o__Methanosarciniales;f__Methanosaetaceae;g__Methanosaeta
             ]
         elif case_type == 'case3' or case_type == 'case3_mixed_pathway':
-            # Complete families for mixed pathways (hydrogenotrophic + acetoclastic + syntrophic)
+            # Complete GENERA for mixed pathways (hydrogenotrophic + acetoclastic + syntrophic)
             return [
                 # Hydrogenotrophic methanogens
-                'Methanoregulaceae',      # d__Archaea;p__Halobacterota;c__Methanomicrobia;o__Methanomicrobiales;f__Methanoregulaceae;g__Methanolinea
-                'Methanobacteriaceae',    # d__Archaea;p__Euryarchaeota;c__Methanobacteria;o__Methanobacteriales;f__Methanobacteriaceae;g__Methanobacterium
-                'Methanospirillaceae',    # d__Archaea;p__Halobacterota;c__Methanomicrobia;o__Methanomicrobiales;f__Methanospirillaceae;g__Methanospirillum
+                'Methanolinea',           # d__Archaea;p__Halobacterota;c__Methanomicrobia;o__Methanomicrobiales;f__Methanoregulaceae;g__Methanolinea
+                'Methanobacterium',       # d__Archaea;p__Euryarchaeota;c__Methanobacteria;o__Methanobacteriales;f__Methanobacteriaceae;g__Methanobacterium
+                'Methanospirillum',       # d__Archaea;p__Halobacterota;c__Methanomicrobia;o__Methanomicrobiales;f__Methanospirillaceae;g__Methanospirillum
                 # Acetoclastic methanogens
-                'Methanosaetaceae',       # d__Archaea;p__Halobacterota;c__Methanosarcinia;o__Methanosarciniales;f__Methanosaetaceae;g__Methanosaeta
+                'Methanosaeta',           # d__Archaea;p__Halobacterota;c__Methanosarcinia;o__Methanosarciniales;f__Methanosaetaceae;g__Methanosaeta
                 # Syntrophic bacteria
-                'Smithellaceae',          # d__Bacteria;p__Desulfobacterota;c__Syntrophia;o__Syntrophales;f__Smithellaceae;g__Smithella
-                'Syntrophorhabdaceae',    # d__Bacteria;p__Desulfobacterota;c__Syntrophorhabdia;o__Syntrophorhabdales;f__Syntrophorhabdaceae;g__Syntrophorhabdus
-                'Syntrophobacteraceae',   # d__Bacteria;p__Desulfobacterota;c__Syntrophobacteria;o__Syntrophobacterales;f__Syntrophobacteraceae;g__Syntrophobacter
-                'Synergistaceae',         # d__Bacteria;p__Synergistota;c__Synergistia;o__Synergistales;f__Synergistaceae;g__Syner-01
+                'Smithella',              # d__Bacteria;p__Desulfobacterota;c__Syntrophia;o__Syntrophales;f__Smithellaceae;g__Smithella
+                'Syntrophorhabdus',       # d__Bacteria;p__Desulfobacterota;c__Syntrophorhabdia;o__Syntrophorhabdales;f__Syntrophorhabdaceae;g__Syntrophorhabdus
+                'Syntrophobacter',        # d__Bacteria;p__Desulfobacterota;c__Syntrophobacteria;o__Syntrophobacterales;f__Syntrophobacteraceae;g__Syntrophobacter
+                'Syner-01',               # d__Bacteria;p__Synergistota;c__Synergistia;o__Synergistales;f__Synergistaceae;g__Syner-01
                 'uncultured',             # d__Bacteria;p__Desulfobacterota;c__Syntrophia;o__Syntrophales;f__uncultured;g__uncultured
-                'Rikenellaceae',          # d__Bacteria;p__Bacteroidota;c__Bacteroidia;o__Bacteroidales;f__Rikenellaceae;g__DMER64
-                'Syntrophomonadaceae',    # d__Bacteria;p__Firmicutes;c__Syntrophomonadia;o__Syntrophomonadales;f__Syntrophomonadaceae;g__Syntrophomonas
-                'Syntrophaceae',          # d__Bacteria;p__Desulfobacterota;c__Syntrophia;o__Syntrophales;f__Syntrophaceae;g__Syntrophus
-                'Geobacteraceae',         # d__Bacteria;p__Desulfobacterota;c__Desulfuromonadia;o__Geobacterales;f__Geobacteraceae;__
-                'Desulfotomaculales'      # d__Bacteria;p__Firmicutes;c__Desulfotomaculia;o__Desulfotomaculales;f__Desulfotomaculales;g__Pelotomaculum
+                'DMER64',                 # d__Bacteria;p__Bacteroidota;c__Bacteroidia;o__Bacteroidales;f__Rikenellaceae;g__DMER64
+                'Thermovirga',            # d__Bacteria;p__Synergistota;c__Synergistia;o__Synergistales;f__Synergistaceae;g__Thermovirga
+                'Syntrophomonas',         # d__Bacteria;p__Firmicutes;c__Syntrophomonadia;o__Syntrophomonadales;f__Syntrophomonadaceae;g__Syntrophomonas
+                'Syntrophus',             # d__Bacteria;p__Desulfobacterota;c__Syntrophia;o__Syntrophales;f__Syntrophaceae;g__Syntrophus
+                'JGI-0000079-D21',        # d__Bacteria;p__Synergistota;c__Synergistia;o__Synergistales;f__Synergistaceae;g__JGI-0000079-D21
+                'Geobacter',              # d__Bacteria;p__Desulfobacterota;c__Desulfuromonadia;o__Geobacterales;f__Geobacteraceae;g__Geobacter
+                'Pelotomaculum'           # d__Bacteria;p__Firmicutes;c__Desulfotomaculia;o__Desulfotomaculales;f__Desulfotomaculales;g__Pelotomaculum
             ]
         else:
             # No protected nodes for other cases

@@ -451,6 +451,18 @@ def create_side_by_side_comparison(knn_graph_data, explainer_graph_data, node_fe
         )
         print(f"Panel 1 (k-NN fallback): {len(original_G.nodes())} nodes, {len(original_G.edges())} edges (isolated nodes removed)")
 
+    # CRITICAL FIX: Add back any protected nodes that were filtered out as isolated
+    if protected_nodes:
+        nodes_added = 0
+        for idx, node_name in enumerate(original_node_names):
+            if node_name in protected_nodes and idx not in original_G:
+                original_G.add_node(idx, name=node_name)
+                print(f"  ✅ Panel 1: Added isolated protected node '{node_name}' (idx={idx})")
+                nodes_added += 1
+        if nodes_added > 0:
+            print(f"  ✅ Panel 1: Total isolated protected nodes added: {nodes_added}")
+            print(f"  Panel 1 UPDATED: {len(original_G.nodes())} nodes total (protected nodes preserved)")
+
     # Use EXTREMELY large scale for maximum spacing in first panel
     pos1 = get_optimal_layout(original_G, seed=42, scale=80.0)  # MASSIVE scale for spacing
 
@@ -518,6 +530,19 @@ def create_side_by_side_comparison(knn_graph_data, explainer_graph_data, node_fe
         include_isolated_nodes=False  # Filter isolated nodes for cleaner visualization
     )
     print(f"Panel 2 (k-NN): {len(knn_G.nodes())} nodes, {len(knn_G.edges())} edges (isolated nodes removed)")
+
+    # CRITICAL FIX: Add back any protected nodes that were filtered out as isolated
+    if protected_nodes:
+        nodes_added = 0
+        for idx, node_name in enumerate(original_node_names):
+            if node_name in protected_nodes and idx not in knn_G:
+                knn_G.add_node(idx, name=node_name)
+                print(f"  ✅ Panel 2: Added isolated protected node '{node_name}' (idx={idx})")
+                nodes_added += 1
+        if nodes_added > 0:
+            print(f"  ✅ Panel 2: Total isolated protected nodes added: {nodes_added}")
+            print(f"  Panel 2 UPDATED: {len(knn_G.nodes())} nodes total (protected nodes preserved)")
+
     # Use EXTREMELY large scale for maximum spacing in second panel
     pos2 = get_optimal_layout(knn_G, seed=42, scale=80.0)  # MASSIVE scale for spacing
 
@@ -586,6 +611,18 @@ def create_side_by_side_comparison(knn_graph_data, explainer_graph_data, node_fe
             print("Warning: No pruned_node_names found, using fallback")
             explainer_node_names = node_features
 
+        # DIAGNOSTIC: Check node counts at each stage
+        print(f"\n🔍 Panel 3 DIAGNOSTIC:")
+        print(f"  Original nodes (Panels 1/2): {len(original_node_names)}")
+        print(f"  After explainer pruning: {len(explainer_node_names)}")
+        if len(explainer_node_names) < len(original_node_names):
+            pruned_nodes = set(original_node_names) - set(explainer_node_names)
+            print(f"  ⚠ Explainer pruned {len(pruned_nodes)} nodes: {pruned_nodes}")
+            if protected_nodes:
+                pruned_protected = pruned_nodes & set(protected_nodes)
+                if pruned_protected:
+                    print(f"  🚨 PROTECTED nodes pruned by explainer: {pruned_protected}")
+
         # Filter isolated nodes from explainer graph for cleaner visualization
         explainer_G = create_networkx_graph_from_edge_data(
             explainer_graph_data['edge_index'],
@@ -594,6 +631,51 @@ def create_side_by_side_comparison(knn_graph_data, explainer_graph_data, node_fe
             include_isolated_nodes=False  # Filter isolated nodes for cleaner visualization
         )
         print(f"Panel 3 (Explainer): {len(explainer_G.nodes())} nodes, {len(explainer_G.edges())} edges (isolated nodes removed)")
+
+        # DIAGNOSTIC: Check which nodes were filtered as isolated
+        if len(explainer_G.nodes()) < len(explainer_node_names):
+            graph_node_names = set([explainer_G.nodes[n]['name'] for n in explainer_G.nodes()])
+            isolated_nodes = set(explainer_node_names) - graph_node_names
+            print(f"  ⚠ {len(isolated_nodes)} isolated nodes filtered: {isolated_nodes}")
+            if protected_nodes:
+                isolated_protected = isolated_nodes & set(protected_nodes)
+                if isolated_protected:
+                    print(f"  🚨 PROTECTED nodes filtered as isolated: {isolated_protected}")
+
+        # CRITICAL FIX: Add back any protected nodes that were filtered out
+        # IMPORTANT: Must check against ORIGINAL node list, not pruned list!
+        # If a protected node was pruned, it won't be in explainer_node_names,
+        # so we need to check the original list from Panels 1/2
+        if protected_nodes and original_node_names:
+            print(f"\n🔍 Checking {len(protected_nodes)} protected nodes for restoration:")
+            print(f"   Protected nodes: {sorted(protected_nodes)}")
+            nodes_added = 0
+            # Create a mapping from node names to indices in the ORIGINAL graph
+            explainer_nodes_set = set(explainer_node_names)
+
+            for orig_idx, node_name in enumerate(original_node_names):
+                if node_name in protected_nodes:
+                    # This is a protected node - check if it's missing from explainer graph
+                    if node_name not in explainer_nodes_set:
+                        # Protected node was pruned! Add it back
+                        # Need to map to explainer graph indices
+                        new_idx = len(explainer_G.nodes())  # Assign next available index
+                        explainer_G.add_node(new_idx, name=node_name)
+                        print(f"  ✅ Panel 3: RESTORED pruned protected node '{node_name}' (orig_idx={orig_idx}, new_idx={new_idx})")
+                        nodes_added += 1
+                    elif node_name in explainer_nodes_set:
+                        # Protected node is in pruned list, but check if it's isolated
+                        explainer_idx = explainer_node_names.index(node_name)
+                        if explainer_idx not in explainer_G:
+                            explainer_G.add_node(explainer_idx, name=node_name)
+                            print(f"  ✅ Panel 3: Added isolated protected node '{node_name}' (idx={explainer_idx})")
+                            nodes_added += 1
+
+            if nodes_added > 0:
+                print(f"  ✅ Panel 3: Total protected nodes restored/added: {nodes_added}")
+                print(f"  Panel 3 UPDATED: {len(explainer_G.nodes())} nodes total (protected nodes preserved)")
+            else:
+                print(f"  ✓ Panel 3: All {len([n for n in original_node_names if n in protected_nodes])} protected nodes already present")
 
         # Get layout - ensure it doesn't use circular layout, use EXTREMELY large scale for spacing
         pos3 = get_optimal_layout(explainer_G, seed=42, scale=80.0)  # MASSIVE scale for spacing

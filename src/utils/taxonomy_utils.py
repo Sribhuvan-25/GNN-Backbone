@@ -132,16 +132,31 @@ def apply_family_filtering(df_fam_rel, filter_mode='relaxed'):
 def extract_genus_from_taxonomy(taxonomy_string):
     """
     Extract genus name from full taxonomy string.
+    Falls back to family name if genus is missing or malformed.
 
     Args:
         taxonomy_string: Full taxonomy string with taxonomic levels
 
     Returns:
-        str: Genus name or None if not found
+        str: Genus name, family name (fallback), or None if neither found
     """
+    # Try genus first
     if 'g__' in taxonomy_string:
         genus_part = taxonomy_string.split('g__')[1].split(';')[0].split('s__')[0]
-        return genus_part.strip()
+        genus_name = genus_part.strip()
+        # Check if genus is not empty (handles cases like "g__" or "g__;")
+        if genus_name:
+            return genus_name
+
+    # Fallback: if no genus or empty genus, use family name
+    if 'f__' in taxonomy_string:
+        family_part = taxonomy_string.split('f__')[1].split(';')[0]
+        family_name = family_part.strip()
+        if family_name:
+            print(f"WARNING: No genus found in '{taxonomy_string[-80:]}', using family '{family_name}' as fallback")
+            return family_name
+
+    print(f"ERROR: No genus or family found in '{taxonomy_string}'")
     return None
 
 
