@@ -27,17 +27,17 @@ except ImportError:
     LIGHTGBM_AVAILABLE = False
     print("Warning: LightGBM not available. Install with: pip install lightgbm")
 
-# Domain Expert Case Feature Definitions
+# Domain Expert Case Genus-Level Feature Definitions
 CASE_FEATURES = {
-    'case1': [  # Hydrogenotrophic features only
+    'case1': [  # Hydrogenotrophic genera only
         "d__Archaea;p__Halobacterota;c__Methanomicrobia;o__Methanomicrobiales;f__Methanoregulaceae;g__Methanolinea",
-        "d__Archaea;p__Euryarchaeota;c__Methanobacteria;o__Methanobacteriales;f__Methanobacteriaceae;g__Methanobacterium", 
+        "d__Archaea;p__Euryarchaeota;c__Methanobacteria;o__Methanobacteriales;f__Methanobacteriaceae;g__Methanobacterium",
         "d__Archaea;p__Halobacterota;c__Methanomicrobia;o__Methanomicrobiales;f__Methanospirillaceae;g__Methanospirillum"
     ],
-    'case2': [  # Acetoclastic features only
+    'case2': [  # Acetoclastic genera only
         "d__Archaea;p__Halobacterota;c__Methanosarcinia;o__Methanosarciniales;f__Methanosaetaceae;g__Methanosaeta"
     ],
-    'case3': [  # All feature groups (acetoclastic + hydrogenotrophic + syntrophic)
+    'case3': [  # All genus groups (acetoclastic + hydrogenotrophic + syntrophic)
         "d__Archaea;p__Halobacterota;c__Methanosarcinia;o__Methanosarciniales;f__Methanosaetaceae;g__Methanosaeta",
         "d__Archaea;p__Halobacterota;c__Methanomicrobia;o__Methanomicrobiales;f__Methanoregulaceae;g__Methanolinea",
         "d__Archaea;p__Euryarchaeota;c__Methanobacteria;o__Methanobacteriales;f__Methanobacteriaceae;g__Methanobacterium",
@@ -99,7 +99,7 @@ def create_performance_plot(all_actual, all_predictions, target, n_features, fin
     # Add metrics to title
     metrics = f'R² = {final_r2:.4f}\nMSE = {final_mse:.4f}'
     feature_display = "All" if n_features is None else str(n_features)
-    title = f'{target} Prediction ({model_type})\nAll Features' if n_features is None else f'{target} Prediction ({model_type})\nTop {feature_display} Features'
+    title = f'{target} Prediction ({model_type})\nAll Genera' if n_features is None else f'{target} Prediction ({model_type})\nTop {feature_display} Genera'
     plt.title(f'{title}\n{metrics}')
     
     plt.legend()
@@ -108,27 +108,27 @@ def create_performance_plot(all_actual, all_predictions, target, n_features, fin
     
     # Save plot
     feature_suffix = "all" if n_features is None else str(n_features)
-    filename = f'results_rfe_simple_cv/{case_type}/plots/results_{target}_{feature_suffix}_features_{model_type}.png'
+    filename = f'results_rfe_simple_cv/{case_type}/plots/results_{target}_{feature_suffix}_genera_{model_type}.png'
     plt.savefig(filename, dpi=300, bbox_inches='tight')
     plt.close()
     print(f"Saved plot: {filename}")
 
 def select_features_with_rfe(X_candidate, y, n_features=None, model_type='extratrees', fixed_features=None):
-    """Perform RFE feature selection on candidate features, optionally combining with fixed features"""
+    """Perform RFE genus selection on candidate genera, optionally combining with fixed genera"""
     if n_features is None:
-        # If no RFE selection needed, return all candidate features + fixed features
+        # If no RFE selection needed, return all candidate genera + fixed genera
         all_features = list(X_candidate.columns)
         if fixed_features:
             all_features.extend(fixed_features)
         return all_features
-    
-    # If we want more features than available candidates, use all candidates
+
+    # If we want more genera than available candidates, use all candidates
     if n_features >= len(X_candidate.columns):
-        print(f"        RFE Debug: Requested {n_features} features but only {len(X_candidate.columns)} candidates available")
-        print(f"        RFE Debug: Using all {len(X_candidate.columns)} candidate features")
+        print(f"        RFE Debug: Requested {n_features} genera but only {len(X_candidate.columns)} candidates available")
+        print(f"        RFE Debug: Using all {len(X_candidate.columns)} candidate genera")
         selected_candidate_features = X_candidate.columns.tolist()
     else:
-        print(f"        RFE Debug: Starting with {len(X_candidate.columns)} candidate features, selecting {n_features}")
+        print(f"        RFE Debug: Starting with {len(X_candidate.columns)} candidate genera, selecting {n_features}")
         start_time = time.time()
             
         # Create estimator based on model type
@@ -156,32 +156,32 @@ def select_features_with_rfe(X_candidate, y, n_features=None, model_type='extrat
         print(f"        RFE Debug: Fitting RFE with {type(estimator).__name__}...")
         rfe.fit(X_candidate, y)
         
-        # Get selected features
+        # Get selected genera
         selected_candidate_features = X_candidate.columns[rfe.support_].tolist()
-        
+
         # Debug output
-        print(f"        RFE Debug: Selected {len(selected_candidate_features)} candidate features in {time.time() - start_time:.2f}s")
-        print(f"        RFE Debug: First 5 selected candidate features: {selected_candidate_features[:5]}")
-    
-    # Combine fixed features with RFE-selected features
+        print(f"        RFE Debug: Selected {len(selected_candidate_features)} candidate genera in {time.time() - start_time:.2f}s")
+        print(f"        RFE Debug: First 5 selected candidate genera: {selected_candidate_features[:5]}")
+
+    # Combine fixed genera with RFE-selected genera
     final_features = []
     if fixed_features:
         final_features.extend(fixed_features)
-        print(f"        RFE Debug: Added {len(fixed_features)} fixed features")
+        print(f"        RFE Debug: Added {len(fixed_features)} fixed genera")
     final_features.extend(selected_candidate_features)
-    
-    print(f"        RFE Debug: Final feature set: {len(fixed_features) if fixed_features else 0} fixed + {len(selected_candidate_features)} RFE-selected = {len(final_features)} total")
+
+    print(f"        RFE Debug: Final genus set: {len(fixed_features) if fixed_features else 0} fixed + {len(selected_candidate_features)} RFE-selected = {len(final_features)} total")
     
     return final_features
 
 def run_model_simple_cv(data_path, target="ACE-km", model_type='extratrees', case_type='case3', n_features=50):
     """
-    Run model with simple 5-fold CV for feature selection with domain expert cases
-    
+    Run model with simple 5-fold CV for genus-level feature selection with domain expert cases
+
     Parameters:
     ----------
     data_path : str
-        Path to the input data file
+        Path to the input data file with genus-level abundance data
     target : str
         Target variable to predict (must exist in the data)
     model_type : str
@@ -189,7 +189,7 @@ def run_model_simple_cv(data_path, target="ACE-km", model_type='extratrees', cas
     case_type : str
         Domain expert case type ('case1', 'case2', 'case3')
     n_features : int
-        Number of additional features to select via RFE (default: 50)
+        Number of additional genera to select via RFE (default: 50)
     """
     # Create directories if they don't exist
     create_directories()
@@ -222,55 +222,55 @@ def run_model_simple_cv(data_path, target="ACE-km", model_type='extratrees', cas
     # Get features (all columns except target columns)
     all_features = [col for col in df.columns if col not in target_columns]
     
-    # Apply case-specific feature filtering with hybrid approach
+    # Apply case-specific genus-level feature filtering with hybrid approach
     if case_type in CASE_FEATURES:
         case_features = CASE_FEATURES[case_type]
-        # Find intersection between case features and available features
+        # Find intersection between case genera and available genera
         available_case_features = [f for f in case_features if f in df.columns]
-        
+
         if not available_case_features:
-            print(f"ERROR: No case features found in dataset for {case_type}")
-            print(f"Required features: {case_features[:3]}...")  # Show first 3
-            print(f"Available features: {list(df.columns)[:10]}...")  # Show first 10
+            print(f"ERROR: No case genera found in dataset for {case_type}")
+            print(f"Required genera: {case_features[:3]}...")  # Show first 3
+            print(f"Available genera: {list(df.columns)[:10]}...")  # Show first 10
             return None
+
+        print(f"\n{case_type.upper()} HYBRID GENUS-LEVEL FEATURE SELECTION:")
+        print(f"Case genera required: {len(case_features)}")
+        print(f"Case genera available: {len(available_case_features)}")
+        print(f"Available case genera: {available_case_features}")
         
-        print(f"\n{case_type.upper()} HYBRID FEATURE SELECTION:")
-        print(f"Case features required: {len(case_features)}")
-        print(f"Case features available: {len(available_case_features)}")
-        print(f"Available case features: {available_case_features}")
-        
-        # HYBRID APPROACH: Fixed case features + RFE on remaining features
-        # Step 1: Get remaining features (excluding case features)
+        # HYBRID APPROACH: Fixed case genera + RFE on remaining genera
+        # Step 1: Get remaining genera (excluding case genera)
         remaining_features = [f for f in all_features if f not in available_case_features]
-        print(f"Remaining features for RFE: {len(remaining_features)}")
-        
-        # Step 2: Create separate datasets for fixed and candidate features
-        X_fixed = df[available_case_features]  # Always included features
-        X_candidate = df[remaining_features]   # Features for RFE selection
-        
-        # Store the fixed features for later use
+        print(f"Remaining genera for RFE: {len(remaining_features)}")
+
+        # Step 2: Create separate datasets for fixed and candidate genera
+        X_fixed = df[available_case_features]  # Always included genera
+        X_candidate = df[remaining_features]   # Genera for RFE selection
+
+        # Store the fixed genera for later use
         fixed_features = available_case_features
-        
-        print(f"Fixed features (always included): {len(fixed_features)}")
-        print(f"Candidate features (for RFE): {len(remaining_features)}")
+
+        print(f"Fixed genera (always included): {len(fixed_features)}")
+        print(f"Candidate genera (for RFE): {len(remaining_features)}")
         
     else:
-        # Use all features if case_type is not recognized (no fixed features)
+        # Use all genera if case_type is not recognized (no fixed genera)
         X_fixed = None
         X_candidate = df[all_features]
         fixed_features = None
-        print(f"\nNo case filtering - using all {len(all_features)} features for RFE")
+        print(f"\nNo case filtering - using all {len(all_features)} genera for RFE")
     
     y = df[target]
     
     print(f"Final dataset shape: {df.shape}")
-    print(f"Fixed features: {len(fixed_features) if fixed_features else 0}")
-    print(f"Candidate features: {len(X_candidate.columns)}")
+    print(f"Fixed genera: {len(fixed_features) if fixed_features else 0}")
+    print(f"Candidate genera: {len(X_candidate.columns)}")
     print(f"Target: {target}")
     print(f"Target range: {y.min():.4f} to {y.max():.4f}")
     print(f"Model type: {model_type}")
     print(f"Case type: {case_type}")
-    print(f"Additional features to select: {n_features}")
+    print(f"Additional genera to select: {n_features}")
     
     # Use simple 5-fold CV
     kf = KFold(n_splits=5, shuffle=True, random_state=42)
@@ -291,25 +291,25 @@ def run_model_simple_cv(data_path, target="ACE-km", model_type='extratrees', cas
         print(f"  Train samples: {len(train_idx)}, Test samples: {len(test_idx)}")
         
         y_train, y_test = y.iloc[train_idx], y.iloc[test_idx]
-        
-        # Perform hybrid feature selection: fixed features + RFE on candidate features
-        print(f"  Performing hybrid feature selection...")
-        
+
+        # Perform hybrid genus selection: fixed genera + RFE on candidate genera
+        print(f"  Performing hybrid genus selection...")
+
         if n_features is None:
-            # Use all features
+            # Use all genera
             selected_features = list(X_candidate.columns) if 'X_candidate' in locals() else []
             if fixed_features:
                 selected_features.extend(fixed_features)
-            print(f"  Using all {len(selected_features)} features...")
+            print(f"  Using all {len(selected_features)} genera...")
         else:
-            # Use hybrid selection: fixed + RFE on candidates
+            # Use hybrid selection: fixed genera + RFE on candidate genera
             if 'X_candidate' in locals() and len(X_candidate.columns) > 0:
                 X_candidate_train = X_candidate.iloc[train_idx]
                 selected_candidate_features = select_features_with_rfe(X_candidate_train, y_train, n_features, model_type, None)
             else:
                 selected_candidate_features = []
-            
-            # Combine fixed and RFE-selected features
+
+            # Combine fixed and RFE-selected genera
             selected_features = []
             if fixed_features:
                 selected_features.extend(fixed_features)
@@ -432,16 +432,16 @@ def run_model_simple_cv(data_path, target="ACE-km", model_type='extratrees', cas
     results_df.to_csv(results_path, index=False)
     print(f"Saved results: {results_path}")
     
-    # Save selected features summary
+    # Save selected genera summary
     feature_counts = Counter(all_selected_features)
     feature_df = pd.DataFrame([
-        {'Feature': feature, 'Frequency': count} 
+        {'Genus': feature, 'Frequency': count}
         for feature, count in feature_counts.items()
     ]).sort_values('Frequency', ascending=False)
-    
-    features_path = f'results_rfe_simple_cv/{case_type}/selected_features/{target}_{model_type}_feature_frequency.csv'
+
+    features_path = f'results_rfe_simple_cv/{case_type}/selected_features/{target}_{model_type}_genus_frequency.csv'
     feature_df.to_csv(features_path, index=False)
-    print(f"Saved feature frequency: {features_path}")
+    print(f"Saved genus frequency: {features_path}")
     
     # Save metrics in mean ± std format
     save_metrics_summary(avg_r2, std_r2, avg_mse, std_mse, target, model_type, case_type)
@@ -548,13 +548,13 @@ if __name__ == "__main__":
     
     # Focus on the two main targets: ACE-km and H2-km
     main_targets = ['ACE-km', 'H2-km']
-    
-    # Number of additional features to select via RFE
+
+    # Number of additional genera to select via RFE
     n_features_options = [50, 100, 200]
-    
+
     print(f"Available model types ({len(model_types)}): {model_types}")
-    print(f"Available feature counts: {n_features_options}")
-    print(f"Total experiments to run: {len(cases)} cases × {len(main_targets)} targets × {len(model_types)} models × {len(n_features_options)} feature counts = {len(cases) * len(main_targets) * len(model_types) * len(n_features_options)}")
+    print(f"Available genus counts: {n_features_options}")
+    print(f"Total experiments to run: {len(cases)} cases × {len(main_targets)} targets × {len(model_types)} models × {len(n_features_options)} genus counts = {len(cases) * len(main_targets) * len(model_types) * len(n_features_options)}")
     
     # Dictionary to store results
     all_results = {}
@@ -565,37 +565,37 @@ if __name__ == "__main__":
             for model_type in model_types:
                 for n_features in n_features_options:
                     print(f"\n{'='*80}")
-                    print(f"Running SIMPLE CV for {case_type.upper()} - {target} with {model_type.upper()} ({n_features} features)")
+                    print(f"Running SIMPLE CV for {case_type.upper()} - {target} with {model_type.upper()} ({n_features} genera)")
                     print(f"{'='*80}")
-                    
+
                     try:
                         results = run_model_simple_cv(
-                            data_path, 
-                            target=target, 
+                            data_path,
+                            target=target,
                             model_type=model_type,
                             case_type=case_type,
                             n_features=n_features
                         )
-                        
+
                         if results is not None:
-                            config_name = f"{case_type}_{target}_{model_type}_{n_features}features"
+                            config_name = f"{case_type}_{target}_{model_type}_{n_features}genera"
                             all_results[config_name] = {
                                 'Case': case_type,
                                 'Target': target,
                                 'Model': model_type,
-                                'N_Features': n_features,
+                                'N_Genera': n_features,
                                 'R2': results['avg_r2'],
                                 'MSE': results['avg_mse'],
                                 'Std_R2': results['std_r2'],
                                 'Std_MSE': results['std_mse']
                             }
-                            
-                            print(f"Completed {case_type} - {target} with {model_type} ({n_features} features)")
+
+                            print(f"Completed {case_type} - {target} with {model_type} ({n_features} genera)")
                         else:
-                            print(f"Skipping {case_type} - {target} with {model_type} ({n_features} features) due to errors")
-                        
+                            print(f"Skipping {case_type} - {target} with {model_type} ({n_features} genera) due to errors")
+
                     except Exception as e:
-                        print(f"Error running {case_type} - {target} with {model_type} ({n_features} features): {str(e)}")
+                        print(f"Error running {case_type} - {target} with {model_type} ({n_features} genera): {str(e)}")
                         continue
     
     # Save overall results
@@ -630,7 +630,7 @@ if __name__ == "__main__":
                         best_config = target_case_results.loc[target_case_results['R2'].idxmax()]
                         print(f"  {target}:")
                         print(f"    Best Model: {best_config['Model']}")
-                        print(f"    Best N_Features: {best_config['N_Features']}")
+                        print(f"    Best N_Genera: {best_config['N_Genera']}")
                         print(f"    Best R²: {best_config['R2']:.4f} ± {best_config['Std_R2']:.4f}")
                         print(f"    MSE: {best_config['MSE']:.4f} ± {best_config['Std_MSE']:.4f}")
                         print(f"    Mean ± Std Format: R² = {best_config['R2']:.4f} ± {best_config['Std_R2']:.4f}, MSE = {best_config['MSE']:.4f} ± {best_config['Std_MSE']:.4f}")
@@ -648,7 +648,7 @@ if __name__ == "__main__":
                 print(f"\n{target} (Overall Best):")
                 print(f"Best Case: {best_config['Case']}")
                 print(f"Best Model: {best_config['Model']}")
-                print(f"Best N_Features: {best_config['N_Features']}")
+                print(f"Best N_Genera: {best_config['N_Genera']}")
                 print(f"Best R²: {best_config['R2']:.4f} ± {best_config['Std_R2']:.4f}")
                 print(f"MSE: {best_config['MSE']:.4f} ± {best_config['Std_MSE']:.4f}")
                 print(f"Mean ± Std Format: R² = {best_config['R2']:.4f} ± {best_config['Std_R2']:.4f}, MSE = {best_config['MSE']:.4f} ± {best_config['Std_MSE']:.4f}")
