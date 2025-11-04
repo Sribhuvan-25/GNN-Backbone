@@ -51,7 +51,8 @@ class AnchoredMicrobialGNNDataset(MicrobialGNNDataset):
     def __init__(self, data_path, anchored_features=None, case_type=None,
                  k_neighbors=5, mantel_threshold=0.05, use_fast_correlation=False,
                  graph_mode='genus', family_filter_mode='relaxed',
-                 graph_construction_method='original', save_dir=None):
+                 graph_construction_method='original', save_dir=None,
+                 lrp_feature_selection=False, n_lrp_features=100, target_for_lrp='first'):
         """
         Initialize the anchored microbial GNN dataset.
 
@@ -78,7 +79,10 @@ class AnchoredMicrobialGNNDataset(MicrobialGNNDataset):
             use_fast_correlation=use_fast_correlation,
             graph_mode=graph_mode,
             family_filter_mode=family_filter_mode,
-            graph_construction_method=graph_construction_method
+            graph_construction_method=graph_construction_method,
+            lrp_feature_selection=lrp_feature_selection,
+            n_lrp_features=n_lrp_features,
+            target_for_lrp=target_for_lrp
         )
     
     def _process_families(self):

@@ -33,16 +33,27 @@ def create_explainer_sparsified_graph(pipeline, model, target_idx=0, importance_
     print(f"Current number of nodes: {len(pipeline.dataset.node_feature_names)}")
     print(f"Original importance threshold: {importance_threshold}")
     
-    # Get original node count (before any pruning)
-    original_node_count = pipeline.dataset.original_node_count if hasattr(pipeline.dataset, 'original_node_count') and pipeline.dataset.original_node_count is not None else len(pipeline.dataset.node_feature_names)
-    print(f"Using original node count for explainer: {original_node_count}")
+    # FIX: Use CURRENT node count (after LRP selection) instead of original_node_count
+    # When LRP is enabled, the graph has already been pruned to selected features
+    current_node_count = len(pipeline.dataset.node_feature_names)
+    
+    # Check if original_node_count exists and if it's different (meaning LRP was used)
+    if hasattr(pipeline.dataset, 'original_node_count') and pipeline.dataset.original_node_count:
+        original_node_count = pipeline.dataset.original_node_count
+        if original_node_count != current_node_count:
+            print(f"Using CURRENT node count for explainer: {current_node_count} (original was {original_node_count}, LRP selection applied)")
+        else:
+            print(f"Using current node count for explainer: {current_node_count}")
+    else:
+        print(f"Using current node count for explainer: {current_node_count}")
+        original_node_count = current_node_count
     
     # Initialize explainer
     explainer = GNNExplainerRegression(model, device)
     
-    # Create a combined edge importance matrix from multiple samples using original size
+    # Create a combined edge importance matrix from multiple samples using CURRENT size
     num_explain = min(10, len(pipeline.dataset.data_list))  # Use up to 10 samples
-    combined_edge_importance = torch.zeros((original_node_count, original_node_count), device=device)
+    combined_edge_importance = torch.zeros((current_node_count, current_node_count), device=device)
     
     importance_matrices = []
     num_processed = 0
@@ -64,14 +75,14 @@ def create_explainer_sparsified_graph(pipeline, model, target_idx=0, importance_
         if edge_importance_matrix.size() != combined_edge_importance.size():
             print(f"WARNING: Size mismatch detected - edge_importance_matrix: {edge_importance_matrix.size()}, combined: {combined_edge_importance.size()}")
             
-            # If the edge importance matrix is smaller, we might be working with pruned data
-            # In this case, skip this sample or pad it
+            # If the edge importance matrix is smaller, resize the combined matrix to match
+            # This happens when LRP feature selection was used (current graph is smaller than original)
             if edge_importance_matrix.size(0) < combined_edge_importance.size(0):
-                print("Edge importance matrix is smaller - likely working with pruned data. Skipping this sample.")
-                continue
+                print(f"Resizing combined matrix from {combined_edge_importance.size()} to {edge_importance_matrix.size()} to match current graph")
+                combined_edge_importance = torch.zeros_like(edge_importance_matrix, device=device)
+                num_processed = 0  # Reset counter since we're starting over
             elif edge_importance_matrix.size(0) > combined_edge_importance.size(0):
-                print("Combined matrix is smaller - resizing combined matrix to match")
-                # Resize the combined matrix to match  
+                print("Edge importance matrix is larger - resizing combined matrix to match")
                 combined_edge_importance = torch.zeros_like(edge_importance_matrix, device=device)
                 num_processed = 0  # Reset counter since we're starting over
         
@@ -209,11 +220,29 @@ def create_edge_pruned_graph_pipeline(pipeline, explainer, combined_edge_importa
     
     # Create sparsified adjacency matrix by thresholding
     adj_matrix = combined_edge_importance.clone()
+    
+    # DIAGNOSTIC: Print edge importance statistics before thresholding
+    original_edge_count = len(pipeline.dataset.data_list[0].edge_index[0]) // 2
+    print(f"\n🔍 Edge Pruning Diagnostics:")
+    print(f"  Original graph edges: {original_edge_count}")
+    print(f"  Combined edge importance matrix size: {adj_matrix.shape}")
+    print(f"  Non-zero importance values: {len(non_zero_importance)}")
+    if len(non_zero_importance) > 0:
+        print(f"  Importance range: [{non_zero_importance.min():.6f}, {non_zero_importance.max():.6f}]")
+        print(f"  Threshold value: {threshold_value:.6f}")
+    
     adj_matrix[adj_matrix < threshold_value] = 0
     
     # Count edges after thresholding
     edges_after_threshold = (adj_matrix > 0).sum().item()
-    print(f"Edges after thresholding: {edges_after_threshold}")
+    print(f"  Edges after thresholding: {edges_after_threshold}")
+    
+    # Check if pruning actually happened
+    if edges_after_threshold >= original_edge_count * 0.9:
+        print(f"  ⚠️ WARNING: Threshold kept {edges_after_threshold}/{original_edge_count} edges ({edges_after_threshold/original_edge_count*100:.1f}%)")
+        print(f"     This suggests threshold is too low. Consider lowering importance_threshold.")
+    elif edges_after_threshold < original_edge_count * 0.5:
+        print(f"  ✅ Pruning effective: Reduced from {original_edge_count} to {edges_after_threshold} edges ({edges_after_threshold/original_edge_count*100:.1f}%)")
     
     # If still no edges, try even more aggressive selection
     if edges_after_threshold == 0 and len(non_zero_importance) > 0:
@@ -443,11 +472,29 @@ def create_edge_pruned_graph_pipeline(pipeline, explainer, combined_edge_importa
     
     # Create sparsified adjacency matrix by thresholding
     adj_matrix = combined_edge_importance.clone()
+    
+    # DIAGNOSTIC: Print edge importance statistics before thresholding
+    original_edge_count = len(pipeline.dataset.data_list[0].edge_index[0]) // 2
+    print(f"\n🔍 Edge Pruning Diagnostics:")
+    print(f"  Original graph edges: {original_edge_count}")
+    print(f"  Combined edge importance matrix size: {adj_matrix.shape}")
+    print(f"  Non-zero importance values: {len(non_zero_importance)}")
+    if len(non_zero_importance) > 0:
+        print(f"  Importance range: [{non_zero_importance.min():.6f}, {non_zero_importance.max():.6f}]")
+        print(f"  Threshold value: {threshold_value:.6f}")
+    
     adj_matrix[adj_matrix < threshold_value] = 0
     
     # Count edges after thresholding
     edges_after_threshold = (adj_matrix > 0).sum().item()
-    print(f"Edges after thresholding: {edges_after_threshold}")
+    print(f"  Edges after thresholding: {edges_after_threshold}")
+    
+    # Check if pruning actually happened
+    if edges_after_threshold >= original_edge_count * 0.9:
+        print(f"  ⚠️ WARNING: Threshold kept {edges_after_threshold}/{original_edge_count} edges ({edges_after_threshold/original_edge_count*100:.1f}%)")
+        print(f"     This suggests threshold is too low. Consider lowering importance_threshold.")
+    elif edges_after_threshold < original_edge_count * 0.5:
+        print(f"  ✅ Pruning effective: Reduced from {original_edge_count} to {edges_after_threshold} edges ({edges_after_threshold/original_edge_count*100:.1f}%)")
     
     # If still no edges, try even more aggressive selection
     if edges_after_threshold == 0 and len(non_zero_importance) > 0:

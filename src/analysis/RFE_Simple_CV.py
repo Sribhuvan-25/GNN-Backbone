@@ -544,7 +544,7 @@ if __name__ == "__main__":
     if LIGHTGBM_AVAILABLE:
         model_types.append('lightgbm')
     
-    cases = ['case1', 'case2', 'case3']
+    cases = ['case3']
     
     # Focus on the two main targets: ACE-km and H2-km
     main_targets = ['ACE-km', 'H2-km']

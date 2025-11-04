@@ -21,7 +21,8 @@ class MicrobialGNNDataset:
     """Dataset class for GNN-based regression on microbial data"""
     
     def __init__(self, data_path, k_neighbors=5, mantel_threshold=0.05, use_fast_correlation=True,
-                 graph_mode='genus', family_filter_mode='relaxed', graph_construction_method='original'):
+                 graph_mode='genus', family_filter_mode='relaxed', graph_construction_method='original',
+                 lrp_feature_selection=False, n_lrp_features=100, target_for_lrp='first'):
         """
         Initialize the microbial GNN dataset
 
@@ -33,6 +34,9 @@ class MicrobialGNNDataset:
             graph_mode: Mode for graph construction ('otu', 'family', or 'genus')
             family_filter_mode: Mode for taxonomic filtering ('strict', 'relaxed', or 'permissive')
             graph_construction_method: 'original', 'paper_correlation', or 'hybrid'
+            lrp_feature_selection: If True, use LRP for feature selection before graph construction
+            n_lrp_features: Number of features to select using LRP (20, 40, 80, or 100)
+            target_for_lrp: Target to use for LRP ('first', 'both', or target name)
         """
         self.data_path = data_path
         self.k_neighbors = k_neighbors
@@ -41,6 +45,9 @@ class MicrobialGNNDataset:
         self.graph_mode = graph_mode
         self.family_filter_mode = family_filter_mode
         self.graph_construction_method = graph_construction_method
+        self.lrp_feature_selection = lrp_feature_selection
+        self.n_lrp_features = n_lrp_features
+        self.target_for_lrp = target_for_lrp
         
         # Initialize data containers
         self.feature_df = None
@@ -63,6 +70,10 @@ class MicrobialGNNDataset:
         # Create node features (must be done before graph structure)
         self.df_features, self.feature_matrix = self._create_node_features()
         
+        # NEW STEP: LRP feature selection (if enabled)
+        if self.lrp_feature_selection:
+            self._select_features_with_lrp()
+        
         # Create graph structure (now feature_matrix is available)
         self.full_edge_index, self.full_edge_weight, self.full_edge_type = self._create_graph_structure()
         
@@ -77,8 +88,9 @@ class MicrobialGNNDataset:
 
         # Store original graph data for visualization
         # Store BOTH the full Spearman correlation graph AND the k-NN sparsified graph
+        # When LRP is enabled, both are k-NN graphs (no correlation step)
         self.original_graph_data = {
-            # Full Spearman correlation graph (before k-NN sparsification)
+            # Full graph (correlation graph when LRP disabled, k-NN graph when LRP enabled)
             'original_edge_index': self.full_edge_index.clone(),
             'original_edge_weight': self.full_edge_weight.clone(),
             'original_edge_type': self.full_edge_type.clone(),
@@ -86,7 +98,9 @@ class MicrobialGNNDataset:
             'edge_index': self.edge_index.clone(),
             'edge_weight': self.edge_weight.clone(),
             'edge_type': self.edge_type.clone(),
-            'original_node_names': self.node_feature_names.copy()  # Store original node names
+            'original_node_names': self.node_feature_names.copy(),  # Store original node names
+            'use_lrp_feature_selection': self.lrp_feature_selection,  # NEW: Flag for LRP usage
+            'n_lrp_features': self.n_lrp_features if self.lrp_feature_selection else None  # NEW: Number of LRP features
         }
         
         # Initialize explainer-sparsified graph data as None
@@ -277,6 +291,112 @@ class MicrobialGNNDataset:
             self.original_node_count = len(self.node_feature_names)
 
         return df_features, feature_matrix
+    
+    def _select_features_with_lrp(self):
+        """
+        Select top N features using Layer-wise Relevance Propagation (LRP).
+        
+        This method filters features before graph construction by:
+        1. Training a baseline model on all features
+        2. Computing LRP relevance scores
+        3. Selecting top N features based on relevance
+        4. Ensuring anchored features (if any) are preserved
+        """
+        print(f"\n{'='*80}")
+        print("LRP FEATURE SELECTION")
+        print(f"{'='*80}")
+        print(f"Total features before LRP selection: {len(self.node_feature_names)}")
+        print(f"Target number of features: {self.n_lrp_features}")
+        print(f"Target selection mode: {self.target_for_lrp}")
+        
+        # Validation
+        if self.n_lrp_features > len(self.node_feature_names):
+            print(f"Warning: Requested {self.n_lrp_features} features but only {len(self.node_feature_names)} available")
+            self.n_lrp_features = len(self.node_feature_names)
+        
+        if self.n_lrp_features < self.k_neighbors:
+            print(f"Warning: Selected features ({self.n_lrp_features}) < k_neighbors ({self.k_neighbors})")
+            print(f"  This may result in disconnected graph. Consider increasing n_lrp_features.")
+        
+        # Determine target column(s)
+        if self.target_for_lrp == 'first':
+            target_col = self.target_df.columns[0]
+            y = self.target_df[target_col].values
+            print(f"Using target: {target_col}")
+        elif self.target_for_lrp == 'both':
+            # Use average of both targets for LRP
+            y = self.target_df.mean(axis=1).values
+            print(f"Using combined target: average of {list(self.target_df.columns)}")
+        else:
+            # Use specific target name
+            if self.target_for_lrp in self.target_df.columns:
+                y = self.target_df[self.target_for_lrp].values
+                print(f"Using target: {self.target_for_lrp}")
+            else:
+                print(f"Warning: Target '{self.target_for_lrp}' not found, using first target")
+                target_col = self.target_df.columns[0]
+                y = self.target_df[target_col].values
+        
+        # Prepare feature matrix for LRP (transpose to n_samples × n_features)
+        X = self.feature_matrix.T  # Shape: (n_samples, n_features)
+        
+        # Import and instantiate LRP feature selector
+        try:
+            from utils.lrp_feature_selector import LRPFeatureSelector
+        except ImportError as e:
+            raise ImportError(f"Failed to import LRPFeatureSelector: {e}. "
+                           f"Please ensure src/utils/lrp_feature_selector.py exists.")
+        
+        selector = LRPFeatureSelector(
+            n_hidden_layers=2,
+            hidden_dim=64,
+            epochs=100,
+            learning_rate=0.001,
+            random_state=42
+        )
+        
+        # Fit LRP selector and get selected features
+        selected_indices, selected_names, relevance_dict = selector.fit(
+            X=X,
+            y=y,
+            n_features=self.n_lrp_features,
+            feature_names=self.node_feature_names
+        )
+        
+        # PROTECT ANCHORED FEATURES (if any)
+        anchored_indices_to_add = []
+        if hasattr(self, 'protected_nodes') and self.protected_nodes:
+            print(f"\n🔒 Protecting {len(self.protected_nodes)} anchored features...")
+            for anchored_name in self.protected_nodes:
+                if anchored_name in self.node_feature_names:
+                    idx = self.node_feature_names.index(anchored_name)
+                    if idx not in selected_indices:
+                        anchored_indices_to_add.append(idx)
+                        print(f"  Adding anchored feature (not selected by LRP): {anchored_name}")
+            
+            if anchored_indices_to_add:
+                selected_indices.extend(anchored_indices_to_add)
+                selected_names.extend([self.node_feature_names[i] for i in anchored_indices_to_add])
+                print(f"  Total features after adding {len(anchored_indices_to_add)} anchored features: {len(selected_indices)}")
+        
+        # Filter feature data
+        self.df_features = self.df_features[selected_names]
+        
+        # Update feature matrix (keep only selected features)
+        # feature_matrix shape is (n_features, n_samples), so we select rows
+        self.feature_matrix = self.feature_matrix[selected_indices, :]
+        
+        # Update node feature names
+        self.node_feature_names = selected_names
+        
+        # Update original node count if not set
+        if self.original_node_count is None:
+            self.original_node_count = len(selected_indices)
+        
+        print(f"\n✅ LRP feature selection completed!")
+        print(f"Selected {len(selected_names)} features")
+        print(f"Feature matrix shape: {self.feature_matrix.shape} (features × samples)")
+        print(f"{'='*80}\n")
     
     def _compute_distance_matrix(self, vec, metric='euclidean'):
         """Compute distance matrix between samples for a given feature"""
@@ -494,6 +614,11 @@ class MicrobialGNNDataset:
 
     def _create_graph_structure(self):
         """Create graph structure based on correlation or distance metrics"""
+        # If LRP feature selection is enabled, create k-NN graph directly
+        if self.lrp_feature_selection:
+            return self._create_knn_graph_from_features()
+        
+        # Otherwise, use existing correlation-based methods
         if self.graph_construction_method == 'paper_correlation':
             return self._create_graph_structure_paper_style()
         elif self.graph_construction_method == 'hybrid':
@@ -502,6 +627,81 @@ class MicrobialGNNDataset:
             return self._create_graph_structure_fast()
         else:
             return self._create_graph_structure_mantel()
+    
+    def _create_knn_graph_from_features(self):
+        """
+        Create k-NN graph directly from feature matrix (no correlation step).
+        
+        This method is used when LRP feature selection is enabled.
+        It creates edges between features based on similarity of their
+        abundance patterns across samples.
+        
+        Returns:
+            edge_index, edge_weight, edge_type
+        """
+        print(f"Creating k-NN graph directly from LRP-selected features...")
+        print(f"Features: {len(self.node_feature_names)}, k={self.k_neighbors}")
+        
+        from sklearn.neighbors import NearestNeighbors
+        
+        # feature_matrix shape is (n_features, n_samples)
+        # For sklearn NearestNeighbors, we need features as rows (samples) and samples as columns (features)
+        # sklearn NearestNeighbors fits on (n_samples, n_features) where rows are samples
+        # We want each feature (genus) as a sample, so we use feature_matrix directly
+        # Each row is a feature (genus), columns are samples
+        X_features = self.feature_matrix  # Shape: (n_features, n_samples)
+        
+        # Handle case where k+1 > n_features
+        k = min(self.k_neighbors, len(self.node_feature_names) - 1)
+        if k < 1:
+            k = 1
+        
+        # Use cosine similarity for abundance patterns (more appropriate than euclidean)
+        nbrs = NearestNeighbors(n_neighbors=k+1, metric='cosine')
+        nbrs.fit(X_features)
+        
+        # Get distances and indices
+        distances, indices = nbrs.kneighbors(X_features)
+        
+        # Create edges
+        edge_i, edge_j, edge_weights, edge_types = [], [], [], []
+        
+        for i in range(len(self.node_feature_names)):
+            for j_idx, neighbor_idx in enumerate(indices[i]):
+                if neighbor_idx != i:  # Skip self-connections
+                    j = neighbor_idx
+                    distance = distances[i][j_idx]
+                    
+                    # Convert distance to similarity weight (cosine distance -> similarity)
+                    # Cosine distance: 1 - cosine_similarity
+                    # So similarity = 1 - cosine_distance
+                    similarity = 1.0 - distance
+                    weight = max(0.0, similarity)  # Ensure non-negative
+                    
+                    # Add bidirectional edges
+                    edge_i.extend([i, j])
+                    edge_j.extend([j, i])
+                    edge_weights.extend([weight, weight])
+                    edge_types.extend([1, 1])  # All positive edges
+        
+        if len(edge_i) == 0:
+            print("Warning: No edges created! Creating fully connected graph as fallback...")
+            # Fallback: create edges between all features
+            for i in range(len(self.node_feature_names)):
+                for j in range(i+1, len(self.node_feature_names)):
+                    edge_i.extend([i, j])
+                    edge_j.extend([j, i])
+                    edge_weights.extend([1.0, 1.0])
+                    edge_types.extend([1, 1])
+        
+        # Convert to tensors
+        edge_index = torch.tensor([edge_i, edge_j], dtype=torch.long)
+        edge_weight = torch.tensor(edge_weights, dtype=torch.float32)
+        edge_type = torch.tensor(edge_types, dtype=torch.long)
+        
+        print(f"✅ Created k-NN graph: {len(self.node_feature_names)} nodes, {edge_index.shape[1]//2} undirected edges")
+        
+        return edge_index, edge_weight, edge_type
     
     def _create_graph_structure_fast(self):
         """Create graph structure using correlation-based approach (much faster than Mantel tests)"""
@@ -832,6 +1032,13 @@ class MicrobialGNNDataset:
 
     def _create_knn_graph(self, k=None):
         """Create a k-nearest neighbor sparsified version of the graph"""
+        # If LRP is enabled, graph is already k-NN, so just return it
+        if self.lrp_feature_selection:
+            print(f"LRP enabled: Graph is already k-NN, returning existing graph structure")
+            # When LRP is enabled, full_edge_index contains the k-NN graph
+            # Use it directly as edge_index (no additional sparsification needed)
+            return self.full_edge_index.clone(), self.full_edge_weight.clone(), self.full_edge_type.clone()
+        
         if k is None:
             k = self.k_neighbors
             

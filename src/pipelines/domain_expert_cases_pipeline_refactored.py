@@ -142,10 +142,11 @@ class DomainExpertCasesPipeline(MixedEmbeddingPipeline):
                  num_epochs=200, patience=20, num_folds=5,
                  save_dir='./domain_expert_results',
                  importance_threshold=0.30,
-                 use_fast_correlation=False,
+                 use_fast_correlation=True,  # Changed to True to use fast correlation instead of Mantel test when LRP disabled
                  graph_mode='genus', family_filter_mode='strict',
                  use_nested_cv=True, use_node_pruning=False,
-                 graph_construction_method='original'):
+                 graph_construction_method='original',
+                 use_lrp_feature_selection=False, n_lrp_features=100, target_for_lrp='first'):
         """
         Initialize the Domain Expert Cases Pipeline.
 
@@ -220,8 +221,11 @@ class DomainExpertCasesPipeline(MixedEmbeddingPipeline):
             use_fast_correlation=use_fast_correlation,
             graph_mode=graph_mode,
             family_filter_mode=family_filter_mode,
-            graph_construction_method=graph_construction_method,
-            save_dir=self.save_dir
+            graph_construction_method='original',  # Always use 'original' (will handle LRP internally)
+            save_dir=self.save_dir,
+            lrp_feature_selection=use_lrp_feature_selection,
+            n_lrp_features=n_lrp_features,
+            target_for_lrp=target_for_lrp
         )
         
         # Store sparsification configuration (MUST be False - edge-based sparsification only)
@@ -563,6 +567,20 @@ class DomainExpertCasesPipeline(MixedEmbeddingPipeline):
             graphs_dir = os.path.join(self.save_dir, 'graphs', target_name)
             os.makedirs(graphs_dir, exist_ok=True)
             print(f"Saving graphs to: {graphs_dir}")
+            
+            # DEBUG: Check if explainer data exists before visualization
+            if hasattr(self.dataset, 'explainer_sparsified_graph_data'):
+                print(f"DEBUG: explainer_sparsified_graph_data exists: {bool(self.dataset.explainer_sparsified_graph_data)}")
+                if isinstance(self.dataset.explainer_sparsified_graph_data, dict):
+                    print(f"DEBUG: Available targets in explainer data: {list(self.dataset.explainer_sparsified_graph_data.keys())}")
+                    if target_name in self.dataset.explainer_sparsified_graph_data:
+                        print(f"DEBUG: ✅ Found explainer data for {target_name}")
+                    else:
+                        print(f"DEBUG: ⚠️ Target '{target_name}' not in explainer data keys")
+                else:
+                    print(f"DEBUG: explainer_sparsified_graph_data is not a dict: {type(self.dataset.explainer_sparsified_graph_data)}")
+            else:
+                print(f"DEBUG: ⚠️ No explainer_sparsified_graph_data attribute on dataset")
             
             # Ensure the dataset has the original graph data for comparison
             if not hasattr(self.dataset, 'original_graph_data') or self.dataset.original_graph_data is None:
@@ -951,11 +969,19 @@ class DomainExpertCasesPipeline(MixedEmbeddingPipeline):
                 if isinstance(self.dataset.explainer_sparsified_graph_data, dict):
                     explainer_graph_data = self.dataset.explainer_sparsified_graph_data.get(target_name, None)
                     if explainer_graph_data is None:
-                        print(f"Warning: No explainer graph data found for target '{target_name}'")
-                        print(f"Available targets: {list(self.dataset.explainer_sparsified_graph_data.keys())}")
+                        print(f"⚠️ Warning: No explainer graph data found for target '{target_name}'")
+                        print(f"   Available targets: {list(self.dataset.explainer_sparsified_graph_data.keys())}")
+                        print(f"   Looking for: '{target_name}'")
+                    else:
+                        print(f"✅ Found explainer graph data for target '{target_name}'")
+                        print(f"   Edge count: {explainer_graph_data.get('edge_index', torch.tensor([])).shape[1] // 2 if 'edge_index' in explainer_graph_data else 0}")
                 else:
                     # Fallback for old single-target format
                     explainer_graph_data = self.dataset.explainer_sparsified_graph_data
+                    print(f"✅ Using single-target explainer graph data format")
+            else:
+                print(f"⚠️ Warning: No explainer_sparsified_graph_data attribute found on dataset")
+                print(f"   This means explainer graphs were not generated.")
             
             # Get abundance data for node sizing
             abundance_data = {}

@@ -4,7 +4,8 @@ Run Enhanced Edge-Based Sparsification Pipeline
 
 This script demonstrates how to run the enhanced domain expert pipeline
 with comprehensive validation framework including:
-- Edge-based sparsification using GNNExplainer (NO node pruning)
+- LRP-based feature selection (optional) to identify top N important genus features
+- k-NN graph construction from selected features (no Spearman correlation)
 - Genus-level microbial analysis (higher taxonomic resolution)
 - Statistical validation with significance testing
 - Enhanced Graph Transformer architecture
@@ -13,20 +14,20 @@ with comprehensive validation framework including:
 - Ablation studies for component analysis
 
 Usage:
-    python run_enhanced_pipeline.py [--case case1] [--epochs 100] [--quick]
+    python run_enhanced_pipeline.py [--case case1] [--epochs 100] [--use_lrp] [--n_lrp_features 100]
 
 Examples:
-    # Run full pipeline with case 1 (hydrogenotrophic focus)
+    # Run full pipeline with case 1 (hydrogenotrophic focus) - NO LRP
     python run_enhanced_pipeline.py --case case1
 
-    # Keep top 80% of edges in explainer pruning (default is 20%)
-    python run_enhanced_pipeline.py --case case1 --importance_threshold 0.8
+    # Run with LRP feature selection (select top 40 features)
+    python run_enhanced_pipeline.py --case case1 --use_lrp --n_lrp_features 40
 
-    # Quick test run (minimal epochs)
-    python run_enhanced_pipeline.py --case case1 --quick
+    # Quick test run with LRP (minimal epochs)
+    python run_enhanced_pipeline.py --case case1 --use_lrp --n_lrp_features 20 --quick
 
-    # Custom configuration with 50% edge retention
-    python run_enhanced_pipeline.py --case case2 --epochs 50 --importance_threshold 0.5
+    # Custom configuration with 80 LRP features and combined target
+    python run_enhanced_pipeline.py --case case2 --epochs 50 --use_lrp --n_lrp_features 80 --target_for_lrp both
 """
 
 import argparse
@@ -45,9 +46,15 @@ def main():
                         help='Quick test run with minimal configuration')
     parser.add_argument('--data_path', default='../Data/New_Data.csv',
                         help='Path to the dataset (default: ../Data/New_Data.csv)')
-    parser.add_argument('--graph_method', default='paper_correlation',
-                        choices=['original', 'paper_correlation', 'hybrid'],
-                        help='Graph construction method (default: paper_correlation)')
+    parser.add_argument('--graph_method', default='original',
+                        choices=['original', 'hybrid'],
+                        help='Graph construction method (default: original, paper_correlation removed)')
+    parser.add_argument('--use_lrp', action='store_true',
+                        help='Enable LRP feature selection before graph construction')
+    parser.add_argument('--n_lrp_features', type=int, default=100, choices=[20, 40, 80, 100],
+                        help='Number of features to select using LRP (default: 100)')
+    parser.add_argument('--target_for_lrp', default='first', choices=['first', 'both'],
+                        help='Target to use for LRP selection (default: first)')
     parser.add_argument('--importance_threshold', type=float, default=0.5,
                         help='Threshold for explainer edge importance (default: 0.5 = keep top 50%% of edges)')
 
@@ -80,6 +87,7 @@ Nested CV: {nested_cv}
 Data: {args.data_path}
 Graph Mode: genus (genus-level analysis for higher taxonomic resolution)
 Sparsification: Edge-based using GNNExplainer
+LRP Feature Selection: {'Enabled' if args.use_lrp else 'Disabled'} ({args.n_lrp_features} features if enabled)
 {'='*80}
 
 Key Features Enabled:
@@ -90,6 +98,7 @@ Key Features Enabled:
 ✅ Comprehensive baseline comparisons
 ✅ Biological validation with pathway enrichment
 ✅ Ablation studies for component analysis
+{f'✅ LRP feature selection ({args.n_lrp_features} features)' if args.use_lrp else '⚠️  LRP feature selection disabled (using all features)'}
 {'='*80}
 """)
     
@@ -128,10 +137,13 @@ Key Features Enabled:
             'learning_rate': 0.001,         # Lower for stability
             'patience': 30 if not args.quick else 5,  # More patience for convergence
             'importance_threshold': 0.5,    # Keep 50% of edges (was 30%)
-            'graph_construction_method': args.graph_method,
+            'graph_construction_method': 'original',  # Always 'original' (handles LRP internally)
             'use_node_pruning': False,
             'weight_decay': 1e-4,
             'family_filter_mode': 'strict',
+            'use_lrp_feature_selection': args.use_lrp,
+            'n_lrp_features': args.n_lrp_features,
+            'target_for_lrp': args.target_for_lrp,
         }
         
         print("Initializing enhanced pipeline...")
@@ -281,7 +293,10 @@ def run_all_cases(args):
                 'learning_rate': 0.001,
                 'patience': 20 if not args.quick else 5,
                 'importance_threshold': args.importance_threshold,
-                'graph_construction_method': args.graph_method
+                'graph_construction_method': 'original',  # Always 'original' (handles LRP internally)
+                'use_lrp_feature_selection': args.use_lrp,
+                'n_lrp_features': args.n_lrp_features,
+                'target_for_lrp': args.target_for_lrp,
             }
 
             start_time = time.time()

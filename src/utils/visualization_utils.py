@@ -427,20 +427,37 @@ def create_side_by_side_comparison(knn_graph_data, explainer_graph_data, node_fe
 
         return edge_widths
     
-    # Panel 1: Spearman Correlation Graph (Original)
+    # Panel 1: Spearman Correlation Graph (Original) OR LRP-selected k-NN Graph
     # IMPORTANT: Use original node names for Panel 1, not current node_features which might be pruned
     original_node_names = knn_graph_data.get('original_node_names', node_features)
-
+    
+    # Check if LRP was used for feature selection
+    use_lrp = knn_graph_data.get('use_lrp_feature_selection', False)
+    n_lrp_features = knn_graph_data.get('n_lrp_features', None)
+    
     if 'original_edge_index' in knn_graph_data:
-        # Use original correlation data if available
-        # include_isolated_nodes=False to filter out nodes without edges
-        original_G = create_networkx_graph_from_edge_data(
-            knn_graph_data['original_edge_index'],
-            knn_graph_data.get('original_edge_weight', None),
-            original_node_names,  # Use original names, not current node_features
-            include_isolated_nodes=False  # Filter isolated nodes for cleaner visualization
-        )
-        print(f"Panel 1 (Spearman): {len(original_G.nodes())} nodes, {len(original_G.edges())} edges (isolated nodes removed)")
+        # Use original correlation data if available (when LRP disabled)
+        # OR use k-NN graph data if LRP enabled (both are k-NN graphs in that case)
+        if use_lrp:
+            # When LRP enabled, original_edge_index is also k-NN graph
+            original_G = create_networkx_graph_from_edge_data(
+                knn_graph_data['original_edge_index'],
+                knn_graph_data.get('original_edge_weight', None),
+                original_node_names,  # Use original names, not current node_features
+                include_isolated_nodes=False  # Filter isolated nodes for cleaner visualization
+            )
+            panel1_label = f"LRP-selected k-NN Graph ({n_lrp_features} features)"
+            print(f"Panel 1 ({panel1_label}): {len(original_G.nodes())} nodes, {len(original_G.edges())} edges (isolated nodes removed)")
+        else:
+            # When LRP disabled, original_edge_index is correlation graph
+            original_G = create_networkx_graph_from_edge_data(
+                knn_graph_data['original_edge_index'],
+                knn_graph_data.get('original_edge_weight', None),
+                original_node_names,  # Use original names, not current node_features
+                include_isolated_nodes=False  # Filter isolated nodes for cleaner visualization
+            )
+            panel1_label = "Spearman Correlation Graph"
+            print(f"Panel 1 ({panel1_label}): {len(original_G.nodes())} nodes, {len(original_G.edges())} edges (isolated nodes removed)")
     else:
         # Fallback to k-NN graph for Panel 1
         original_G = create_networkx_graph_from_edge_data(
@@ -449,7 +466,8 @@ def create_side_by_side_comparison(knn_graph_data, explainer_graph_data, node_fe
             original_node_names,  # Use original names, not current node_features
             include_isolated_nodes=False  # Filter isolated nodes for cleaner visualization
         )
-        print(f"Panel 1 (k-NN fallback): {len(original_G.nodes())} nodes, {len(original_G.edges())} edges (isolated nodes removed)")
+        panel1_label = "k-NN Graph (fallback)" if not use_lrp else f"LRP-selected k-NN Graph ({n_lrp_features} features)"
+        print(f"Panel 1 ({panel1_label}): {len(original_G.nodes())} nodes, {len(original_G.edges())} edges (isolated nodes removed)")
 
     # CRITICAL FIX: Add back any protected nodes that were filtered out as isolated
     if protected_nodes:
@@ -516,7 +534,7 @@ def create_side_by_side_comparison(knn_graph_data, explainer_graph_data, node_fe
     # EXTREMELY large font size
     nx.draw_networkx_labels(original_G, pos1, labels=node_labels, ax=ax1, font_size=28, font_weight='bold')
 
-    ax1.set_title('Spearman Correlation Graph (Original)', fontsize=32, fontweight='bold', pad=20)
+    ax1.set_title(panel1_label, fontsize=32, fontweight='bold', pad=20)
     ax1.text(0.02, 0.98, f"Nodes: {len(original_G.nodes())}\nEdges: {len(original_G.edges())}",
             transform=ax1.transAxes, fontsize=24, verticalalignment='top',
             bbox=dict(boxstyle="round,pad=0.5", facecolor="#E8E8E8", alpha=0.9))
@@ -615,6 +633,16 @@ def create_side_by_side_comparison(knn_graph_data, explainer_graph_data, node_fe
         print(f"\n🔍 Panel 3 DIAGNOSTIC:")
         print(f"  Original nodes (Panels 1/2): {len(original_node_names)}")
         print(f"  After explainer pruning: {len(explainer_node_names)}")
+        print(f"  Explainer edge_index shape: {explainer_graph_data['edge_index'].shape}")
+        print(f"  k-NN edge_index shape: {knn_graph_data['edge_index'].shape}")
+        
+        # Check if explainer graph is different from k-NN graph
+        explainer_edge_count = explainer_graph_data['edge_index'].shape[1] // 2
+        knn_edge_count = knn_graph_data['edge_index'].shape[1] // 2
+        if explainer_edge_count == knn_edge_count:
+            print(f"  ⚠️ WARNING: Explainer graph has same number of edges as k-NN graph!")
+            print(f"     This suggests edges were not pruned. Check importance_threshold.")
+        
         if len(explainer_node_names) < len(original_node_names):
             pruned_nodes = set(original_node_names) - set(explainer_node_names)
             print(f"  ⚠ Explainer pruned {len(pruned_nodes)} nodes: {pruned_nodes}")
@@ -771,14 +799,36 @@ def create_side_by_side_comparison(knn_graph_data, explainer_graph_data, node_fe
         ax3.text(0.02, 0.98, f"Nodes: {len(explainer_G.nodes())}\nEdges: {len(explainer_G.edges())}",
                 transform=ax3.transAxes, fontsize=24, verticalalignment='top',
                 bbox=dict(boxstyle="round,pad=0.5", facecolor="#C8C8C8", alpha=0.9))
+    else:
+        # Panel 3: No explainer data available
+        print(f"\n⚠️ WARNING: No explainer graph data available for Panel 3!")
+        if explainer_graph_data is None:
+            print(f"   explainer_graph_data is None")
+        elif 'edge_index' not in explainer_graph_data:
+            print(f"   explainer_graph_data missing 'edge_index' key")
+            print(f"   Available keys: {list(explainer_graph_data.keys())}")
+        ax3.text(0.5, 0.5, 'No Explainer Graph Data\nAvailable', 
+                transform=ax3.transAxes, fontsize=32, ha='center', va='center',
+                bbox=dict(boxstyle="round,pad=1", facecolor="#FFE6E6", alpha=0.8))
+        ax3.set_title('Explainer-Pruned Graph (Not Available)', fontsize=32, fontweight='bold', pad=20)
 
     # Remove axes
     ax1.axis('off')
     ax2.axis('off')
     ax3.axis('off')
+    
+    # Ensure Panel 3 is handled even if explainer data is missing
+    if not (explainer_graph_data and 'edge_index' in explainer_graph_data):
+        # Panel 3 will show "No data" message (already set above)
+        pass
 
-    # Add overall title
-    plt.suptitle('Graph Comparison: Spearman → k-NN → Attention-Pruned', fontsize=40, fontweight='bold', y=0.95)
+    # Add overall title (update based on LRP usage)
+    use_lrp = knn_graph_data.get('use_lrp_feature_selection', False)
+    if use_lrp:
+        title_text = 'Graph Comparison: LRP-selected k-NN → Explainer-Pruned'
+    else:
+        title_text = 'Graph Comparison: Spearman → k-NN → Attention-Pruned'
+    plt.suptitle(title_text, fontsize=40, fontweight='bold', y=0.95)
 
     # Add enhanced legend
     from matplotlib.patches import Patch
