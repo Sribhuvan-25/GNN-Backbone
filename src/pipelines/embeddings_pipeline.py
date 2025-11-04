@@ -445,10 +445,16 @@ class MixedEmbeddingPipeline:
                     hidden_dim=local_hidden_dim
                 )
                 
-                # Explicitly delete model to free computational graph
+                # Explicitly delete model and clear memory
                 del model
-                torch.cuda.empty_cache() if torch.cuda.is_available() else None
+                if torch.cuda.is_available():
+                    torch.cuda.empty_cache()
+                    torch.cuda.synchronize()
                 val_scores.append(mse_score)
+                
+                # Additional cleanup between inner folds
+                import gc
+                gc.collect()
             
             mean_val = np.mean(val_scores)
             std_val = np.std(val_scores)
@@ -467,6 +473,14 @@ class MixedEmbeddingPipeline:
                 best_score = mean_val
                 best_params = params.copy()
                 combination_result['is_best'] = True
+            
+            # Clear memory between hyperparameter combinations
+            del temp_data_list, val_scores
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
+                torch.cuda.synchronize()
+            import gc
+            gc.collect()
             
             # Print progress
             best_marker = "✓" if combination_result['is_best'] else " "
@@ -769,6 +783,14 @@ class MixedEmbeddingPipeline:
                 best_outer_r2 = r2
                 best_model_state = model.state_dict().copy()
                 best_hyperparams = best_params.copy()  # Store the best hyperparameters
+            
+            # Clear memory after each outer fold
+            del model, train_data, test_data
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
+                torch.cuda.synchronize()
+            import gc
+            gc.collect()
         
         # 4. Comprehensive Summary
         print(f"\n{'='*60}")
@@ -2681,6 +2703,10 @@ class MixedEmbeddingPipeline:
                 optimizer.step()
                 
                 total_train_loss += loss.item() * batch_data.num_graphs
+                
+                # Clear gradients and intermediate values to free memory
+                optimizer.zero_grad(set_to_none=True)
+                del loss, out, target, x_input, edge_input, batch_input, target_input
             
             # Validation
             model.eval()
@@ -2726,11 +2752,29 @@ class MixedEmbeddingPipeline:
                 
                 all_preds.append(out.cpu().numpy())
                 all_targets.append(target.cpu().numpy())
+                
+                # Clear intermediate tensors
+                del out, feat, target, x_input, edge_input, batch_input, target_input
+        
+        # Clear GPU memory before processing results
+        del train_loader, val_loader
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
         
         all_preds = np.vstack(all_preds).flatten()
         all_targets = np.vstack(all_targets).flatten()
         
         mse = mean_squared_error(all_targets, all_preds)
+        
+        # Additional aggressive cleanup before returning
+        del train_data, val_data
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+            torch.cuda.synchronize()
+        
+        import gc
+        gc.collect()
+        
         return mse  # Return MSE instead of R² for hyperparameter selection
 
     def save_comprehensive_hyperparameter_tracking(self, all_results):
