@@ -19,6 +19,10 @@ Architecture:
 - Core pipeline: Focused on orchestration and hyperparameter tuning
 """
 
+# Set matplotlib to use non-GUI backend to avoid threading issues
+import matplotlib
+matplotlib.use('Agg')  # Must be set before importing pyplot
+
 import os
 import torch
 import numpy as np

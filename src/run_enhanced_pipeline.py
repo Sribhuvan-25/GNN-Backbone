@@ -51,7 +51,7 @@ def main():
                         help='Graph construction method (default: original, paper_correlation removed)')
     parser.add_argument('--use_lrp', action='store_true',
                         help='Enable LRP feature selection before graph construction')
-    parser.add_argument('--n_lrp_features', type=int, default=100, choices=[20, 40, 80, 100],
+    parser.add_argument('--n_lrp_features', type=int, default=100, choices=[20, 40, 50, 80, 100],
                         help='Number of features to select using LRP (default: 100)')
     parser.add_argument('--target_for_lrp', default='first', choices=['first', 'both'],
                         help='Target to use for LRP selection (default: first)')

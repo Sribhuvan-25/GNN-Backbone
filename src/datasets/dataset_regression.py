@@ -367,20 +367,47 @@ class MicrobialGNNDataset:
         anchored_indices_to_add = []
         if hasattr(self, 'protected_nodes') and self.protected_nodes:
             print(f"\n🔒 Protecting {len(self.protected_nodes)} anchored features...")
+            # Use set for O(1) lookup to avoid duplicates
+            selected_set = set(selected_indices)
             for anchored_name in self.protected_nodes:
                 if anchored_name in self.node_feature_names:
                     idx = self.node_feature_names.index(anchored_name)
-                    if idx not in selected_indices:
+                    if idx not in selected_set:
                         anchored_indices_to_add.append(idx)
+                        selected_set.add(idx)  # Track to avoid duplicates
                         print(f"  Adding anchored feature (not selected by LRP): {anchored_name}")
+                    else:
+                        print(f"  Anchored feature already selected by LRP: {anchored_name}")
             
             if anchored_indices_to_add:
                 selected_indices.extend(anchored_indices_to_add)
                 selected_names.extend([self.node_feature_names[i] for i in anchored_indices_to_add])
                 print(f"  Total features after adding {len(anchored_indices_to_add)} anchored features: {len(selected_indices)}")
+            else:
+                print(f"  All anchored features were already selected by LRP")
+        
+        # Remove any duplicates while preserving order (safety check)
+        seen = set()
+        unique_indices = []
+        unique_names = []
+        for idx, name in zip(selected_indices, selected_names):
+            if idx not in seen:
+                seen.add(idx)
+                unique_indices.append(idx)
+                unique_names.append(name)
+        
+        if len(unique_indices) < len(selected_indices):
+            print(f"  ⚠️ Removed {len(selected_indices) - len(unique_indices)} duplicate features")
+        
+        selected_indices = unique_indices
+        selected_names = unique_names
         
         # Filter feature data
         self.df_features = self.df_features[selected_names]
+        
+        # Validation: Ensure we have at least some features
+        if len(selected_indices) == 0:
+            raise ValueError("LRP feature selection resulted in 0 features. This should not happen.")
         
         # Update feature matrix (keep only selected features)
         # feature_matrix shape is (n_features, n_samples), so we select rows
@@ -389,12 +416,19 @@ class MicrobialGNNDataset:
         # Update node feature names
         self.node_feature_names = selected_names
         
-        # Update original node count if not set
+        # Store original count BEFORE LRP (for explainer compatibility)
+        # original_node_count should represent the count BEFORE any filtering
         if self.original_node_count is None:
-            self.original_node_count = len(selected_indices)
+            # This shouldn't happen, but set it to current count as fallback
+            self.original_node_count = len(self.node_feature_names)
+        # Note: original_node_count was already set in _create_node_features() to the full count
+        # We don't update it here because we want to preserve the original count before LRP
         
         print(f"\n✅ LRP feature selection completed!")
         print(f"Selected {len(selected_names)} features")
+        if hasattr(self, 'original_node_count') and self.original_node_count:
+            print(f"Original feature count: {self.original_node_count}")
+            print(f"Reduction: {self.original_node_count - len(selected_names)} features removed")
         print(f"Feature matrix shape: {self.feature_matrix.shape} (features × samples)")
         print(f"{'='*80}\n")
     

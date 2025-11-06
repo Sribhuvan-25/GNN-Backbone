@@ -205,8 +205,14 @@ class LRPFeatureSelector:
             
             relevance_scores_per_sample.append(sample_relevance)
             
-            # Reset gradients
-            X_tensor.grad = None
+            # Clear gradients and intermediate values to free memory
+            if x_sample.grad is not None:
+                x_sample.grad = None
+            del output, x_sample
+            
+            # Periodic GPU memory cleanup for large datasets
+            if (i + 1) % 10 == 0 and torch.cuda.is_available():
+                torch.cuda.empty_cache()
         
         # Average relevance across samples
         relevance_scores = np.mean(relevance_scores_per_sample, axis=0)

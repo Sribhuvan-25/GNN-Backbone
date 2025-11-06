@@ -1,3 +1,7 @@
+# Set matplotlib to use non-GUI backend to avoid threading issues
+import matplotlib
+matplotlib.use('Agg')  # Must be set before importing pyplot
+
 import pandas as pd
 import numpy as np
 from sklearn.preprocessing import StandardScaler
