@@ -146,11 +146,11 @@ class DomainExpertCasesPipeline(MixedEmbeddingPipeline):
                  num_epochs=200, patience=20, num_folds=5,
                  save_dir='./domain_expert_results',
                  importance_threshold=0.30,
-                 use_fast_correlation=True,  # Changed to True to use fast correlation instead of Mantel test when LRP disabled
+                 use_fast_correlation=True,  # Changed to True to use fast correlation instead of Mantel test when RFE disabled
                  graph_mode='genus', family_filter_mode='strict',
                  use_nested_cv=True, use_node_pruning=False,
                  graph_construction_method='original',
-                 use_lrp_feature_selection=False, n_lrp_features=100, target_for_lrp='first'):
+                 use_rfe_feature_selection=False, n_rfe_features=100, target_for_rfe='first', rfe_model_type='extratrees'):
         """
         Initialize the Domain Expert Cases Pipeline.
 
@@ -225,11 +225,12 @@ class DomainExpertCasesPipeline(MixedEmbeddingPipeline):
             use_fast_correlation=use_fast_correlation,
             graph_mode=graph_mode,
             family_filter_mode=family_filter_mode,
-            graph_construction_method='original',  # Always use 'original' (will handle LRP internally)
+            graph_construction_method='original',  # Always use 'original' (will handle RFE internally)
             save_dir=self.save_dir,
-            lrp_feature_selection=use_lrp_feature_selection,
-            n_lrp_features=n_lrp_features,
-            target_for_lrp=target_for_lrp
+            rfe_feature_selection=use_rfe_feature_selection,
+            n_rfe_features=n_rfe_features,
+            target_for_rfe=target_for_rfe,
+            rfe_model_type=rfe_model_type
         )
         
         # Store sparsification configuration (MUST be False - edge-based sparsification only)
@@ -971,13 +972,27 @@ class DomainExpertCasesPipeline(MixedEmbeddingPipeline):
             if hasattr(self.dataset, 'explainer_sparsified_graph_data') and self.dataset.explainer_sparsified_graph_data:
                 # Access explainer data by target name
                 if isinstance(self.dataset.explainer_sparsified_graph_data, dict):
-                    explainer_graph_data = self.dataset.explainer_sparsified_graph_data.get(target_name, None)
-                    if explainer_graph_data is None:
-                        print(f"⚠️ Warning: No explainer graph data found for target '{target_name}'")
-                        print(f"   Available targets: {list(self.dataset.explainer_sparsified_graph_data.keys())}")
-                        print(f"   Looking for: '{target_name}'")
+                    # If target_name is a summary name (e.g., "case3_summary"), use first available target
+                    if target_name.endswith('_summary') or target_name not in self.dataset.explainer_sparsified_graph_data:
+                        available_targets = list(self.dataset.explainer_sparsified_graph_data.keys())
+                        if available_targets:
+                            # Use first available target for summary visualizations
+                            actual_target = available_targets[0]
+                            explainer_graph_data = self.dataset.explainer_sparsified_graph_data.get(actual_target, None)
+                            if explainer_graph_data:
+                                print(f"ℹ️  Using explainer data from '{actual_target}' for case-level summary visualization")
+                        else:
+                            explainer_graph_data = None
                     else:
-                        print(f"✅ Found explainer graph data for target '{target_name}'")
+                        explainer_graph_data = self.dataset.explainer_sparsified_graph_data.get(target_name, None)
+                    
+                    if explainer_graph_data is None:
+                        print(f"⚠️ Warning: No explainer graph data available for visualization")
+                        if isinstance(self.dataset.explainer_sparsified_graph_data, dict):
+                            print(f"   Available targets: {list(self.dataset.explainer_sparsified_graph_data.keys())}")
+                            print(f"   Requested target: '{target_name}'")
+                    else:
+                        print(f"✅ Found explainer graph data")
                         print(f"   Edge count: {explainer_graph_data.get('edge_index', torch.tensor([])).shape[1] // 2 if 'edge_index' in explainer_graph_data else 0}")
                 else:
                     # Fallback for old single-target format

@@ -33,15 +33,15 @@ def create_explainer_sparsified_graph(pipeline, model, target_idx=0, importance_
     print(f"Current number of nodes: {len(pipeline.dataset.node_feature_names)}")
     print(f"Original importance threshold: {importance_threshold}")
     
-    # FIX: Use CURRENT node count (after LRP selection) instead of original_node_count
-    # When LRP is enabled, the graph has already been pruned to selected features
+    # FIX: Use CURRENT node count (after RFE selection) instead of original_node_count
+    # When RFE is enabled, the graph has already been pruned to selected features
     current_node_count = len(pipeline.dataset.node_feature_names)
     
-    # Check if original_node_count exists and if it's different (meaning LRP was used)
+    # Check if original_node_count exists and if it's different (meaning RFE was used)
     if hasattr(pipeline.dataset, 'original_node_count') and pipeline.dataset.original_node_count:
         original_node_count = pipeline.dataset.original_node_count
         if original_node_count != current_node_count:
-            print(f"Using CURRENT node count for explainer: {current_node_count} (original was {original_node_count}, LRP selection applied)")
+            print(f"Using CURRENT node count for explainer: {current_node_count} (original was {original_node_count}, RFE selection applied)")
         else:
             print(f"Using current node count for explainer: {current_node_count}")
     else:
@@ -76,7 +76,7 @@ def create_explainer_sparsified_graph(pipeline, model, target_idx=0, importance_
             print(f"WARNING: Size mismatch detected - edge_importance_matrix: {edge_importance_matrix.size()}, combined: {combined_edge_importance.size()}")
             
             # If the edge importance matrix is smaller, resize the combined matrix to match
-            # This happens when LRP feature selection was used (current graph is smaller than original)
+            # This happens when RFE feature selection was used (current graph is smaller than original)
             if edge_importance_matrix.size(0) < combined_edge_importance.size(0):
                 print(f"Resizing combined matrix from {combined_edge_importance.size()} to {edge_importance_matrix.size()} to match current graph")
                 combined_edge_importance = torch.zeros_like(edge_importance_matrix, device=device)

@@ -427,29 +427,31 @@ def create_side_by_side_comparison(knn_graph_data, explainer_graph_data, node_fe
 
         return edge_widths
     
-    # Panel 1: Spearman Correlation Graph (Original) OR LRP-selected k-NN Graph
+    # Panel 1: Spearman Correlation Graph (Original) OR RFE-selected k-NN Graph
     # IMPORTANT: Use original node names for Panel 1, not current node_features which might be pruned
     original_node_names = knn_graph_data.get('original_node_names', node_features)
     
-    # Check if LRP was used for feature selection
-    use_lrp = knn_graph_data.get('use_lrp_feature_selection', False)
-    n_lrp_features = knn_graph_data.get('n_lrp_features', None)
+    # Check if RFE was used for feature selection
+    use_rfe = knn_graph_data.get('use_rfe_feature_selection', False)
+    n_rfe_features = knn_graph_data.get('n_rfe_features', None)
+    rfe_model_type = knn_graph_data.get('rfe_model_type', None)
     
     if 'original_edge_index' in knn_graph_data:
-        # Use original correlation data if available (when LRP disabled)
-        # OR use k-NN graph data if LRP enabled (both are k-NN graphs in that case)
-        if use_lrp:
-            # When LRP enabled, original_edge_index is also k-NN graph
+        # Use original correlation data if available (when RFE disabled)
+        # OR use k-NN graph data if RFE enabled (both are k-NN graphs in that case)
+        if use_rfe:
+            # When RFE enabled, original_edge_index is also k-NN graph
             original_G = create_networkx_graph_from_edge_data(
                 knn_graph_data['original_edge_index'],
                 knn_graph_data.get('original_edge_weight', None),
                 original_node_names,  # Use original names, not current node_features
                 include_isolated_nodes=False  # Filter isolated nodes for cleaner visualization
             )
-            panel1_label = f"LRP-selected k-NN Graph ({n_lrp_features} features)"
+            model_label = f" ({rfe_model_type})" if rfe_model_type else ""
+            panel1_label = f"RFE-selected k-NN Graph ({n_rfe_features} features{model_label})"
             print(f"Panel 1 ({panel1_label}): {len(original_G.nodes())} nodes, {len(original_G.edges())} edges (isolated nodes removed)")
         else:
-            # When LRP disabled, original_edge_index is correlation graph
+            # When RFE disabled, original_edge_index is correlation graph
             original_G = create_networkx_graph_from_edge_data(
                 knn_graph_data['original_edge_index'],
                 knn_graph_data.get('original_edge_weight', None),
@@ -466,7 +468,7 @@ def create_side_by_side_comparison(knn_graph_data, explainer_graph_data, node_fe
             original_node_names,  # Use original names, not current node_features
             include_isolated_nodes=False  # Filter isolated nodes for cleaner visualization
         )
-        panel1_label = "k-NN Graph (fallback)" if not use_lrp else f"LRP-selected k-NN Graph ({n_lrp_features} features)"
+        panel1_label = "k-NN Graph (fallback)" if not use_rfe else f"RFE-selected k-NN Graph ({n_rfe_features} features)"
         print(f"Panel 1 ({panel1_label}): {len(original_G.nodes())} nodes, {len(original_G.edges())} edges (isolated nodes removed)")
 
     # CRITICAL FIX: Add back any protected nodes that were filtered out as isolated
@@ -822,10 +824,10 @@ def create_side_by_side_comparison(knn_graph_data, explainer_graph_data, node_fe
         # Panel 3 will show "No data" message (already set above)
         pass
 
-    # Add overall title (update based on LRP usage)
-    use_lrp = knn_graph_data.get('use_lrp_feature_selection', False)
-    if use_lrp:
-        title_text = 'Graph Comparison: LRP-selected k-NN → Explainer-Pruned'
+    # Add overall title (update based on RFE usage)
+    use_rfe = knn_graph_data.get('use_rfe_feature_selection', False)
+    if use_rfe:
+        title_text = 'Graph Comparison: RFE-selected k-NN → Explainer-Pruned'
     else:
         title_text = 'Graph Comparison: Spearman → k-NN → Attention-Pruned'
     plt.suptitle(title_text, fontsize=40, fontweight='bold', y=0.95)

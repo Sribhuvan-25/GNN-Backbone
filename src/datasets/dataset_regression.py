@@ -22,7 +22,7 @@ class MicrobialGNNDataset:
     
     def __init__(self, data_path, k_neighbors=5, mantel_threshold=0.05, use_fast_correlation=True,
                  graph_mode='genus', family_filter_mode='relaxed', graph_construction_method='original',
-                 lrp_feature_selection=False, n_lrp_features=100, target_for_lrp='first'):
+                 rfe_feature_selection=False, n_rfe_features=100, target_for_rfe='first', rfe_model_type='extratrees'):
         """
         Initialize the microbial GNN dataset
 
@@ -34,9 +34,10 @@ class MicrobialGNNDataset:
             graph_mode: Mode for graph construction ('otu', 'family', or 'genus')
             family_filter_mode: Mode for taxonomic filtering ('strict', 'relaxed', or 'permissive')
             graph_construction_method: 'original', 'paper_correlation', or 'hybrid'
-            lrp_feature_selection: If True, use LRP for feature selection before graph construction
-            n_lrp_features: Number of features to select using LRP (20, 40, 80, or 100)
-            target_for_lrp: Target to use for LRP ('first', 'both', or target name)
+            rfe_feature_selection: If True, use RFE for feature selection before graph construction
+            n_rfe_features: Number of features to select using RFE (20, 40, 50, 80, or 100)
+            target_for_rfe: Target to use for RFE ('first', 'both', or target name)
+            rfe_model_type: Model type for RFE ('extratrees', 'linearsvr', 'randomforest', 'gradientboosting', 'xgboost', 'lightgbm')
         """
         self.data_path = data_path
         self.k_neighbors = k_neighbors
@@ -45,9 +46,10 @@ class MicrobialGNNDataset:
         self.graph_mode = graph_mode
         self.family_filter_mode = family_filter_mode
         self.graph_construction_method = graph_construction_method
-        self.lrp_feature_selection = lrp_feature_selection
-        self.n_lrp_features = n_lrp_features
-        self.target_for_lrp = target_for_lrp
+        self.rfe_feature_selection = rfe_feature_selection
+        self.n_rfe_features = n_rfe_features
+        self.target_for_rfe = target_for_rfe
+        self.rfe_model_type = rfe_model_type
         
         # Initialize data containers
         self.feature_df = None
@@ -70,9 +72,9 @@ class MicrobialGNNDataset:
         # Create node features (must be done before graph structure)
         self.df_features, self.feature_matrix = self._create_node_features()
         
-        # NEW STEP: LRP feature selection (if enabled)
-        if self.lrp_feature_selection:
-            self._select_features_with_lrp()
+        # NEW STEP: RFE feature selection (if enabled)
+        if self.rfe_feature_selection:
+            self._select_features_with_rfe()
         
         # Create graph structure (now feature_matrix is available)
         self.full_edge_index, self.full_edge_weight, self.full_edge_type = self._create_graph_structure()
@@ -88,9 +90,9 @@ class MicrobialGNNDataset:
 
         # Store original graph data for visualization
         # Store BOTH the full Spearman correlation graph AND the k-NN sparsified graph
-        # When LRP is enabled, both are k-NN graphs (no correlation step)
+        # When RFE is enabled, both are k-NN graphs (no correlation step)
         self.original_graph_data = {
-            # Full graph (correlation graph when LRP disabled, k-NN graph when LRP enabled)
+            # Full graph (correlation graph when RFE disabled, k-NN graph when RFE enabled)
             'original_edge_index': self.full_edge_index.clone(),
             'original_edge_weight': self.full_edge_weight.clone(),
             'original_edge_type': self.full_edge_type.clone(),
@@ -99,8 +101,9 @@ class MicrobialGNNDataset:
             'edge_weight': self.edge_weight.clone(),
             'edge_type': self.edge_type.clone(),
             'original_node_names': self.node_feature_names.copy(),  # Store original node names
-            'use_lrp_feature_selection': self.lrp_feature_selection,  # NEW: Flag for LRP usage
-            'n_lrp_features': self.n_lrp_features if self.lrp_feature_selection else None  # NEW: Number of LRP features
+            'use_rfe_feature_selection': self.rfe_feature_selection,  # NEW: Flag for RFE usage
+            'n_rfe_features': self.n_rfe_features if self.rfe_feature_selection else None,  # NEW: Number of RFE features
+            'rfe_model_type': self.rfe_model_type if self.rfe_feature_selection else None  # NEW: RFE model type
         }
         
         # Initialize explainer-sparsified graph data as None
@@ -292,74 +295,77 @@ class MicrobialGNNDataset:
 
         return df_features, feature_matrix
     
-    def _select_features_with_lrp(self):
+    def _select_features_with_rfe(self):
         """
-        Select top N features using Layer-wise Relevance Propagation (LRP).
+        Select top N features using Recursive Feature Elimination (RFE).
         
         This method filters features before graph construction by:
-        1. Training a baseline model on all features
-        2. Computing LRP relevance scores
-        3. Selecting top N features based on relevance
-        4. Ensuring anchored features (if any) are preserved
+        1. Using sklearn's RFE with specified model type
+        2. Selecting top N features based on model importance
+        3. Ensuring anchored features (if any) are preserved
         """
         print(f"\n{'='*80}")
-        print("LRP FEATURE SELECTION")
+        print("RFE FEATURE SELECTION")
         print(f"{'='*80}")
-        print(f"Total features before LRP selection: {len(self.node_feature_names)}")
-        print(f"Target number of features: {self.n_lrp_features}")
-        print(f"Target selection mode: {self.target_for_lrp}")
+        print(f"Total features before RFE selection: {len(self.node_feature_names)}")
+        print(f"Target number of features: {self.n_rfe_features}")
+        print(f"Target selection mode: {self.target_for_rfe}")
+        print(f"RFE model type: {self.rfe_model_type}")
         
         # Validation
-        if self.n_lrp_features > len(self.node_feature_names):
-            print(f"Warning: Requested {self.n_lrp_features} features but only {len(self.node_feature_names)} available")
-            self.n_lrp_features = len(self.node_feature_names)
+        if self.n_rfe_features > len(self.node_feature_names):
+            print(f"Warning: Requested {self.n_rfe_features} features but only {len(self.node_feature_names)} available")
+            self.n_rfe_features = len(self.node_feature_names)
         
-        if self.n_lrp_features < self.k_neighbors:
-            print(f"Warning: Selected features ({self.n_lrp_features}) < k_neighbors ({self.k_neighbors})")
-            print(f"  This may result in disconnected graph. Consider increasing n_lrp_features.")
+        if self.n_rfe_features < self.k_neighbors:
+            print(f"Warning: Selected features ({self.n_rfe_features}) < k_neighbors ({self.k_neighbors})")
+            print(f"  This may result in disconnected graph. Consider increasing n_rfe_features.")
+        
+        # Validate model type
+        valid_model_types = ['extratrees', 'linearsvr', 'randomforest', 'gradientboosting', 'xgboost', 'lightgbm']
+        if self.rfe_model_type not in valid_model_types:
+            print(f"Warning: Invalid rfe_model_type '{self.rfe_model_type}', using 'extratrees'")
+            self.rfe_model_type = 'extratrees'
         
         # Determine target column(s)
-        if self.target_for_lrp == 'first':
+        if self.target_for_rfe == 'first':
             target_col = self.target_df.columns[0]
             y = self.target_df[target_col].values
             print(f"Using target: {target_col}")
-        elif self.target_for_lrp == 'both':
-            # Use average of both targets for LRP
+        elif self.target_for_rfe == 'both':
+            # Use average of both targets for RFE
             y = self.target_df.mean(axis=1).values
             print(f"Using combined target: average of {list(self.target_df.columns)}")
         else:
             # Use specific target name
-            if self.target_for_lrp in self.target_df.columns:
-                y = self.target_df[self.target_for_lrp].values
-                print(f"Using target: {self.target_for_lrp}")
+            if self.target_for_rfe in self.target_df.columns:
+                y = self.target_df[self.target_for_rfe].values
+                print(f"Using target: {self.target_for_rfe}")
             else:
-                print(f"Warning: Target '{self.target_for_lrp}' not found, using first target")
+                print(f"Warning: Target '{self.target_for_rfe}' not found, using first target")
                 target_col = self.target_df.columns[0]
                 y = self.target_df[target_col].values
         
-        # Prepare feature matrix for LRP (transpose to n_samples × n_features)
+        # Prepare feature matrix for RFE (transpose to n_samples × n_features)
         X = self.feature_matrix.T  # Shape: (n_samples, n_features)
         
-        # Import and instantiate LRP feature selector
+        # Import and instantiate RFE feature selector
         try:
-            from utils.lrp_feature_selector import LRPFeatureSelector
+            from utils.rfe_feature_selector import RFEFeatureSelector
         except ImportError as e:
-            raise ImportError(f"Failed to import LRPFeatureSelector: {e}. "
-                           f"Please ensure src/utils/lrp_feature_selector.py exists.")
+            raise ImportError(f"Failed to import RFEFeatureSelector: {e}. "
+                           f"Please ensure src/utils/rfe_feature_selector.py exists.")
         
-        selector = LRPFeatureSelector(
-            n_hidden_layers=2,
-            hidden_dim=64,
-            epochs=100,
-            learning_rate=0.001,
+        selector = RFEFeatureSelector(
+            model_type=self.rfe_model_type,
             random_state=42
         )
         
-        # Fit LRP selector and get selected features
-        selected_indices, selected_names, relevance_dict = selector.fit(
+        # Fit RFE selector and get selected features
+        selected_indices, selected_names = selector.select_features(
             X=X,
             y=y,
-            n_features=self.n_lrp_features,
+            n_features=self.n_rfe_features,
             feature_names=self.node_feature_names
         )
         
@@ -375,16 +381,16 @@ class MicrobialGNNDataset:
                     if idx not in selected_set:
                         anchored_indices_to_add.append(idx)
                         selected_set.add(idx)  # Track to avoid duplicates
-                        print(f"  Adding anchored feature (not selected by LRP): {anchored_name}")
+                        print(f"  Adding anchored feature (not selected by RFE): {anchored_name}")
                     else:
-                        print(f"  Anchored feature already selected by LRP: {anchored_name}")
+                        print(f"  Anchored feature already selected by RFE: {anchored_name}")
             
             if anchored_indices_to_add:
                 selected_indices.extend(anchored_indices_to_add)
                 selected_names.extend([self.node_feature_names[i] for i in anchored_indices_to_add])
                 print(f"  Total features after adding {len(anchored_indices_to_add)} anchored features: {len(selected_indices)}")
             else:
-                print(f"  All anchored features were already selected by LRP")
+                print(f"  All anchored features were already selected by RFE")
         
         # Remove any duplicates while preserving order (safety check)
         seen = set()
@@ -407,7 +413,7 @@ class MicrobialGNNDataset:
         
         # Validation: Ensure we have at least some features
         if len(selected_indices) == 0:
-            raise ValueError("LRP feature selection resulted in 0 features. This should not happen.")
+            raise ValueError("RFE feature selection resulted in 0 features. This should not happen.")
         
         # Update feature matrix (keep only selected features)
         # feature_matrix shape is (n_features, n_samples), so we select rows
@@ -416,15 +422,15 @@ class MicrobialGNNDataset:
         # Update node feature names
         self.node_feature_names = selected_names
         
-        # Store original count BEFORE LRP (for explainer compatibility)
+        # Store original count BEFORE RFE (for explainer compatibility)
         # original_node_count should represent the count BEFORE any filtering
         if self.original_node_count is None:
             # This shouldn't happen, but set it to current count as fallback
             self.original_node_count = len(self.node_feature_names)
         # Note: original_node_count was already set in _create_node_features() to the full count
-        # We don't update it here because we want to preserve the original count before LRP
+        # We don't update it here because we want to preserve the original count before RFE
         
-        print(f"\n✅ LRP feature selection completed!")
+        print(f"\n✅ RFE feature selection completed!")
         print(f"Selected {len(selected_names)} features")
         if hasattr(self, 'original_node_count') and self.original_node_count:
             print(f"Original feature count: {self.original_node_count}")
@@ -648,8 +654,8 @@ class MicrobialGNNDataset:
 
     def _create_graph_structure(self):
         """Create graph structure based on correlation or distance metrics"""
-        # If LRP feature selection is enabled, create k-NN graph directly
-        if self.lrp_feature_selection:
+        # If RFE feature selection is enabled, create k-NN graph directly
+        if self.rfe_feature_selection:
             return self._create_knn_graph_from_features()
         
         # Otherwise, use existing correlation-based methods
@@ -666,14 +672,14 @@ class MicrobialGNNDataset:
         """
         Create k-NN graph directly from feature matrix (no correlation step).
         
-        This method is used when LRP feature selection is enabled.
+        This method is used when RFE feature selection is enabled.
         It creates edges between features based on similarity of their
         abundance patterns across samples.
         
         Returns:
             edge_index, edge_weight, edge_type
         """
-        print(f"Creating k-NN graph directly from LRP-selected features...")
+        print(f"Creating k-NN graph directly from RFE-selected features...")
         print(f"Features: {len(self.node_feature_names)}, k={self.k_neighbors}")
         
         from sklearn.neighbors import NearestNeighbors
@@ -1066,10 +1072,10 @@ class MicrobialGNNDataset:
 
     def _create_knn_graph(self, k=None):
         """Create a k-nearest neighbor sparsified version of the graph"""
-        # If LRP is enabled, graph is already k-NN, so just return it
-        if self.lrp_feature_selection:
-            print(f"LRP enabled: Graph is already k-NN, returning existing graph structure")
-            # When LRP is enabled, full_edge_index contains the k-NN graph
+        # If RFE is enabled, graph is already k-NN, so just return it
+        if self.rfe_feature_selection:
+            print(f"RFE enabled: Graph is already k-NN, returning existing graph structure")
+            # When RFE is enabled, full_edge_index contains the k-NN graph
             # Use it directly as edge_index (no additional sparsification needed)
             return self.full_edge_index.clone(), self.full_edge_weight.clone(), self.full_edge_type.clone()
         

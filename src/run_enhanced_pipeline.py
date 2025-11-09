@@ -4,7 +4,7 @@ Run Enhanced Edge-Based Sparsification Pipeline
 
 This script demonstrates how to run the enhanced domain expert pipeline
 with comprehensive validation framework including:
-- LRP-based feature selection (optional) to identify top N important genus features
+- RFE-based feature selection (optional) to identify top N important genus features
 - k-NN graph construction from selected features (no Spearman correlation)
 - Genus-level microbial analysis (higher taxonomic resolution)
 - Statistical validation with significance testing
@@ -14,20 +14,20 @@ with comprehensive validation framework including:
 - Ablation studies for component analysis
 
 Usage:
-    python run_enhanced_pipeline.py [--case case1] [--epochs 100] [--use_lrp] [--n_lrp_features 100]
+    python run_enhanced_pipeline.py [--case case1] [--epochs 100] [--use_rfe] [--n_rfe_features 100]
 
 Examples:
-    # Run full pipeline with case 1 (hydrogenotrophic focus) - NO LRP
+    # Run full pipeline with case 1 (hydrogenotrophic focus) - NO RFE
     python run_enhanced_pipeline.py --case case1
 
-    # Run with LRP feature selection (select top 40 features)
-    python run_enhanced_pipeline.py --case case1 --use_lrp --n_lrp_features 40
+    # Run with RFE feature selection (select top 40 features)
+    python run_enhanced_pipeline.py --case case1 --use_rfe --n_rfe_features 40
 
-    # Quick test run with LRP (minimal epochs)
-    python run_enhanced_pipeline.py --case case1 --use_lrp --n_lrp_features 20 --quick
+    # Quick test run with RFE (minimal epochs)
+    python run_enhanced_pipeline.py --case case1 --use_rfe --n_rfe_features 20 --quick
 
-    # Custom configuration with 80 LRP features and combined target
-    python run_enhanced_pipeline.py --case case2 --epochs 50 --use_lrp --n_lrp_features 80 --target_for_lrp both
+    # Custom configuration with 80 RFE features and combined target
+    python run_enhanced_pipeline.py --case case2 --epochs 50 --use_rfe --n_rfe_features 80 --target_for_rfe both --rfe_model_type linearsvr
 """
 
 import argparse
@@ -49,12 +49,15 @@ def main():
     parser.add_argument('--graph_method', default='original',
                         choices=['original', 'hybrid'],
                         help='Graph construction method (default: original, paper_correlation removed)')
-    parser.add_argument('--use_lrp', action='store_true',
-                        help='Enable LRP feature selection before graph construction')
-    parser.add_argument('--n_lrp_features', type=int, default=100, choices=[20, 40, 50, 80, 100],
-                        help='Number of features to select using LRP (default: 100)')
-    parser.add_argument('--target_for_lrp', default='first', choices=['first', 'both'],
-                        help='Target to use for LRP selection (default: first)')
+    parser.add_argument('--use_rfe', action='store_true',
+                        help='Enable RFE feature selection before graph construction')
+    parser.add_argument('--n_rfe_features', type=int, default=100, choices=[20, 40, 50, 80, 100],
+                        help='Number of features to select using RFE (default: 100)')
+    parser.add_argument('--target_for_rfe', default='first', choices=['first', 'both'],
+                        help='Target to use for RFE selection (default: first)')
+    parser.add_argument('--rfe_model_type', default='extratrees', 
+                        choices=['extratrees', 'linearsvr', 'randomforest', 'gradientboosting', 'xgboost', 'lightgbm'],
+                        help='Model type for RFE feature selection (default: extratrees)')
     parser.add_argument('--importance_threshold', type=float, default=0.5,
                         help='Threshold for explainer edge importance (default: 0.5 = keep top 50%% of edges)')
 
@@ -87,7 +90,7 @@ Nested CV: {nested_cv}
 Data: {args.data_path}
 Graph Mode: genus (genus-level analysis for higher taxonomic resolution)
 Sparsification: Edge-based using GNNExplainer
-LRP Feature Selection: {'Enabled' if args.use_lrp else 'Disabled'} ({args.n_lrp_features} features if enabled)
+RFE Feature Selection: {'Enabled' if args.use_rfe else 'Disabled'} ({args.n_rfe_features} features if enabled, model: {args.rfe_model_type})
 {'='*80}
 
 Key Features Enabled:
@@ -98,7 +101,7 @@ Key Features Enabled:
 ✅ Comprehensive baseline comparisons
 ✅ Biological validation with pathway enrichment
 ✅ Ablation studies for component analysis
-{f'✅ LRP feature selection ({args.n_lrp_features} features)' if args.use_lrp else '⚠️  LRP feature selection disabled (using all features)'}
+{f'✅ RFE feature selection ({args.n_rfe_features} features, {args.rfe_model_type})' if args.use_rfe else '⚠️  RFE feature selection disabled (using all features)'}
 {'='*80}
 """)
     
@@ -137,13 +140,14 @@ Key Features Enabled:
             'learning_rate': 0.001,         # Lower for stability
             'patience': 30 if not args.quick else 5,  # More patience for convergence
             'importance_threshold': 0.5,    # Keep 50% of edges (was 30%)
-            'graph_construction_method': 'original',  # Always 'original' (handles LRP internally)
+            'graph_construction_method': 'original',  # Always 'original' (handles RFE internally)
             'use_node_pruning': False,
             'weight_decay': 1e-4,
             'family_filter_mode': 'strict',
-            'use_lrp_feature_selection': args.use_lrp,
-            'n_lrp_features': args.n_lrp_features,
-            'target_for_lrp': args.target_for_lrp,
+            'use_rfe_feature_selection': args.use_rfe,
+            'n_rfe_features': args.n_rfe_features,
+            'target_for_rfe': args.target_for_rfe,
+            'rfe_model_type': args.rfe_model_type,
         }
         
         print("Initializing enhanced pipeline...")
@@ -293,10 +297,11 @@ def run_all_cases(args):
                 'learning_rate': 0.001,
                 'patience': 20 if not args.quick else 5,
                 'importance_threshold': args.importance_threshold,
-                'graph_construction_method': 'original',  # Always 'original' (handles LRP internally)
-                'use_lrp_feature_selection': args.use_lrp,
-                'n_lrp_features': args.n_lrp_features,
-                'target_for_lrp': args.target_for_lrp,
+                'graph_construction_method': 'original',  # Always 'original' (handles RFE internally)
+                'use_rfe_feature_selection': args.use_rfe,
+                'n_rfe_features': args.n_rfe_features,
+                'target_for_rfe': args.target_for_rfe,
+                'rfe_model_type': args.rfe_model_type,
             }
 
             start_time = time.time()
