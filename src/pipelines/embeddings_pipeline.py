@@ -2711,6 +2711,9 @@ class MixedEmbeddingPipeline:
                 # Clear gradients and intermediate values to free memory
                 optimizer.zero_grad(set_to_none=True)
                 del loss, out, target, x_input, edge_input, batch_input, target_input
+                # Clear CUDA cache periodically to prevent OOM
+                if torch.cuda.is_available():
+                    torch.cuda.empty_cache()
             
             # Validation
             model.eval()

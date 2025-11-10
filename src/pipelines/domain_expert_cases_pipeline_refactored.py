@@ -307,8 +307,8 @@ class DomainExpertCasesPipeline(MixedEmbeddingPipeline):
     
     def _setup_hyperparameter_grids(self):
         """Setup comprehensive hyperparameter grids for production use."""
-        # Production hyperparameter options
-        hidden_dim_options = [512, 128, 64]  
+        # Production hyperparameter options (reduced 512 to prevent OOM)
+        hidden_dim_options = [128, 64, 32]  # Removed 512 to prevent CUDA OOM
         k_neighbors_options = [8, 10, 12]    
         
         # Main GNN hyperparameter grid
