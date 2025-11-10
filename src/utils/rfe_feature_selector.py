@@ -69,7 +69,9 @@ class RFEFeatureSelector:
             Estimator instance
         """
         if self.model_type == 'linearsvr':
-            return LinearSVR(random_state=self.random_state, max_iter=100000, tol=1e-4, dual=True)
+            # dual='auto' chooses the optimal solver based on n_samples vs n_features
+            # For your case (54 samples), it will automatically use dual=False (primal)
+            return LinearSVR(random_state=self.random_state, max_iter=100000, tol=1e-4, dual='auto')
         elif self.model_type == 'extratrees':
             return ExtraTreesRegressor(n_estimators=n_estimators, random_state=self.random_state, n_jobs=-1)
         elif self.model_type == 'randomforest':

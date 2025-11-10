@@ -68,14 +68,14 @@ class MicrobialGNNDataset:
         
         # Load and process data
         self._load_data()
-        
+
         # Create node features (must be done before graph structure)
         self.df_features, self.feature_matrix = self._create_node_features()
-        
-        # NEW STEP: RFE feature selection (if enabled)
-        if self.rfe_feature_selection:
-            self._select_features_with_rfe()
-        
+
+        # IMPORTANT: RFE feature selection is NO LONGER performed here to avoid data leakage
+        # It must be performed separately for each CV fold using perform_rfe_on_train_data()
+        # The full feature set is kept here, and feature selection happens in the training loop
+
         # Create graph structure (now feature_matrix is available)
         self.full_edge_index, self.full_edge_weight, self.full_edge_type = self._create_graph_structure()
         
@@ -437,7 +437,197 @@ class MicrobialGNNDataset:
             print(f"Reduction: {self.original_node_count - len(selected_names)} features removed")
         print(f"Feature matrix shape: {self.feature_matrix.shape} (features × samples)")
         print(f"{'='*80}\n")
-    
+
+    def perform_rfe_on_train_data(self, train_indices, target_idx=0):
+        """
+        Perform RFE feature selection on training data only (NO DATA LEAKAGE).
+
+        This method should be called within each CV fold to select features
+        based only on training samples, preventing information leakage from test sets.
+
+        Args:
+            train_indices: List/array of training sample indices
+            target_idx: Index of target variable to use for RFE (default: 0 for first target)
+
+        Returns:
+            selected_indices: List of selected feature indices
+            selected_names: List of selected feature names
+        """
+        if not self.rfe_feature_selection:
+            # If RFE is disabled, return all features
+            return list(range(len(self.node_feature_names))), self.node_feature_names.copy()
+
+        print(f"\n{'='*80}")
+        print("RFE FEATURE SELECTION (TRAINING DATA ONLY - NO LEAKAGE)")
+        print(f"{'='*80}")
+        print(f"Total features: {len(self.node_feature_names)}")
+        print(f"Target number of features: {self.n_rfe_features}")
+        print(f"Training samples: {len(train_indices)}")
+        print(f"RFE model type: {self.rfe_model_type}")
+
+        # Validation
+        if self.n_rfe_features > len(self.node_feature_names):
+            print(f"Warning: Requested {self.n_rfe_features} features but only {len(self.node_feature_names)} available")
+            n_features_to_select = len(self.node_feature_names)
+        else:
+            n_features_to_select = self.n_rfe_features
+
+        if n_features_to_select < self.k_neighbors:
+            print(f"Warning: Selected features ({n_features_to_select}) < k_neighbors ({self.k_neighbors})")
+            print(f"  This may result in disconnected graph.")
+
+        # Prepare feature matrix for TRAINING DATA ONLY
+        # feature_matrix shape is (n_features, n_samples), select training samples
+        X_train = self.feature_matrix[:, train_indices].T  # Shape: (n_train_samples, n_features)
+
+        # Get target values for TRAINING DATA ONLY
+        if self.target_for_rfe == 'first':
+            y_train = self.target_df.iloc[train_indices, 0].values
+            print(f"Using target: {self.target_df.columns[0]}")
+        elif self.target_for_rfe == 'both':
+            y_train = self.target_df.iloc[train_indices].mean(axis=1).values
+            print(f"Using combined target: average of {list(self.target_df.columns)}")
+        else:
+            # Use specific target by index
+            if isinstance(target_idx, int) and 0 <= target_idx < len(self.target_df.columns):
+                y_train = self.target_df.iloc[train_indices, target_idx].values
+                print(f"Using target: {self.target_df.columns[target_idx]}")
+            else:
+                # Fallback to first target
+                y_train = self.target_df.iloc[train_indices, 0].values
+                print(f"Using default target: {self.target_df.columns[0]}")
+
+        # Import and instantiate RFE feature selector
+        try:
+            from utils.rfe_feature_selector import RFEFeatureSelector
+        except ImportError as e:
+            raise ImportError(f"Failed to import RFEFeatureSelector: {e}")
+
+        selector = RFEFeatureSelector(
+            model_type=self.rfe_model_type,
+            random_state=42
+        )
+
+        # Fit RFE selector on TRAINING DATA ONLY
+        selected_indices, selected_names = selector.select_features(
+            X=X_train,  # ← Only training samples
+            y=y_train,  # ← Only training targets
+            n_features=n_features_to_select,
+            feature_names=self.node_feature_names
+        )
+
+        # PROTECT ANCHORED FEATURES (if any)
+        anchored_indices_to_add = []
+        if hasattr(self, 'protected_nodes') and self.protected_nodes:
+            print(f"\n🔒 Protecting {len(self.protected_nodes)} anchored features...")
+            selected_set = set(selected_indices)
+            for anchored_name in self.protected_nodes:
+                if anchored_name in self.node_feature_names:
+                    idx = self.node_feature_names.index(anchored_name)
+                    if idx not in selected_set:
+                        anchored_indices_to_add.append(idx)
+                        selected_set.add(idx)
+                        print(f"  Adding anchored feature (not selected by RFE): {anchored_name}")
+                    else:
+                        print(f"  Anchored feature already selected by RFE: {anchored_name}")
+
+            if anchored_indices_to_add:
+                selected_indices.extend(anchored_indices_to_add)
+                selected_names.extend([self.node_feature_names[i] for i in anchored_indices_to_add])
+                print(f"  Total features after adding {len(anchored_indices_to_add)} anchored: {len(selected_indices)}")
+
+        # Remove duplicates while preserving order
+        seen = set()
+        unique_indices = []
+        unique_names = []
+        for idx, name in zip(selected_indices, selected_names):
+            if idx not in seen:
+                seen.add(idx)
+                unique_indices.append(idx)
+                unique_names.append(name)
+
+        if len(unique_indices) < len(selected_indices):
+            print(f"  ⚠️ Removed {len(selected_indices) - len(unique_indices)} duplicate features")
+
+        print(f"\n✅ RFE feature selection completed!")
+        print(f"Selected {len(unique_indices)} features from {len(self.node_feature_names)} total")
+        print(f"Top 5 selected features: {unique_names[:5]}")
+        print(f"{'='*80}\n")
+
+        return unique_indices, unique_names
+
+    def create_feature_subset_data_objects(self, selected_feature_indices, data_indices=None):
+        """
+        Create new PyG Data objects with only selected features.
+
+        This creates a subset of the dataset using only the features selected by RFE,
+        applying the same selection to both node features and graph structure.
+
+        Args:
+            selected_feature_indices: List of feature indices to keep
+            data_indices: Optional list of data sample indices to include (default: all samples)
+
+        Returns:
+            List of PyG Data objects with selected features only
+        """
+        if data_indices is None:
+            data_indices = list(range(len(self.data_list)))
+
+        # Create mapping from old feature indices to new feature indices
+        new_idx_map = {old_idx: new_idx for new_idx, old_idx in enumerate(selected_feature_indices)}
+
+        new_data_list = []
+        for sample_idx in data_indices:
+            old_data = self.data_list[sample_idx]
+
+            # Select only the chosen features from node features
+            # old_data.x shape: (n_nodes, n_node_features)
+            # We want to select rows (nodes) corresponding to selected_feature_indices
+            new_x = old_data.x[selected_feature_indices, :]
+
+            # Filter edges to only include edges between selected nodes
+            # old_data.edge_index shape: (2, n_edges)
+            old_edge_index = old_data.edge_index
+            old_edge_attr = old_data.edge_attr if hasattr(old_data, 'edge_attr') and old_data.edge_attr is not None else None
+
+            # Find edges where both source and target are in selected features
+            valid_edges_mask = torch.tensor([
+                (edge[0].item() in new_idx_map and edge[1].item() in new_idx_map)
+                for edge in old_edge_index.t()
+            ], dtype=torch.bool)
+
+            # Filter edges and remap indices
+            if valid_edges_mask.any():
+                valid_edge_index = old_edge_index[:, valid_edges_mask]
+                # Remap node indices to new positions
+                new_edge_index = torch.tensor([
+                    [new_idx_map[edge[0].item()], new_idx_map[edge[1].item()]]
+                    for edge in valid_edge_index.t()
+                ], dtype=torch.long).t()
+
+                # Filter edge attributes if they exist
+                if old_edge_attr is not None:
+                    new_edge_attr = old_edge_attr[valid_edges_mask]
+                else:
+                    new_edge_attr = None
+            else:
+                # No valid edges - create empty edge_index
+                print(f"Warning: Sample {sample_idx} has no edges after feature selection")
+                new_edge_index = torch.empty((2, 0), dtype=torch.long)
+                new_edge_attr = None
+
+            # Create new Data object
+            new_data = Data(
+                x=new_x,
+                edge_index=new_edge_index,
+                edge_attr=new_edge_attr,
+                y=old_data.y  # Keep same targets
+            )
+
+            new_data_list.append(new_data)
+
+        return new_data_list
+
     def _compute_distance_matrix(self, vec, metric='euclidean'):
         """Compute distance matrix between samples for a given feature"""
         if vec.ndim == 1:

@@ -434,18 +434,48 @@ class MixedEmbeddingPipeline:
                 temp_data_list = self._move_data_to_device(temp_dataset.data_list)
             
             val_scores = []
-            
+
             for tr_idx, val_idx in inner_kf.split(temp_data_list):
+                # CRITICAL FIX: Perform RFE on inner training data if enabled
+                if hasattr(self.dataset, 'rfe_feature_selection') and self.dataset.rfe_feature_selection and not is_explainer_phase:
+                    # Perform RFE on inner training samples only
+                    # Note: Use self.dataset (original full feature set) for RFE, not temp_dataset
+                    inner_selected_features, _ = self.dataset.perform_rfe_on_train_data(
+                        train_indices=tr_idx,
+                        target_idx=target_idx
+                    )
+
+                    # Create feature-subset data for inner train and validation
+                    inner_train_data = self.dataset.create_feature_subset_data_objects(
+                        selected_feature_indices=inner_selected_features,
+                        data_indices=tr_idx
+                    )
+                    inner_val_data = self.dataset.create_feature_subset_data_objects(
+                        selected_feature_indices=inner_selected_features,
+                        data_indices=val_idx
+                    )
+
+                    # Combine for this inner fold
+                    inner_fold_data = inner_train_data + inner_val_data
+                    # Update indices to match the new combined list
+                    inner_tr_idx = list(range(len(inner_train_data)))
+                    inner_val_idx = list(range(len(inner_train_data), len(inner_fold_data)))
+                else:
+                    # No RFE or explainer phase - use temp_data_list as is
+                    inner_fold_data = temp_data_list
+                    inner_tr_idx = tr_idx
+                    inner_val_idx = val_idx
+
                 # Create completely fresh model instance to avoid autograd issues
                 model = self._create_gnn_model_with_params(model_type, local_hidden_dim, num_targets=1)
                 model.to(device)
-                
+
                 # Ensure no gradients are carried over
                 for param in model.parameters():
                     param.grad = None
-                
+
                 mse_score = self._train_and_evaluate_once_with_params(
-                    model, temp_data_list, tr_idx, val_idx, target_idx, 
+                    model, inner_fold_data, inner_tr_idx, inner_val_idx, target_idx,
                     hidden_dim=local_hidden_dim
                 )
                 
@@ -678,10 +708,36 @@ class MixedEmbeddingPipeline:
             print(f"\n  {'-'*50}")
             print(f"  OUTER FOLD {fold_num}/{self.num_folds}")
             print(f"  {'-'*50}")
-            
-            train_data = [data_list[i] for i in train_idx]
-            test_data = [data_list[i] for i in test_idx]
-            
+
+            # CRITICAL FIX: Perform RFE on training data only (if enabled)
+            if hasattr(self.dataset, 'rfe_feature_selection') and self.dataset.rfe_feature_selection:
+                print(f"\n  🔬 Performing RFE feature selection on training data only...")
+
+                # Perform RFE on training samples only
+                selected_feature_indices, selected_feature_names = self.dataset.perform_rfe_on_train_data(
+                    train_indices=train_idx,
+                    target_idx=target_idx
+                )
+
+                print(f"  ✅ RFE completed: {len(selected_feature_indices)} features selected")
+
+                # Create feature-subset data objects for train and test
+                train_data = self.dataset.create_feature_subset_data_objects(
+                    selected_feature_indices=selected_feature_indices,
+                    data_indices=train_idx
+                )
+                test_data = self.dataset.create_feature_subset_data_objects(
+                    selected_feature_indices=selected_feature_indices,
+                    data_indices=test_idx
+                )
+
+                print(f"  Train data: {len(train_data)} samples with {len(selected_feature_indices)} features")
+                print(f"  Test data: {len(test_data)} samples with {len(selected_feature_indices)} features")
+            else:
+                # No RFE - use full feature set
+                train_data = [data_list[i] for i in train_idx]
+                test_data = [data_list[i] for i in test_idx]
+
             # 1. Inner loop: pick hyperparameters
             print(f"  Inner CV Hyperparameter Selection:")
             best_params = self._inner_loop_select(model_type, train_data, target_idx)
@@ -932,11 +988,36 @@ class MixedEmbeddingPipeline:
         for fold, (train_index, test_index) in enumerate(kf.split(data_list)):
             fold_num = fold + 1
             print(f"  Fold {fold_num}/{self.num_folds}")
-            
-            # Split into train and test sets
-            train_dataset = [data_list[i] for i in train_index]
-            test_dataset = [data_list[i] for i in test_index]
-            
+
+            # CRITICAL FIX: Perform RFE on training data only (if enabled)
+            if hasattr(self.dataset, 'rfe_feature_selection') and self.dataset.rfe_feature_selection:
+                print(f"\n  🔬 Performing RFE feature selection on training data only...")
+
+                # Perform RFE on training samples only
+                selected_feature_indices, selected_feature_names = self.dataset.perform_rfe_on_train_data(
+                    train_indices=train_index,
+                    target_idx=target_idx
+                )
+
+                print(f"  ✅ RFE completed: {len(selected_feature_indices)} features selected")
+
+                # Create feature-subset data objects for train and test
+                train_dataset = self.dataset.create_feature_subset_data_objects(
+                    selected_feature_indices=selected_feature_indices,
+                    data_indices=train_index
+                )
+                test_dataset = self.dataset.create_feature_subset_data_objects(
+                    selected_feature_indices=selected_feature_indices,
+                    data_indices=test_index
+                )
+
+                print(f"  Train data: {len(train_dataset)} samples with {len(selected_feature_indices)} features")
+                print(f"  Test data: {len(test_dataset)} samples with {len(selected_feature_indices)} features")
+            else:
+                # No RFE - use full feature set
+                train_dataset = [data_list[i] for i in train_index]
+                test_dataset = [data_list[i] for i in test_index]
+
             # Create data loaders
             train_loader = DataLoader(train_dataset, batch_size=self.batch_size, shuffle=True)
             test_loader = DataLoader(test_dataset, batch_size=self.batch_size, shuffle=False)
