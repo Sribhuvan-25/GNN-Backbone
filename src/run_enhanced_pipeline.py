@@ -136,7 +136,7 @@ Key Features Enabled:
             'k_neighbors': 10,              # Increased for better connectivity
             'hidden_dim': 64,
             'dropout_rate': 0.2,            # Reduced for limited data
-            'batch_size': 16,               # Larger for stable batch norm
+            'batch_size': 4,                # Reduced to prevent CUDA OOM errors
             'learning_rate': 0.001,         # Lower for stability
             'patience': 30 if not args.quick else 5,  # More patience for convergence
             'importance_threshold': 0.5,    # Keep 50% of edges (was 30%)
@@ -293,7 +293,7 @@ def run_all_cases(args):
                 'k_neighbors': 10,
                 'hidden_dim': 64,
                 'dropout_rate': 0.3,
-                'batch_size': 8,
+                'batch_size': 4,  # Reduced to prevent CUDA OOM errors
                 'learning_rate': 0.001,
                 'patience': 20 if not args.quick else 5,
                 'importance_threshold': args.importance_threshold,

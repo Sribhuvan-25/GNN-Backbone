@@ -339,6 +339,12 @@ class MixedEmbeddingPipeline:
                 optimizer.step()
                 
                 total_train_loss += loss.item() * batch_data.num_graphs
+                
+                # Clear memory to prevent OOM
+                optimizer.zero_grad(set_to_none=True)
+                del loss, out, target, x_input, edge_input, batch_input, target_input
+                if torch.cuda.is_available():
+                    torch.cuda.empty_cache()
             
             # Validation
             model.eval()
@@ -591,6 +597,12 @@ class MixedEmbeddingPipeline:
                 optimizer.step()
                 
                 total_train_loss += loss.item() * batch_data.num_graphs
+                
+                # Clear memory to prevent OOM
+                optimizer.zero_grad(set_to_none=True)
+                del loss, out, target, x_input, edge_input, batch_input, target_input
+                if torch.cuda.is_available():
+                    torch.cuda.empty_cache()
             
             avg_train_loss = total_train_loss / len(train_loader.dataset)
             scheduler.step(avg_train_loss)
@@ -1057,6 +1069,12 @@ class MixedEmbeddingPipeline:
                     optimizer.step()
                     
                     total_train_loss += loss.item() * batch_data.num_graphs
+                    
+                    # Clear memory to prevent OOM
+                    optimizer.zero_grad(set_to_none=True)
+                    del loss, out, target, feat
+                    if torch.cuda.is_available():
+                        torch.cuda.empty_cache()
                 
                 avg_train_loss = total_train_loss / len(train_loader.dataset)
                 train_losses.append(avg_train_loss)
@@ -2792,6 +2810,9 @@ class MixedEmbeddingPipeline:
                 # Clear gradients and intermediate values to free memory
                 optimizer.zero_grad(set_to_none=True)
                 del loss, out, target, x_input, edge_input, batch_input, target_input
+                # Clear CUDA cache periodically to prevent OOM
+                if torch.cuda.is_available():
+                    torch.cuda.empty_cache()
             
             # Validation
             model.eval()
@@ -2804,6 +2825,11 @@ class MixedEmbeddingPipeline:
                     target = batch_data.y[:, target_idx].view(-1, 1)
                     loss = criterion(out, target)
                     total_val_loss += loss.item() * batch_data.num_graphs
+                    # Clear intermediate values during validation
+                    del out, feat, target, loss
+                # Clear CUDA cache after validation
+                if torch.cuda.is_available():
+                    torch.cuda.empty_cache()
             
             avg_val_loss = total_val_loss / len(val_loader.dataset)
             scheduler.step(avg_val_loss)
