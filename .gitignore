@@ -28,6 +28,7 @@ methane_results/
 methane_results_v2/
 gat_test_results/
 graph_visualizations/
+Notes/
 
 # Generated output directories
 embeddings/
