@@ -123,11 +123,17 @@ class CaseImplementations:
         print(f"{'='*60}")
         results['ace_km'] = pipeline._run_single_target_pipeline(ace_target_idx, "ACE-km")
         
-        # Reset dataset to original state between targets for independent processing
+        # Reset dataset between targets for independent processing
+        # If RFE or LRP is enabled, reset to pre-feature-selection state to allow target-specific selection
         print(f"\n{'='*60}")
         print("RESETTING DATASET BETWEEN TARGETS")
         print(f"{'='*60}")
-        pipeline.dataset.reset_to_original_state()
+        if hasattr(pipeline.dataset, 'lrp_feature_selection') and pipeline.dataset.lrp_feature_selection:
+            pipeline.dataset.reset_to_pre_lrp_state()
+        elif hasattr(pipeline.dataset, 'rfe_feature_selection') and pipeline.dataset.rfe_feature_selection:
+            pipeline.dataset.reset_to_pre_rfe_state()
+        else:
+            pipeline.dataset.reset_to_original_state()
         
         print(f"\n{'='*60}")
         print("CASE 1b: H2-km with hydrogenotrophic features")
@@ -162,11 +168,17 @@ class CaseImplementations:
         print(f"{'='*60}")
         results['ace_km'] = pipeline._run_single_target_pipeline(ace_target_idx, "ACE-km")
         
-        # Reset dataset to original state between targets for independent processing
+        # Reset dataset between targets for independent processing
+        # If RFE or LRP is enabled, reset to pre-feature-selection state to allow target-specific selection
         print(f"\n{'='*60}")
         print("RESETTING DATASET BETWEEN TARGETS")
         print(f"{'='*60}")
-        pipeline.dataset.reset_to_original_state()
+        if hasattr(pipeline.dataset, 'lrp_feature_selection') and pipeline.dataset.lrp_feature_selection:
+            pipeline.dataset.reset_to_pre_lrp_state()
+        elif hasattr(pipeline.dataset, 'rfe_feature_selection') and pipeline.dataset.rfe_feature_selection:
+            pipeline.dataset.reset_to_pre_rfe_state()
+        else:
+            pipeline.dataset.reset_to_original_state()
         
         print(f"\n{'='*60}")
         print("CASE 2b: H2-km with acetoclastic features")
@@ -201,11 +213,17 @@ class CaseImplementations:
         print(f"{'='*60}")
         results['ace_km'] = pipeline._run_single_target_pipeline(ace_target_idx, "ACE-km")
         
-        # Reset dataset to original state between targets for independent processing
+        # Reset dataset between targets for independent processing
+        # If RFE or LRP is enabled, reset to pre-feature-selection state to allow target-specific selection
         print(f"\n{'='*60}")
         print("RESETTING DATASET BETWEEN TARGETS")
         print(f"{'='*60}")
-        pipeline.dataset.reset_to_original_state()
+        if hasattr(pipeline.dataset, 'lrp_feature_selection') and pipeline.dataset.lrp_feature_selection:
+            pipeline.dataset.reset_to_pre_lrp_state()
+        elif hasattr(pipeline.dataset, 'rfe_feature_selection') and pipeline.dataset.rfe_feature_selection:
+            pipeline.dataset.reset_to_pre_rfe_state()
+        else:
+            pipeline.dataset.reset_to_original_state()
         
         print(f"\n{'='*60}")
         print("CASE 3b: H2-km with all feature groups")

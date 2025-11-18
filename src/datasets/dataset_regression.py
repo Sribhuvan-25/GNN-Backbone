@@ -66,17 +66,35 @@ class MicrobialGNNDataset:
         self.original_graph_data = None
         self.explainer_sparsified_graph_data = None
         
+        # Pre-RFE state containers (for target-specific feature selection)
+        self.pre_rfe_feature_matrix = None
+        self.pre_rfe_node_names = None
+        self.pre_rfe_df_features = None
+        self.rfe_applied = False  # Track if RFE has been applied
+        
         # Load and process data
         self._load_data()
-
+        
         # Create node features (must be done before graph structure)
         self.df_features, self.feature_matrix = self._create_node_features()
-
-        # IMPORTANT: RFE feature selection is NO LONGER performed here to avoid data leakage
-        # It must be performed separately for each CV fold using perform_rfe_on_train_data()
-        # The full feature set is kept here, and feature selection happens in the training loop
-
+        
+        # ✅ NEW: Save pre-RFE state (BEFORE applying RFE)
+        # This allows applying RFE separately for different targets
+        if self.rfe_feature_selection:
+            print("\n" + "="*80)
+            print("SAVING PRE-RFE STATE FOR TARGET-SPECIFIC FEATURE SELECTION")
+            print("="*80)
+            self.pre_rfe_feature_matrix = self.feature_matrix.copy()
+            self.pre_rfe_node_names = self.node_feature_names.copy()
+            self.pre_rfe_df_features = self.df_features.copy()
+            self.rfe_applied = False  # Track if RFE has been applied
+            print(f"✅ Saved state with {len(self.pre_rfe_node_names)} features")
+            print(f"📌 RFE will be applied on-demand for each target separately")
+            print("="*80 + "\n")
+            # NOTE: Don't apply RFE here - it will be applied per-target in the pipeline
+        
         # Create graph structure (now feature_matrix is available)
+        # Note: Graph will be rebuilt after RFE is applied per-target
         self.full_edge_index, self.full_edge_weight, self.full_edge_type = self._create_graph_structure()
         
         # Create KNN sparsified graph structure (always use KNN for initial graph)
@@ -145,6 +163,130 @@ class MicrobialGNNDataset:
             self.edge_type = self.original_graph_data['edge_type'].clone()
             
         print(f"Dataset reset complete - back to {len(self.node_feature_names)} nodes")
+    
+    def reset_to_pre_rfe_state(self):
+        """
+        Reset dataset to state BEFORE RFE selection was applied.
+        
+        This allows applying RFE separately for different targets.
+        """
+        if not self.rfe_feature_selection:
+            print("Warning: RFE not enabled, nothing to reset")
+            return
+        
+        if not hasattr(self, 'pre_rfe_feature_matrix') or self.pre_rfe_feature_matrix is None:
+            print("Warning: No pre-RFE state saved")
+            return
+        
+        print("\n" + "="*80)
+        print("RESETTING TO PRE-RFE STATE")
+        print("="*80)
+        print(f"Current features: {len(self.node_feature_names)}")
+        print(f"Restoring to: {len(self.pre_rfe_node_names)} features")
+        
+        # Restore pre-RFE feature data
+        self.feature_matrix = self.pre_rfe_feature_matrix.copy()
+        self.node_feature_names = self.pre_rfe_node_names.copy()
+        self.df_features = self.pre_rfe_df_features.copy()
+        
+        # Mark RFE as not applied
+        self.rfe_applied = False
+        
+        # Rebuild graph structure with all features
+        self.full_edge_index, self.full_edge_weight, self.full_edge_type = self._create_graph_structure()
+        self.edge_index, self.edge_weight, self.edge_type = self._create_knn_graph(k=self.k_neighbors)
+        
+        # Recreate data objects
+        self.data_list = self._create_data_objects()
+        self.original_data_list = [data.clone() for data in self.data_list]
+        
+        # Update original graph data
+        self.original_graph_data = {
+            'original_edge_index': self.full_edge_index.clone(),
+            'original_edge_weight': self.full_edge_weight.clone(),
+            'original_edge_type': self.full_edge_type.clone(),
+            'edge_index': self.edge_index.clone(),
+            'edge_weight': self.edge_weight.clone(),
+            'edge_type': self.edge_type.clone(),
+            'original_node_names': self.node_feature_names.copy(),
+            'use_rfe_feature_selection': self.rfe_feature_selection,
+            'n_rfe_features': self.n_rfe_features if self.rfe_feature_selection else None,
+            'rfe_model_type': self.rfe_model_type if self.rfe_feature_selection else None
+        }
+        
+        # Reset explainer data
+        self.explainer_sparsified_graph_data = None
+        
+        print(f"✅ Reset complete: {len(self.node_feature_names)} features restored")
+        print("="*80 + "\n")
+
+    def apply_rfe_for_specific_target(self, target_name):
+        """
+        Apply RFE feature selection for a specific target.
+        
+        This method:
+        1. Resets to pre-RFE state (if RFE already applied)
+        2. Applies RFE using the specified target
+        3. Rebuilds graph and data objects with selected features
+        
+        Args:
+            target_name: Name of target to use for RFE ('ACE-km', 'H2-km', etc.)
+        """
+        if not self.rfe_feature_selection:
+            print(f"Warning: RFE not enabled, skipping target-specific selection for {target_name}")
+            return
+        
+        print("\n" + "="*80)
+        print(f"APPLYING TARGET-SPECIFIC RFE FOR: {target_name.upper()}")
+        print("="*80)
+        
+        # Reset to pre-RFE state if RFE was already applied
+        if self.rfe_applied:
+            print(f"📌 RFE was already applied for another target, resetting first...")
+            self.reset_to_pre_rfe_state()
+        
+        # Set target_for_rfe to this specific target
+        original_target = self.target_for_rfe
+        self.target_for_rfe = target_name
+        
+        # Apply RFE with this target
+        self._select_features_with_rfe()
+        
+        # Mark as applied
+        self.rfe_applied = True
+        
+        # Restore original target setting (for reference)
+        self.target_for_rfe = original_target
+        
+        # Rebuild graph structure with selected features
+        print(f"\n🔄 Rebuilding graph structure with {len(self.node_feature_names)} selected features...")
+        self.full_edge_index, self.full_edge_weight, self.full_edge_type = self._create_graph_structure()
+        self.edge_index, self.edge_weight, self.edge_type = self._create_knn_graph(k=self.k_neighbors)
+        
+        # Recreate data objects with new graph
+        self.data_list = self._create_data_objects()
+        self.original_data_list = [data.clone() for data in self.data_list]
+        
+        # Update original graph data
+        self.original_graph_data = {
+            'original_edge_index': self.full_edge_index.clone(),
+            'original_edge_weight': self.full_edge_weight.clone(),
+            'original_edge_type': self.full_edge_type.clone(),
+            'edge_index': self.edge_index.clone(),
+            'edge_weight': self.edge_weight.clone(),
+            'edge_type': self.edge_type.clone(),
+            'original_node_names': self.node_feature_names.copy(),
+            'use_rfe_feature_selection': self.rfe_feature_selection,
+            'n_rfe_features': self.n_rfe_features if self.rfe_feature_selection else None,
+            'rfe_model_type': self.rfe_model_type if self.rfe_feature_selection else None
+        }
+        
+        # Reset explainer data
+        self.explainer_sparsified_graph_data = None
+        
+        print(f"✅ RFE applied for {target_name}: {len(self.node_feature_names)} features selected")
+        print(f"✅ Graph rebuilt: {self.edge_index.shape[1]//2} edges")
+        print("="*80 + "\n")
     
     def _load_data(self):
         """Load and process the data"""

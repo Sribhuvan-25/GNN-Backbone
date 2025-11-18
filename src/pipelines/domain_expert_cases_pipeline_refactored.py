@@ -435,8 +435,13 @@ class DomainExpertCasesPipeline(MixedEmbeddingPipeline):
         print(f"\n{'='*60}")
         print(f"SINGLE TARGET PIPELINE: {target_name}")
         print(f"Target index: {target_idx}")
-        print(f"Features: {len(self.dataset.node_feature_names)}")
+        print(f"Features (before target-specific RFE): {len(self.dataset.node_feature_names)}")
         print(f"{'='*60}")
+        
+        # ✅ NEW: Apply target-specific RFE if enabled
+        if self.dataset.rfe_feature_selection:
+            self.dataset.apply_rfe_for_specific_target(target_name)
+            print(f"Features (after target-specific RFE): {len(self.dataset.node_feature_names)}")
         
         results = {}
         
