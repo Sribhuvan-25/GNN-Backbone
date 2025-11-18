@@ -328,6 +328,7 @@ class MicrobialGNNDataset:
             self.rfe_model_type = 'extratrees'
         
         # Determine target column(s)
+        # ✅ FIX: Support target-specific selection by target name (with fuzzy matching)
         if self.target_for_rfe == 'first':
             target_col = self.target_df.columns[0]
             y = self.target_df[target_col].values
@@ -337,14 +338,30 @@ class MicrobialGNNDataset:
             y = self.target_df.mean(axis=1).values
             print(f"Using combined target: average of {list(self.target_df.columns)}")
         else:
-            # Use specific target name
+            # Use specific target name (with case-insensitive matching)
+            target_found = False
+            
+            # First try exact match
             if self.target_for_rfe in self.target_df.columns:
                 y = self.target_df[self.target_for_rfe].values
                 print(f"Using target: {self.target_for_rfe}")
+                target_found = True
             else:
+                # Try fuzzy matching (case-insensitive, ignoring hyphens/underscores)
+                target_normalized = self.target_for_rfe.lower().replace('-', '').replace('_', '')
+                for col in self.target_df.columns:
+                    col_normalized = col.lower().replace('-', '').replace('_', '')
+                    if target_normalized in col_normalized or col_normalized in target_normalized:
+                        y = self.target_df[col].values
+                        print(f"Using target: {col} (matched '{self.target_for_rfe}')")
+                        target_found = True
+                        break
+            
+            if not target_found:
                 print(f"Warning: Target '{self.target_for_rfe}' not found, using first target")
                 target_col = self.target_df.columns[0]
                 y = self.target_df[target_col].values
+                print(f"Using target: {target_col}")
         
         # Prepare feature matrix for RFE (transpose to n_samples × n_features)
         X = self.feature_matrix.T  # Shape: (n_samples, n_features)
@@ -481,21 +498,31 @@ class MicrobialGNNDataset:
         X_train = self.feature_matrix[:, train_indices].T  # Shape: (n_train_samples, n_features)
 
         # Get target values for TRAINING DATA ONLY
-        if self.target_for_rfe == 'first':
+        # ✅ FIX: Prioritize target_idx when provided (target-specific RFE)
+        # This ensures ACE-km gets features optimized for ACE-km, H2-km gets features for H2-km
+        if target_idx is not None and isinstance(target_idx, int) and 0 <= target_idx < len(self.target_df.columns):
+            # Use the specific target index that was passed (target-specific RFE)
+            y_train = self.target_df.iloc[train_indices, target_idx].values
+            target_name = self.target_df.columns[target_idx]
+            print(f"Using target: {target_name} (target_idx={target_idx}) for target-specific RFE")
+        elif self.target_for_rfe == 'first':
+            # Fallback: use first target if target_idx not provided
             y_train = self.target_df.iloc[train_indices, 0].values
-            print(f"Using target: {self.target_df.columns[0]}")
+            print(f"Using target: {self.target_df.columns[0]} (target_for_rfe='first', target_idx not provided)")
         elif self.target_for_rfe == 'both':
+            # Use average of both targets
             y_train = self.target_df.iloc[train_indices].mean(axis=1).values
             print(f"Using combined target: average of {list(self.target_df.columns)}")
         else:
-            # Use specific target by index
-            if isinstance(target_idx, int) and 0 <= target_idx < len(self.target_df.columns):
-                y_train = self.target_df.iloc[train_indices, target_idx].values
-                print(f"Using target: {self.target_df.columns[target_idx]}")
+            # Use specific target name from target_for_rfe (if it's a target name string)
+            if self.target_for_rfe in self.target_df.columns:
+                target_col_idx = list(self.target_df.columns).index(self.target_for_rfe)
+                y_train = self.target_df.iloc[train_indices, target_col_idx].values
+                print(f"Using target: {self.target_for_rfe} (from target_for_rfe setting)")
             else:
-                # Fallback to first target
+                # Final fallback to first target
                 y_train = self.target_df.iloc[train_indices, 0].values
-                print(f"Using default target: {self.target_df.columns[0]}")
+                print(f"Warning: Invalid target_for_rfe '{self.target_for_rfe}', using default: {self.target_df.columns[0]}")
 
         # Import and instantiate RFE feature selector
         try:
