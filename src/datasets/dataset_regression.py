@@ -64,15 +64,31 @@ class MicrobialGNNDataset:
         self.original_graph_data = None
         self.explainer_sparsified_graph_data = None
         
+        # Pre-LRP state containers (for target-specific feature selection)
+        self.pre_lrp_feature_matrix = None
+        self.pre_lrp_node_names = None
+        self.pre_lrp_df_features = None
+        self.lrp_applied = False  # Track if LRP has been applied
+        
         # Load and process data
         self._load_data()
         
         # Create node features (must be done before graph structure)
         self.df_features, self.feature_matrix = self._create_node_features()
         
-        # NEW STEP: LRP feature selection (if enabled)
+        # NEW: Save pre-LRP state (BEFORE applying LRP)
+        # This allows applying LRP separately for different targets
         if self.lrp_feature_selection:
-            self._select_features_with_lrp()
+            print("\n" + "="*80)
+            print("SAVING PRE-LRP STATE FOR TARGET-SPECIFIC FEATURE SELECTION")
+            print("="*80)
+            self.pre_lrp_feature_matrix = self.feature_matrix.copy()
+            self.pre_lrp_node_names = self.node_feature_names.copy()
+            self.pre_lrp_df_features = self.df_features.copy()
+            print(f"✅ Saved state with {len(self.pre_lrp_node_names)} features")
+            print(f"📌 LRP will be applied on-demand for each target separately")
+            print("="*80 + "\n")
+            # NOTE: Don't apply LRP here - it will be applied per-target in the pipeline
         
         # Create graph structure (now feature_matrix is available)
         self.full_edge_index, self.full_edge_weight, self.full_edge_type = self._create_graph_structure()
@@ -142,6 +158,102 @@ class MicrobialGNNDataset:
             self.edge_type = self.original_graph_data['edge_type'].clone()
             
         print(f"Dataset reset complete - back to {len(self.node_feature_names)} nodes")
+    
+    def reset_to_pre_lrp_state(self):
+        """
+        Reset dataset to state BEFORE LRP selection was applied.
+        
+        This allows applying LRP separately for different targets.
+        """
+        if not self.lrp_feature_selection:
+            print("Warning: LRP not enabled, nothing to reset")
+            return
+        
+        if self.pre_lrp_feature_matrix is None:
+            print("Warning: No pre-LRP state saved")
+            return
+        
+        print("\n" + "="*80)
+        print("RESETTING TO PRE-LRP STATE")
+        print("="*80)
+        print(f"Current features: {len(self.node_feature_names)}")
+        print(f"Restoring to: {len(self.pre_lrp_node_names)} features")
+        
+        # Restore pre-LRP feature data
+        self.feature_matrix = self.pre_lrp_feature_matrix.copy()
+        self.node_feature_names = self.pre_lrp_node_names.copy()
+        self.df_features = self.pre_lrp_df_features.copy()
+        
+        # Mark LRP as not applied
+        self.lrp_applied = False
+        
+        # Rebuild graph structure with all features
+        self.full_edge_index, self.full_edge_weight, self.full_edge_type = self._create_graph_structure()
+        self.edge_index, self.edge_weight, self.edge_type = self._create_knn_graph(k=self.k_neighbors)
+        
+        # Recreate data objects
+        self.data_list = self._create_data_objects()
+        self.original_data_list = [data.clone() for data in self.data_list]
+        
+        # Update original graph data
+        self.original_graph_data = {
+            'original_edge_index': self.full_edge_index.clone(),
+            'original_edge_weight': self.full_edge_weight.clone(),
+            'original_edge_type': self.full_edge_type.clone(),
+            'edge_index': self.edge_index.clone(),
+            'edge_weight': self.edge_weight.clone(),
+            'edge_type': self.edge_type.clone(),
+            'original_node_names': self.node_feature_names.copy(),
+            'use_lrp_feature_selection': self.lrp_feature_selection,
+            'n_lrp_features': self.n_lrp_features if self.lrp_feature_selection else None
+        }
+        
+        # Reset explainer data
+        self.explainer_sparsified_graph_data = None
+        
+        print(f"✅ Reset complete: {len(self.node_feature_names)} features restored")
+        print("="*80 + "\n")
+
+    def apply_lrp_for_specific_target(self, target_name):
+        """
+        Apply LRP feature selection for a specific target.
+        
+        This method:
+        1. Resets to pre-LRP state (if LRP already applied)
+        2. Applies LRP using the specified target
+        3. Rebuilds graph and data objects
+        
+        Args:
+            target_name: Name of target to use for LRP ('ACE-km', 'H2-km', etc.)
+        """
+        if not self.lrp_feature_selection:
+            print(f"Warning: LRP not enabled, skipping target-specific selection for {target_name}")
+            return
+        
+        print("\n" + "="*80)
+        print(f"APPLYING TARGET-SPECIFIC LRP FOR: {target_name.upper()}")
+        print("="*80)
+        
+        # Reset to pre-LRP state if LRP was already applied
+        if self.lrp_applied:
+            print(f"📌 LRP was already applied for another target, resetting first...")
+            self.reset_to_pre_lrp_state()
+        
+        # Set target_for_lrp to this specific target
+        original_target = self.target_for_lrp
+        self.target_for_lrp = target_name
+        
+        # Apply LRP with this target
+        self._select_features_with_lrp()
+        
+        # Mark as applied
+        self.lrp_applied = True
+        
+        # Restore original target setting (for reference)
+        self.target_for_lrp = original_target
+        
+        print(f"✅ LRP applied for {target_name}: {len(self.node_feature_names)} features selected")
+        print("="*80 + "\n")
     
     def _load_data(self):
         """Load and process the data"""
@@ -328,14 +440,30 @@ class MicrobialGNNDataset:
             y = self.target_df.mean(axis=1).values
             print(f"Using combined target: average of {list(self.target_df.columns)}")
         else:
-            # Use specific target name
+            # Use specific target name (with case-insensitive matching)
+            target_found = False
+            
+            # First try exact match
             if self.target_for_lrp in self.target_df.columns:
                 y = self.target_df[self.target_for_lrp].values
                 print(f"Using target: {self.target_for_lrp}")
+                target_found = True
             else:
+                # Try fuzzy matching (case-insensitive, ignoring hyphens/underscores)
+                target_normalized = self.target_for_lrp.lower().replace('-', '').replace('_', '')
+                for col in self.target_df.columns:
+                    col_normalized = col.lower().replace('-', '').replace('_', '')
+                    if target_normalized in col_normalized or col_normalized in target_normalized:
+                        y = self.target_df[col].values
+                        print(f"Using target: {col} (matched '{self.target_for_lrp}')")
+                        target_found = True
+                        break
+            
+            if not target_found:
                 print(f"Warning: Target '{self.target_for_lrp}' not found, using first target")
                 target_col = self.target_df.columns[0]
                 y = self.target_df[target_col].values
+                print(f"Using target: {target_col}")
         
         # Prepare feature matrix for LRP (transpose to n_samples × n_features)
         X = self.feature_matrix.T  # Shape: (n_samples, n_features)

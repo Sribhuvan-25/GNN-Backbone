@@ -417,12 +417,13 @@ class DomainExpertCasesPipeline(MixedEmbeddingPipeline):
         Run the complete pipeline for a single target variable.
         
         This method orchestrates the multi-stage learning process:
-        1. Train GNN models on k-NN graphs with hyperparameter tuning
-        2. Generate explainer-sparsified graphs for interpretability
-        3. Retrain GNN models on explainer graphs
-        4. Extract embeddings from best-performing models
-        5. Train classical ML models on embeddings
-        6. Generate comprehensive visualizations and results
+        1. Apply target-specific LRP (if enabled)
+        2. Train GNN models on k-NN graphs with hyperparameter tuning
+        3. Generate explainer-sparsified graphs for interpretability
+        4. Retrain GNN models on explainer graphs
+        5. Extract embeddings from best-performing models
+        6. Train classical ML models on embeddings
+        7. Generate comprehensive visualizations and results
         
         Args:
             target_idx (int): Index of the target variable
@@ -434,8 +435,13 @@ class DomainExpertCasesPipeline(MixedEmbeddingPipeline):
         print(f"\n{'='*60}")
         print(f"SINGLE TARGET PIPELINE: {target_name}")
         print(f"Target index: {target_idx}")
-        print(f"Features: {len(self.dataset.node_feature_names)}")
+        print(f"Features (before target-specific LRP): {len(self.dataset.node_feature_names)}")
         print(f"{'='*60}")
+        
+        # Apply target-specific LRP if enabled
+        if self.dataset.lrp_feature_selection:
+            self.dataset.apply_lrp_for_specific_target(target_name)
+            print(f"Features (after target-specific LRP): {len(self.dataset.node_feature_names)}")
         
         results = {}
         
