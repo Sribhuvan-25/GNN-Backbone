@@ -252,7 +252,33 @@ class MicrobialGNNDataset:
         # Restore original target setting (for reference)
         self.target_for_lrp = original_target
         
+        # Rebuild graph structure with selected features
+        print(f"\n🔄 Rebuilding graph structure with {len(self.node_feature_names)} selected features...")
+        self.full_edge_index, self.full_edge_weight, self.full_edge_type = self._create_graph_structure()
+        self.edge_index, self.edge_weight, self.edge_type = self._create_knn_graph(k=self.k_neighbors)
+        
+        # Recreate data objects with new graph
+        self.data_list = self._create_data_objects()
+        self.original_data_list = [data.clone() for data in self.data_list]
+        
+        # Update original graph data
+        self.original_graph_data = {
+            'original_edge_index': self.full_edge_index.clone(),
+            'original_edge_weight': self.full_edge_weight.clone(),
+            'original_edge_type': self.full_edge_type.clone(),
+            'edge_index': self.edge_index.clone(),
+            'edge_weight': self.edge_weight.clone(),
+            'edge_type': self.edge_type.clone(),
+            'original_node_names': self.node_feature_names.copy(),
+            'use_lrp_feature_selection': self.lrp_feature_selection,
+            'n_lrp_features': self.n_lrp_features if self.lrp_feature_selection else None
+        }
+        
+        # Reset explainer data
+        self.explainer_sparsified_graph_data = None
+        
         print(f"✅ LRP applied for {target_name}: {len(self.node_feature_names)} features selected")
+        print(f"✅ Graph rebuilt: {self.edge_index.shape[1]//2} edges")
         print("="*80 + "\n")
     
     def _load_data(self):
@@ -478,7 +504,7 @@ class MicrobialGNNDataset:
         selector = LRPFeatureSelector(
             n_hidden_layers=2,
             hidden_dim=64,
-            epochs=100,
+            epochs=50,
             learning_rate=0.001,
             random_state=42
         )
