@@ -303,15 +303,24 @@ def create_edge_pruned_graph_pipeline(pipeline, explainer, combined_edge_importa
 
     # Store graph data with target_name as key
     graph_key = target_name if target_name else "default"
+
+    # ✅ VALIDATION: Ensure no nodes are removed in edge-based sparsification
+    original_node_count = len(pipeline.dataset.node_feature_names)
+    assert len(pipeline.dataset.node_feature_names) == original_node_count, \
+        f"Edge-based sparsification should NOT remove nodes! Original: {original_node_count}, Current: {len(pipeline.dataset.node_feature_names)}"
+
     pipeline.dataset.explainer_sparsified_graph_data[graph_key] = {
         'edge_index': new_edge_index.clone(),
         'edge_weight': new_edge_weight.clone(),
         'edge_type': new_edge_type.clone(),
         'pruning_type': 'edge_based',
-        'pruned_node_names': pipeline.dataset.node_feature_names,  # Keep ALL nodes for edge-only sparsification
+        'pruned_node_names': pipeline.dataset.node_feature_names.copy(),  # Keep ALL nodes for edge-only sparsification
         'kept_nodes': list(range(len(pipeline.dataset.node_feature_names))),  # All nodes are kept
-        'target_name': target_name
+        'target_name': target_name,
+        'node_count': original_node_count  # Store for verification
     }
+
+    print(f"✅ Edge-based sparsification complete: {original_node_count} nodes preserved, {num_edges//2} edges kept")
     
     # Create new data objects with sparsified graph
     new_data_list = []
@@ -555,15 +564,24 @@ def create_edge_pruned_graph_pipeline(pipeline, explainer, combined_edge_importa
 
     # Store graph data with target_name as key
     graph_key = target_name if target_name else "default"
+
+    # ✅ VALIDATION: Ensure no nodes are removed in edge-based sparsification
+    original_node_count = len(pipeline.dataset.node_feature_names)
+    assert len(pipeline.dataset.node_feature_names) == original_node_count, \
+        f"Edge-based sparsification should NOT remove nodes! Original: {original_node_count}, Current: {len(pipeline.dataset.node_feature_names)}"
+
     pipeline.dataset.explainer_sparsified_graph_data[graph_key] = {
         'edge_index': new_edge_index.clone(),
         'edge_weight': new_edge_weight.clone(),
         'edge_type': new_edge_type.clone(),
         'pruning_type': 'edge_based',
-        'pruned_node_names': pipeline.dataset.node_feature_names,  # Keep ALL nodes for edge-only sparsification
+        'pruned_node_names': pipeline.dataset.node_feature_names.copy(),  # Keep ALL nodes for edge-only sparsification
         'kept_nodes': list(range(len(pipeline.dataset.node_feature_names))),  # All nodes are kept
-        'target_name': target_name
+        'target_name': target_name,
+        'node_count': original_node_count  # Store for verification
     }
+
+    print(f"✅ Edge-based sparsification complete: {original_node_count} nodes preserved, {num_edges//2} edges kept")
     
     # Create new data objects with sparsified graph
     new_data_list = []

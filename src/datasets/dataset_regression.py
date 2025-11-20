@@ -22,7 +22,8 @@ class MicrobialGNNDataset:
     
     def __init__(self, data_path, k_neighbors=5, mantel_threshold=0.05, use_fast_correlation=True,
                  graph_mode='genus', family_filter_mode='relaxed', graph_construction_method='original',
-                 rfe_feature_selection=False, n_rfe_features=100, target_for_rfe='first', rfe_model_type='extratrees'):
+                 rfe_feature_selection=False, n_rfe_features=100, target_for_rfe='first', rfe_model_type='extratrees',
+                 use_knn_sparsification=True):
         """
         Initialize the microbial GNN dataset
 
@@ -38,6 +39,8 @@ class MicrobialGNNDataset:
             n_rfe_features: Number of features to select using RFE (20, 40, 50, 80, or 100)
             target_for_rfe: Target to use for RFE ('first', 'both', or target name)
             rfe_model_type: Model type for RFE ('extratrees', 'linearsvr', 'randomforest', 'gradientboosting', 'xgboost', 'lightgbm')
+            use_knn_sparsification: If True, apply k-NN sparsification before GNNExplainer (default: True)
+                                   If False, use full correlation graph for GNNExplainer (ablation study)
         """
         self.data_path = data_path
         self.k_neighbors = k_neighbors
@@ -50,6 +53,7 @@ class MicrobialGNNDataset:
         self.n_rfe_features = n_rfe_features
         self.target_for_rfe = target_for_rfe
         self.rfe_model_type = rfe_model_type
+        self.use_knn_sparsification = use_knn_sparsification
         
         # Initialize data containers
         self.feature_df = None
@@ -96,9 +100,16 @@ class MicrobialGNNDataset:
         # Create graph structure (now feature_matrix is available)
         # Note: Graph will be rebuilt after RFE is applied per-target
         self.full_edge_index, self.full_edge_weight, self.full_edge_type = self._create_graph_structure()
-        
-        # Create KNN sparsified graph structure (always use KNN for initial graph)
-        self.edge_index, self.edge_weight, self.edge_type = self._create_knn_graph(k=self.k_neighbors)
+
+        # Apply KNN sparsification or use full correlation graph based on flag
+        if self.use_knn_sparsification:
+            self.edge_index, self.edge_weight, self.edge_type = self._create_knn_graph(k=self.k_neighbors)
+        else:
+            # Use full correlation graph (no sparsification) for ablation study
+            self.edge_index = self.full_edge_index.clone()
+            self.edge_weight = self.full_edge_weight.clone()
+            self.edge_type = self.full_edge_type.clone()
+            print(f"⚠️  KNN sparsification DISABLED: Using full correlation graph ({self.edge_index.shape[1]//2} edges)")
         
         # Create PyG data objects
         self.data_list = self._create_data_objects()
@@ -194,7 +205,14 @@ class MicrobialGNNDataset:
         
         # Rebuild graph structure with all features
         self.full_edge_index, self.full_edge_weight, self.full_edge_type = self._create_graph_structure()
-        self.edge_index, self.edge_weight, self.edge_type = self._create_knn_graph(k=self.k_neighbors)
+
+        # Apply KNN sparsification or use full correlation graph based on flag
+        if self.use_knn_sparsification:
+            self.edge_index, self.edge_weight, self.edge_type = self._create_knn_graph(k=self.k_neighbors)
+        else:
+            self.edge_index = self.full_edge_index.clone()
+            self.edge_weight = self.full_edge_weight.clone()
+            self.edge_type = self.full_edge_type.clone()
         
         # Recreate data objects
         self.data_list = self._create_data_objects()
@@ -261,7 +279,14 @@ class MicrobialGNNDataset:
         # Rebuild graph structure with selected features
         print(f"\n🔄 Rebuilding graph structure with {len(self.node_feature_names)} selected features...")
         self.full_edge_index, self.full_edge_weight, self.full_edge_type = self._create_graph_structure()
-        self.edge_index, self.edge_weight, self.edge_type = self._create_knn_graph(k=self.k_neighbors)
+
+        # Apply KNN sparsification or use full correlation graph based on flag
+        if self.use_knn_sparsification:
+            self.edge_index, self.edge_weight, self.edge_type = self._create_knn_graph(k=self.k_neighbors)
+        else:
+            self.edge_index = self.full_edge_index.clone()
+            self.edge_weight = self.full_edge_weight.clone()
+            self.edge_type = self.full_edge_type.clone()
         
         # Recreate data objects with new graph
         self.data_list = self._create_data_objects()
@@ -590,12 +615,94 @@ class MicrobialGNNDataset:
         # We don't update it here because we want to preserve the original count before RFE
         
         print(f"\n✅ RFE feature selection completed!")
-        print(f"Selected {len(selected_names)} features")
+        print(f"Selected {len(selected_names)} features (requested: {self.n_rfe_features})")
+
+        # ✅ VALIDATION: Check if we got the requested number of features
+        if len(selected_names) < self.n_rfe_features:
+            shortage = self.n_rfe_features - len(selected_names)
+            print(f"⚠️  WARNING: Only {len(selected_names)} features selected (requested {self.n_rfe_features})")
+            print(f"   Shortage: {shortage} features")
+            print(f"   This occurred because pre-filtering reduced available features.")
+            print(f"   ✅ WITH FIX: Pre-filtering now bypassed when RFE enabled - this should not happen anymore!")
+
         if hasattr(self, 'original_node_count') and self.original_node_count:
             print(f"Original feature count: {self.original_node_count}")
             print(f"Reduction: {self.original_node_count - len(selected_names)} features removed")
         print(f"Feature matrix shape: {self.feature_matrix.shape} (features × samples)")
         print(f"{'='*80}\n")
+
+    def save_rfe_selected_features(self, target_name, save_dir=None):
+        """
+        Save the RFE-selected features list to a CSV file.
+
+        This saves:
+        - List of RFE-selected features
+        - List of anchored/protected features
+        - RFE parameters and metadata
+
+        Args:
+            target_name (str): Name of the target variable (e.g., 'ACE-km', 'H2-km')
+            save_dir (str, optional): Directory to save the file. If None, uses current directory.
+        """
+        import pandas as pd
+        import os
+
+        if save_dir is None:
+            save_dir = '.'
+
+        os.makedirs(save_dir, exist_ok=True)
+
+        # Prepare feature information
+        feature_data = []
+
+        # Get protected/anchored features if they exist
+        protected_features = []
+        if hasattr(self, 'protected_nodes') and self.protected_nodes:
+            protected_features = self.protected_nodes
+
+        # Categorize each feature
+        for feature_name in self.node_feature_names:
+            is_protected = feature_name in protected_features
+            feature_data.append({
+                'feature_name': feature_name,
+                'feature_type': 'anchored/protected' if is_protected else 'rfe_selected',
+                'is_protected': is_protected
+            })
+
+        # Create DataFrame
+        df_features = pd.DataFrame(feature_data)
+
+        # Add metadata as a header comment
+        metadata_lines = [
+            f"# RFE Feature Selection Results",
+            f"# Target: {target_name}",
+            f"# RFE Model Type: {self.rfe_model_type}",
+            f"# Requested Features: {self.n_rfe_features}",
+            f"# Total Features Selected: {len(self.node_feature_names)}",
+            f"# RFE-Selected: {len([f for f in feature_data if f['feature_type'] == 'rfe_selected'])}",
+            f"# Anchored/Protected: {len(protected_features)}",
+            f"# Graph Mode: {self.graph_mode}",
+            f"#"
+        ]
+
+        # Save to CSV with metadata
+        filename = f"rfe_selected_features_{target_name.replace('-', '_')}.csv"
+        filepath = os.path.join(save_dir, filename)
+
+        # Write metadata as comments
+        with open(filepath, 'w') as f:
+            for line in metadata_lines:
+                f.write(line + '\n')
+
+        # Append DataFrame
+        df_features.to_csv(filepath, mode='a', index=False)
+
+        print(f"📁 RFE-selected features saved to: {filepath}")
+        print(f"   Total features: {len(self.node_feature_names)}")
+        print(f"   RFE-selected: {len([f for f in feature_data if f['feature_type'] == 'rfe_selected'])}")
+        print(f"   Anchored/protected: {len(protected_features)}")
+
+        return filepath
 
     def perform_rfe_on_train_data(self, train_indices, target_idx=0):
         """
@@ -854,12 +961,27 @@ class MicrobialGNNDataset:
         df_fam_rel = df_fam.div(df_fam.sum(axis=1), axis=0)
         
         print(f"Total families before filtering: {df_fam_rel.shape[1]}")
-        
-        # FILTERING CRITERIA based on family_filter_mode
+
+        # ✅ RFE MODE: Skip stringent filtering when RFE is enabled
+        # RFE will handle feature selection, so we want maximum features available
+        if self.rfe_feature_selection:
+            print(f"🔬 RFE ENABLED: Using minimal filtering (keeping maximum families for RFE selection)")
+            print(f"   Target RFE features: {self.n_rfe_features}")
+
+            # Only remove completely absent families (present in 0 samples)
+            non_zero_families = df_fam_rel.columns[df_fam_rel.sum(axis=0) > 0]
+            df_fam_rel_filtered = df_fam_rel[non_zero_families].copy()
+
+            print(f"   After removing zero-abundance families: {df_fam_rel_filtered.shape[1]} families")
+            print(f"   ✅ Maximum features available for RFE selection")
+
+            return df_fam_rel_filtered, list(df_fam_rel_filtered.columns)
+
+        # NORMAL MODE: Apply filtering criteria based on family_filter_mode
         presence_count = (df_fam_rel > 0).sum(axis=0)
         prevalence = presence_count / df_fam_rel.shape[0]
         mean_abund = df_fam_rel.mean(axis=0)
-        
+
         # Set thresholds based on filter mode
         if self.family_filter_mode == 'strict':
             prevalence_threshold = 0.05  # 5% of samples
@@ -948,7 +1070,22 @@ class MicrobialGNNDataset:
 
         print(f"Total genera before filtering: {df_genus_rel.shape[1]}")
 
-        # FILTERING CRITERIA based on family_filter_mode (applies to genus as well)
+        # ✅ RFE MODE: Skip stringent filtering when RFE is enabled
+        # RFE will handle feature selection, so we want maximum features available
+        if self.rfe_feature_selection:
+            print(f"🔬 RFE ENABLED: Using minimal filtering (keeping maximum genera for RFE selection)")
+            print(f"   Target RFE features: {self.n_rfe_features}")
+
+            # Only remove completely absent genera (present in 0 samples)
+            non_zero_genera = df_genus_rel.columns[df_genus_rel.sum(axis=0) > 0]
+            df_genus_rel_filtered = df_genus_rel[non_zero_genera].copy()
+
+            print(f"   After removing zero-abundance genera: {df_genus_rel_filtered.shape[1]} genera")
+            print(f"   ✅ Maximum features available for RFE selection")
+
+            return df_genus_rel_filtered, list(df_genus_rel_filtered.columns)
+
+        # NORMAL MODE: Apply filtering criteria based on family_filter_mode
         # Using MORE STRINGENT thresholds for genus level
         presence_count = (df_genus_rel > 0).sum(axis=0)
         prevalence = presence_count / df_genus_rel.shape[0]
@@ -1013,11 +1150,8 @@ class MicrobialGNNDataset:
 
     def _create_graph_structure(self):
         """Create graph structure based on correlation or distance metrics"""
-        # If RFE feature selection is enabled, create k-NN graph directly
-        if self.rfe_feature_selection:
-            return self._create_knn_graph_from_features()
-        
-        # Otherwise, use existing correlation-based methods
+        # Create correlation graph for all cases (RFE and non-RFE)
+        # The use_knn_sparsification flag will control whether to apply k-NN sparsification afterward
         if self.graph_construction_method == 'paper_correlation':
             return self._create_graph_structure_paper_style()
         elif self.graph_construction_method == 'hybrid':
@@ -1431,13 +1565,8 @@ class MicrobialGNNDataset:
 
     def _create_knn_graph(self, k=None):
         """Create a k-nearest neighbor sparsified version of the graph"""
-        # If RFE is enabled, graph is already k-NN, so just return it
-        if self.rfe_feature_selection:
-            print(f"RFE enabled: Graph is already k-NN, returning existing graph structure")
-            # When RFE is enabled, full_edge_index contains the k-NN graph
-            # Use it directly as edge_index (no additional sparsification needed)
-            return self.full_edge_index.clone(), self.full_edge_weight.clone(), self.full_edge_type.clone()
-        
+        # Apply k-NN sparsification to the full correlation graph
+        # This now works independently of RFE setting
         if k is None:
             k = self.k_neighbors
             

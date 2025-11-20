@@ -150,7 +150,8 @@ class DomainExpertCasesPipeline(MixedEmbeddingPipeline):
                  graph_mode='genus', family_filter_mode='strict',
                  use_nested_cv=True, use_node_pruning=False,
                  graph_construction_method='original',
-                 use_rfe_feature_selection=False, n_rfe_features=100, target_for_rfe='first', rfe_model_type='extratrees'):
+                 use_rfe_feature_selection=False, n_rfe_features=100, target_for_rfe='first', rfe_model_type='extratrees',
+                 use_knn_sparsification=True):
         """
         Initialize the Domain Expert Cases Pipeline.
 
@@ -230,7 +231,8 @@ class DomainExpertCasesPipeline(MixedEmbeddingPipeline):
             rfe_feature_selection=use_rfe_feature_selection,
             n_rfe_features=n_rfe_features,
             target_for_rfe=target_for_rfe,
-            rfe_model_type=rfe_model_type
+            rfe_model_type=rfe_model_type,
+            use_knn_sparsification=use_knn_sparsification
         )
         
         # Store sparsification configuration (MUST be False - edge-based sparsification only)
@@ -442,7 +444,10 @@ class DomainExpertCasesPipeline(MixedEmbeddingPipeline):
         if self.dataset.rfe_feature_selection:
             self.dataset.apply_rfe_for_specific_target(target_name)
             print(f"Features (after target-specific RFE): {len(self.dataset.node_feature_names)}")
-        
+
+            # ✅ Save RFE-selected features list for this target
+            self.dataset.save_rfe_selected_features(target_name=target_name, save_dir=self.save_dir)
+
         results = {}
         
         # Stage 1: Train GNN models on k-NN sparsified graphs

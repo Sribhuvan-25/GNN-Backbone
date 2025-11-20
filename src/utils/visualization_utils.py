@@ -445,21 +445,21 @@ def create_side_by_side_comparison(knn_graph_data, explainer_graph_data, node_fe
                 knn_graph_data['original_edge_index'],
                 knn_graph_data.get('original_edge_weight', None),
                 original_node_names,  # Use original names, not current node_features
-                include_isolated_nodes=False  # Filter isolated nodes for cleaner visualization
+                include_isolated_nodes=True  # ✅ INCLUDE isolated nodes to show ALL features
             )
             model_label = f" ({rfe_model_type})" if rfe_model_type else ""
             panel1_label = f"RFE-selected k-NN Graph ({n_rfe_features} features{model_label})"
-            print(f"Panel 1 ({panel1_label}): {len(original_G.nodes())} nodes, {len(original_G.edges())} edges (isolated nodes removed)")
+            print(f"Panel 1 ({panel1_label}): {len(original_G.nodes())} nodes, {len(original_G.edges())} edges (all nodes included)")
         else:
             # When RFE disabled, original_edge_index is correlation graph
             original_G = create_networkx_graph_from_edge_data(
                 knn_graph_data['original_edge_index'],
                 knn_graph_data.get('original_edge_weight', None),
                 original_node_names,  # Use original names, not current node_features
-                include_isolated_nodes=False  # Filter isolated nodes for cleaner visualization
+                include_isolated_nodes=True  # ✅ INCLUDE isolated nodes to show ALL features
             )
             panel1_label = "Spearman Correlation Graph"
-            print(f"Panel 1 ({panel1_label}): {len(original_G.nodes())} nodes, {len(original_G.edges())} edges (isolated nodes removed)")
+            print(f"Panel 1 ({panel1_label}): {len(original_G.nodes())} nodes, {len(original_G.edges())} edges (all nodes included)")
     else:
         # Fallback to k-NN graph for Panel 1
         original_G = create_networkx_graph_from_edge_data(
@@ -469,7 +469,7 @@ def create_side_by_side_comparison(knn_graph_data, explainer_graph_data, node_fe
             include_isolated_nodes=False  # Filter isolated nodes for cleaner visualization
         )
         panel1_label = "k-NN Graph (fallback)" if not use_rfe else f"RFE-selected k-NN Graph ({n_rfe_features} features)"
-        print(f"Panel 1 ({panel1_label}): {len(original_G.nodes())} nodes, {len(original_G.edges())} edges (isolated nodes removed)")
+        print(f"Panel 1 ({panel1_label}): {len(original_G.nodes())} nodes, {len(original_G.edges())} edges (all nodes included)")
 
     # CRITICAL FIX: Add back any protected nodes that were filtered out as isolated
     if protected_nodes:
@@ -549,7 +549,7 @@ def create_side_by_side_comparison(knn_graph_data, explainer_graph_data, node_fe
         original_node_names,  # Use original names, not current node_features
         include_isolated_nodes=False  # Filter isolated nodes for cleaner visualization
     )
-    print(f"Panel 2 (k-NN): {len(knn_G.nodes())} nodes, {len(knn_G.edges())} edges (isolated nodes removed)")
+    print(f"Panel 2 (k-NN): {len(knn_G.nodes())} nodes, {len(knn_G.edges())} edges (all nodes included)")
 
     # CRITICAL FIX: Add back any protected nodes that were filtered out as isolated
     if protected_nodes:
@@ -660,7 +660,7 @@ def create_side_by_side_comparison(knn_graph_data, explainer_graph_data, node_fe
             explainer_node_names,
             include_isolated_nodes=False  # Filter isolated nodes for cleaner visualization
         )
-        print(f"Panel 3 (Explainer): {len(explainer_G.nodes())} nodes, {len(explainer_G.edges())} edges (isolated nodes removed)")
+        print(f"Panel 3 (Explainer): {len(explainer_G.nodes())} nodes, {len(explainer_G.edges())} edges (all nodes included)")
 
         # DIAGNOSTIC: Check which nodes were filtered as isolated
         if len(explainer_G.nodes()) < len(explainer_node_names):

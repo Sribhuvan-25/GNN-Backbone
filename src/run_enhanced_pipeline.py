@@ -60,6 +60,8 @@ def main():
                         help='Model type for RFE feature selection (default: extratrees)')
     parser.add_argument('--importance_threshold', type=float, default=0.5,
                         help='Threshold for explainer edge importance (default: 0.5 = keep top 50%% of edges)')
+    parser.add_argument('--no_knn_sparsification', action='store_false', dest='use_knn_sparsification',
+                        help='Disable k-NN sparsification (use full correlation graph for ablation study, default: enabled)')
 
     args = parser.parse_args()
 
@@ -89,7 +91,8 @@ Folds: {folds}
 Nested CV: {nested_cv}
 Data: {args.data_path}
 Graph Mode: genus (genus-level analysis for higher taxonomic resolution)
-Sparsification: Edge-based using GNNExplainer
+KNN Sparsification: {'Enabled' if args.use_knn_sparsification else 'DISABLED (Ablation: Full Correlation Graph)'}
+Explainer Sparsification: Edge-based using GNNExplainer (NO node pruning)
 RFE Feature Selection: {'Enabled' if args.use_rfe else 'Disabled'} ({args.n_rfe_features} features if enabled, model: {args.rfe_model_type})
 {'='*80}
 
@@ -148,6 +151,7 @@ Key Features Enabled:
             'n_rfe_features': args.n_rfe_features,
             'target_for_rfe': args.target_for_rfe,
             'rfe_model_type': args.rfe_model_type,
+            'use_knn_sparsification': args.use_knn_sparsification,
         }
         
         print("Initializing enhanced pipeline...")
@@ -302,6 +306,7 @@ def run_all_cases(args):
                 'n_rfe_features': args.n_rfe_features,
                 'target_for_rfe': args.target_for_rfe,
                 'rfe_model_type': args.rfe_model_type,
+                'use_knn_sparsification': args.use_knn_sparsification,
             }
 
             start_time = time.time()
