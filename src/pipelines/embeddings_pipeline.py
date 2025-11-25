@@ -73,7 +73,7 @@ class MixedEmbeddingPipeline:
     7. Train ML models (LinearSVR, ExtraTrees, RandomForest, XGBoost, LightGBM) on embeddings with 5-fold CV
     """
     
-    def __init__(self, 
+    def __init__(self,
                  data_path,
                  k_neighbors=5,
                  mantel_threshold=0.05,
@@ -96,7 +96,11 @@ class MixedEmbeddingPipeline:
                  use_node_sparsification=False,  # DEPRECATED - MUST be False (use edge-based sparsification only)
                  node_importance_threshold=0.1,  # DEPRECATED - not used with edge-based sparsification
                  min_nodes_to_keep=10,  # DEPRECATED - not used with edge-based sparsification
-                 graph_construction_method='original'):  # Graph construction method
+                 graph_construction_method='original',  # Graph construction method
+                 rfe_feature_selection=False,  # Enable RFE feature selection
+                 n_rfe_features=100,  # Number of features to select via RFE
+                 target_for_rfe='first',  # Target to use for RFE
+                 rfe_model_type='extratrees'):  # Model type for RFE
         """
         Initialize the mixed embedding pipeline
         
@@ -123,6 +127,10 @@ class MixedEmbeddingPipeline:
             use_node_sparsification: DEPRECATED - MUST be False (edge-based sparsification only)
             node_importance_threshold: DEPRECATED - not used (edge-based sparsification only)
             min_nodes_to_keep: DEPRECATED - not used (edge-based sparsification only)
+            rfe_feature_selection: If True, use RFE for feature selection before graph construction
+            n_rfe_features: Number of features to select using RFE (20, 40, 50, 80, or 100)
+            target_for_rfe: Target to use for RFE ('first', 'both', or target name)
+            rfe_model_type: Model type for RFE ('extratrees', 'linearsvr', 'randomforest', etc.)
         """
         self.data_path = data_path
         self.k_neighbors = k_neighbors
@@ -147,6 +155,10 @@ class MixedEmbeddingPipeline:
         self.use_node_sparsification = use_node_sparsification
         self.node_importance_threshold = node_importance_threshold
         self.min_nodes_to_keep = min_nodes_to_keep
+        self.rfe_feature_selection = rfe_feature_selection
+        self.n_rfe_features = n_rfe_features
+        self.target_for_rfe = target_for_rfe
+        self.rfe_model_type = rfe_model_type
         
         # Define hyperparameter search space for nested CV
         self.gnn_hyperparams = {
@@ -192,7 +204,11 @@ class MixedEmbeddingPipeline:
             use_fast_correlation=use_fast_correlation,
             graph_mode=graph_mode,
             family_filter_mode=family_filter_mode,
-            graph_construction_method=graph_construction_method
+            graph_construction_method=graph_construction_method,
+            rfe_feature_selection=rfe_feature_selection,
+            n_rfe_features=n_rfe_features,
+            target_for_rfe=target_for_rfe,
+            rfe_model_type=rfe_model_type
         )
         
         # Get target names for reference
@@ -1855,10 +1871,19 @@ class MixedEmbeddingPipeline:
         for target_idx, target_name in enumerate(self.target_names):
             print(f"\n{'='*60}")
             print(f"PROCESSING TARGET: {target_name} ({target_idx + 1}/{len(self.target_names)})")
+            print(f"Features (before target-specific RFE): {len(self.dataset.node_feature_names)}")
             print(f"{'='*60}")
-            
+
+            # ✅ Apply target-specific RFE if enabled
+            if self.dataset.rfe_feature_selection:
+                self.dataset.apply_rfe_for_specific_target(target_name)
+                print(f"Features (after target-specific RFE): {len(self.dataset.node_feature_names)}")
+
+                # ✅ Save RFE-selected features list for this target
+                self.dataset.save_rfe_selected_features(target_name=target_name, save_dir=self.save_dir)
+
             target_results = {}
-            
+
             # Step 1: Train ALL GNN models on KNN-sparsified graph
             print(f"\nSTEP 1: Training ALL GNN models on KNN-sparsified graph")
             print("Training all GNN models (GCN, RGGC, GAT)")

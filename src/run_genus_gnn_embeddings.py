@@ -3,23 +3,30 @@
 Run GNN Embeddings Pipeline for Genus-Level Analysis (No Knowledge Anchoring)
 
 This script runs a GNN-based embedding extraction pipeline without domain expert
-case constraints (knowledge anchoring). It uses ALL genus features for a fair
-comparison with other baselines.
+case constraints (knowledge anchoring). It uses RFE-selected genus features for a
+fair comparison with the baseline ML models.
 
 Pipeline Flow:
-1. Load ALL genus-level features (no RFE, no domain expert filtering)
-2. Build k-NN graph from genus abundance data
+1. Apply RFE feature selection on genus-level features (optional, recommended)
+2. Build k-NN graph from selected genus abundance data
 3. Train GNN models (GCN, GAT, RGGC) with nested CV hyperparameter tuning
-4. Apply GNNExplainer for graph sparsification (optional)
-5. Retrain GNNs on sparsified graph (optional)
+4. Apply GNNExplainer for graph sparsification
+5. Retrain GNNs on sparsified graph
 6. Extract embeddings from best GNN model
 7. Train classical ML models (LinearSVR, ExtraTrees) on GNN embeddings
 8. Report metrics in "mean ± std" format
 
 Usage:
-    python run_genus_gnn_embeddings.py --target ACE-km
-    python run_genus_gnn_embeddings.py --target H2-km
-    python run_genus_gnn_embeddings.py --target both  # Run both targets
+    # With RFE (recommended for fair comparison with baseline ML)
+    python run_genus_gnn_embeddings.py --use_rfe --n_rfe_features 100
+
+    # Without RFE (use all features)
+    python run_genus_gnn_embeddings.py
+
+    # Custom data path
+    python run_genus_gnn_embeddings.py --use_rfe --n_rfe_features 100 --data_path /path/to/data.csv
+
+Note: The pipeline automatically processes ALL targets (ACE-km, H2-km) in the dataset.
 """
 
 # Set matplotlib to use non-GUI backend to avoid threading issues
@@ -50,25 +57,40 @@ def create_directories():
 
     return base_dir
 
-def run_gnn_embeddings_pipeline(data_path, target='ACE-km', base_dir='results_gnn_embeddings_genus'):
+def run_gnn_embeddings_pipeline(data_path, base_dir='results_gnn_embeddings_genus',
+                                use_rfe=False, n_rfe_features=100,
+                                target_for_rfe='first', rfe_model_type='extratrees'):
     """
-    Run GNN embeddings pipeline for a specific target
+    Run GNN embeddings pipeline for all targets
 
     Parameters:
     ----------
     data_path : str
         Path to the input data file with genus-level abundance data
-    target : str
-        Target variable to predict ('ACE-km', 'H2-km', or 'both')
     base_dir : str
         Base directory for saving results
+    use_rfe : bool
+        If True, use RFE for feature selection before graph construction
+    n_rfe_features : int
+        Number of features to select using RFE (20, 40, 50, 80, or 100)
+    target_for_rfe : str
+        Target to use for RFE ('first', 'both', or target name)
+    rfe_model_type : str
+        Model type for RFE ('extratrees', 'linearsvr', etc.)
+
+    Note:
+    ----
+    The pipeline automatically processes ALL targets (ACE-km, H2-km) in the dataset.
     """
     print(f"\n{'='*80}")
-    print(f"Running GNN Embeddings Pipeline for {target}")
+    print(f"Running GNN Embeddings Pipeline for ALL Targets")
     print(f"{'='*80}")
 
-    # Create target-specific save directory
-    save_dir = f"{base_dir}/{target}"
+    # Create save directory with RFE info
+    if use_rfe:
+        save_dir = f"{base_dir}_rfe{n_rfe_features}"
+    else:
+        save_dir = f"{base_dir}_all_features"
     os.makedirs(save_dir, exist_ok=True)
 
     # Pipeline configuration
@@ -93,18 +115,29 @@ def run_gnn_embeddings_pipeline(data_path, target='ACE-km', base_dir='results_gn
         'adaptive_hyperparameters': True,     # Adaptive hyperparameters
         'use_nested_cv': True,                # Nested CV for hyperparameter tuning
         'use_node_sparsification': False,     # Edge-based sparsification only
-        'graph_construction_method': 'original'
+        'graph_construction_method': 'original',
+        'rfe_feature_selection': use_rfe,     # RFE feature selection
+        'n_rfe_features': n_rfe_features,     # Number of RFE features
+        'target_for_rfe': target_for_rfe,     # Target for RFE
+        'rfe_model_type': rfe_model_type      # RFE model type
     }
 
     print(f"\nPipeline Configuration:")
-    print(f"  Graph Mode: {config['graph_mode']} (using ALL genus features)")
+    print(f"  Graph Mode: {config['graph_mode']} (genus-level)")
+    print(f"  RFE Enabled: {use_rfe}")
+    if use_rfe:
+        print(f"  RFE Features: {n_rfe_features}")
+        print(f"  RFE Target: {target_for_rfe}")
+        print(f"  RFE Model: {rfe_model_type}")
+    else:
+        print(f"  Using ALL genus features (no RFE)")
     print(f"  K-Neighbors: {config['k_neighbors']}")
     print(f"  Hidden Dim: {config['hidden_dim']}")
     print(f"  Epochs: {config['num_epochs']}")
     print(f"  Folds: {config['num_folds']}")
     print(f"  Nested CV: {config['use_nested_cv']}")
     print(f"  Save Directory: {save_dir}")
-    print(f"\nNOTE: No RFE, no domain expert filtering - using ALL genus features")
+    print(f"\nNOTE: No domain expert filtering (no knowledge anchoring)")
 
     try:
         # Initialize pipeline
@@ -114,40 +147,46 @@ def run_gnn_embeddings_pipeline(data_path, target='ACE-km', base_dir='results_gn
 
         pipeline = MixedEmbeddingPipeline(**config)
 
-        # Run the full pipeline
+        # Run the full pipeline (processes all targets automatically)
         print(f"\n{'-'*60}")
         print(f"Running full GNN embeddings pipeline...")
         print(f"{'-'*60}")
 
-        results = pipeline.run_full_pipeline(target_name=target)
+        results = pipeline.run_pipeline()
 
-        # Extract and save summary metrics
+        # Extract and save summary metrics for each target
         print(f"\n{'-'*60}")
         print(f"Extracting Summary Metrics")
         print(f"{'-'*60}")
 
-        if results and 'ml_results' in results:
-            save_summary_metrics(results, target, base_dir)
+        if results:
+            for target_name, target_results in results.items():
+                if target_name == 'summary':  # Skip summary key if present
+                    continue
+                if 'ml_models' in target_results:
+                    save_summary_metrics(target_results, target_name, base_dir)
+                else:
+                    print(f"WARNING: No ML results found for {target_name}")
         else:
-            print(f"WARNING: No ML results found for {target}")
+            print(f"WARNING: No results returned from pipeline")
 
-        print(f"\n✅ Successfully completed pipeline for {target}")
+        print(f"\n✅ Successfully completed pipeline for all targets")
         return results
 
     except Exception as e:
-        print(f"\n❌ ERROR running pipeline for {target}: {str(e)}")
+        print(f"\n❌ ERROR running pipeline: {str(e)}")
         import traceback
         traceback.print_exc()
         return None
 
-def save_summary_metrics(results, target, base_dir):
+def save_summary_metrics(target_results, target, base_dir):
     """
     Save summary metrics in mean ± std format (matching RFE_Simple_CV.py format)
 
     Parameters:
     ----------
-    results : dict
-        Results dictionary from pipeline
+    target_results : dict
+        Results dictionary for a specific target from pipeline
     target : str
         Target variable name
     base_dir : str
@@ -155,7 +194,8 @@ def save_summary_metrics(results, target, base_dir):
     """
     print(f"\nSaving summary metrics for {target}...")
 
-    ml_results = results.get('ml_results', {})
+    # Get ML results from target_results
+    ml_results = target_results.get('ml_models', {})
 
     if not ml_results:
         print(f"WARNING: No ML results to save for {target}")
@@ -229,29 +269,59 @@ def main():
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
-  # Run for ACE-km target
-  python run_genus_gnn_embeddings.py --target ACE-km
+  # Run with ALL features (no RFE) - default
+  python run_genus_gnn_embeddings.py
+  python run_genus_gnn_embeddings.py --n_rfe_features all
 
-  # Run for H2-km target
-  python run_genus_gnn_embeddings.py --target H2-km
+  # Run with RFE (recommended for fair comparison with baseline ML)
+  python run_genus_gnn_embeddings.py --n_rfe_features 100
 
-  # Run for both targets
-  python run_genus_gnn_embeddings.py --target both
+  # Use different number of RFE features
+  python run_genus_gnn_embeddings.py --n_rfe_features 50
+
+  # Custom RFE configuration
+  python run_genus_gnn_embeddings.py --n_rfe_features 100 --rfe_model_type linearsvr --target_for_rfe both
 
   # Use custom data path
-  python run_genus_gnn_embeddings.py --target ACE-km --data_path /path/to/data.csv
+  python run_genus_gnn_embeddings.py --n_rfe_features 100 --data_path /path/to/data.csv
+
+Note: The pipeline automatically processes ALL targets (ACE-km, H2-km) found in the dataset.
+      For fair comparison with baseline ML models, use --n_rfe_features with the same count.
 """
     )
 
-    parser.add_argument('--target',
-                        default='both',
-                        choices=['ACE-km', 'H2-km', 'both'],
-                        help='Target variable to predict (default: both)')
     parser.add_argument('--data_path',
                         default='../Data/New_Data.csv',
                         help='Path to the dataset (default: ../Data/New_Data.csv)')
+    parser.add_argument('--n_rfe_features',
+                        type=str,
+                        default='all',
+                        help='Number of features to select using RFE. Use "all" for no RFE (all features), or specify a number (20, 40, 50, 80, 100). Default: all')
+    parser.add_argument('--target_for_rfe',
+                        default='first',
+                        choices=['first', 'both'],
+                        help='Target to use for RFE selection (default: first)')
+    parser.add_argument('--rfe_model_type',
+                        default='extratrees',
+                        choices=['extratrees', 'linearsvr', 'randomforest', 'gradientboosting', 'xgboost', 'lightgbm'],
+                        help='Model type for RFE feature selection (default: extratrees)')
 
     args = parser.parse_args()
+
+    # Parse n_rfe_features
+    if args.n_rfe_features.lower() == 'all':
+        use_rfe = False
+        n_rfe_features = 100  # Not used, but need a value
+    else:
+        use_rfe = True
+        try:
+            n_rfe_features = int(args.n_rfe_features)
+            if n_rfe_features not in [20, 40, 50, 80, 100]:
+                print(f"Error: n_rfe_features must be 'all' or one of [20, 40, 50, 80, 100]")
+                sys.exit(1)
+        except ValueError:
+            print(f"Error: n_rfe_features must be 'all' or a number (20, 40, 50, 80, 100)")
+            sys.exit(1)
 
     # Print header
     print(f"""
@@ -261,11 +331,13 @@ GNN EMBEDDINGS PIPELINE - GENUS-LEVEL ANALYSIS
 
 Configuration:
   Data Path: {args.data_path}
-  Target(s): {args.target}
-  Graph Mode: genus (ALL genus features, no filtering)
+  Target(s): ALL (ACE-km, H2-km)
+  Graph Mode: genus
+  RFE Enabled: {use_rfe}
+  {'RFE Features: ' + str(n_rfe_features) if use_rfe else 'Using ALL genus features'}
 
 Key Features:
-  ✅ No RFE feature selection (uses all genus features)
+  ✅ RFE feature selection: {'ENABLED (' + str(n_rfe_features) + ' features)' if use_rfe else 'DISABLED (all features)'}
   ✅ No domain expert case filtering (no knowledge anchoring)
   ✅ Genus-level microbial analysis (higher taxonomic resolution)
   ✅ k-NN graph construction from genus abundances
@@ -286,45 +358,39 @@ Key Features:
     # Create base directories
     base_dir = create_directories()
 
-    # Run pipeline for specified target(s)
+    # Run pipeline (processes all targets automatically)
     start_time = time.time()
 
-    if args.target == 'both':
-        targets = ['ACE-km', 'H2-km']
-        print(f"Running pipeline for both targets: {targets}")
-    else:
-        targets = [args.target]
+    print(f"\nRunning pipeline for ALL targets (ACE-km, H2-km)...")
 
-    all_results = {}
-
-    for target in targets:
-        print(f"\n{'#'*80}")
-        print(f"# Processing Target: {target}")
-        print(f"{'#'*80}")
-
-        results = run_gnn_embeddings_pipeline(
-            data_path=args.data_path,
-            target=target,
-            base_dir=base_dir
-        )
-
-        if results:
-            all_results[target] = results
-            print(f"✅ Successfully completed {target}")
-        else:
-            print(f"❌ Failed to complete {target}")
+    results = run_gnn_embeddings_pipeline(
+        data_path=args.data_path,
+        base_dir=base_dir,
+        use_rfe=use_rfe,
+        n_rfe_features=n_rfe_features,
+        target_for_rfe=args.target_for_rfe,
+        rfe_model_type=args.rfe_model_type
+    )
 
     # Print final summary
     elapsed_time = time.time() - start_time
 
-    print(f"\n{'='*80}")
-    print(f"PIPELINE EXECUTION SUMMARY")
-    print(f"{'='*80}")
-    print(f"Targets Processed: {len(all_results)}/{len(targets)}")
-    print(f"Total Time: {elapsed_time/60:.2f} minutes")
-    print(f"Results Directory: {base_dir}")
-    print(f"\nAll results saved successfully!")
-    print(f"{'='*80}")
+    if results:
+        # Count how many targets were successfully processed
+        num_targets = sum(1 for k in results.keys() if k != 'summary')
+
+        print(f"\n{'='*80}")
+        print(f"PIPELINE EXECUTION SUMMARY")
+        print(f"{'='*80}")
+        print(f"Targets Processed: {num_targets}")
+        print(f"Total Time: {elapsed_time/60:.2f} minutes")
+        print(f"Results Directory: {base_dir}")
+        print(f"\nAll results saved successfully!")
+        print(f"{'='*80}")
+    else:
+        print(f"\n{'='*80}")
+        print(f"❌ Pipeline failed to complete")
+        print(f"{'='*80}")
 
 if __name__ == "__main__":
     main()
