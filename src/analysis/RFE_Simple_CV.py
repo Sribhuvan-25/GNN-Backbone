@@ -192,8 +192,9 @@ def run_model_simple_cv(data_path, target="ACE-km", model_type='extratrees', cas
         Type of model to use ('extratrees', 'linearsvr', etc.)
     case_type : str
         Domain expert case type ('case1', 'case2', 'case3')
-    n_features : int
+    n_features : int or None
         Number of additional genera to select via RFE (default: 50)
+        If None, use all available genera (no RFE selection)
     """
     # Create directories if they don't exist
     create_directories()
@@ -274,7 +275,8 @@ def run_model_simple_cv(data_path, target="ACE-km", model_type='extratrees', cas
     print(f"Target range: {y.min():.4f} to {y.max():.4f}")
     print(f"Model type: {model_type}")
     print(f"Case type: {case_type}")
-    print(f"Additional genera to select: {n_features}")
+    feature_selection_desc = "ALL (no RFE)" if n_features is None else f"{n_features} via RFE"
+    print(f"Additional genera to select: {feature_selection_desc}")
     
     # Use simple 5-fold CV
     kf = KFold(n_splits=5, shuffle=True, random_state=42)
@@ -553,8 +555,8 @@ if __name__ == "__main__":
     # Focus on the two main targets: ACE-km and H2-km
     main_targets = ['ACE-km', 'H2-km']
 
-    # Number of additional genera to select via RFE
-    n_features_options = [50, 100, 200]
+    # Number of additional genera to select via RFE (None = use all features)
+    n_features_options = [None]  # None = ALL features (no RFE), others = RFE-selected
 
     print(f"Available model types ({len(model_types)}): {model_types}")
     print(f"Available genus counts: {n_features_options}")
@@ -568,8 +570,9 @@ if __name__ == "__main__":
         for target in main_targets:
             for model_type in model_types:
                 for n_features in n_features_options:
+                    feature_display = "all" if n_features is None else str(n_features)
                     print(f"\n{'='*80}")
-                    print(f"Running SIMPLE CV for {case_type.upper()} - {target} with {model_type.upper()} ({n_features} genera)")
+                    print(f"Running SIMPLE CV for {case_type.upper()} - {target} with {model_type.upper()} ({feature_display} genera)")
                     print(f"{'='*80}")
 
                     try:
@@ -582,24 +585,26 @@ if __name__ == "__main__":
                         )
 
                         if results is not None:
-                            config_name = f"{case_type}_{target}_{model_type}_{n_features}genera"
+                            feature_label = "all" if n_features is None else str(n_features)
+                            config_name = f"{case_type}_{target}_{model_type}_{feature_label}genera"
                             all_results[config_name] = {
                                 'Case': case_type,
                                 'Target': target,
                                 'Model': model_type,
-                                'N_Genera': n_features,
+                                'N_Genera': feature_label,
                                 'R2': results['avg_r2'],
                                 'MSE': results['avg_mse'],
                                 'Std_R2': results['std_r2'],
                                 'Std_MSE': results['std_mse']
                             }
 
-                            print(f"Completed {case_type} - {target} with {model_type} ({n_features} genera)")
+                            print(f"Completed {case_type} - {target} with {model_type} ({feature_label} genera)")
                         else:
-                            print(f"Skipping {case_type} - {target} with {model_type} ({n_features} genera) due to errors")
+                            print(f"Skipping {case_type} - {target} with {model_type} ({feature_label} genera) due to errors")
 
                     except Exception as e:
-                        print(f"Error running {case_type} - {target} with {model_type} ({n_features} genera): {str(e)}")
+                        feature_label = "all" if n_features is None else str(n_features)
+                        print(f"Error running {case_type} - {target} with {model_type} ({feature_label} genera): {str(e)}")
                         continue
     
     # Save overall results
