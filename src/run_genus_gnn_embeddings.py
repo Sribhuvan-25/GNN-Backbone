@@ -17,14 +17,20 @@ Pipeline Flow:
 8. Report metrics in "mean ± std" format
 
 Usage:
-    # With RFE (recommended for fair comparison with baseline ML)
-    python run_genus_gnn_embeddings.py --use_rfe --n_rfe_features 100
+    # Quick test run (5 epochs, 2 folds, no nested CV)
+    python run_genus_gnn_embeddings.py --n_rfe_features 20 --quick
 
-    # Without RFE (use all features)
-    python run_genus_gnn_embeddings.py
+    # Full research run with RFE (recommended for fair comparison with baseline ML)
+    python run_genus_gnn_embeddings.py --n_rfe_features 100
+
+    # Without RFE (use all genus features)
+    python run_genus_gnn_embeddings.py --n_rfe_features all
+
+    # Custom configuration
+    python run_genus_gnn_embeddings.py --n_rfe_features 100 --rfe_model_type linearsvr --target_for_rfe both
 
     # Custom data path
-    python run_genus_gnn_embeddings.py --use_rfe --n_rfe_features 100 --data_path /path/to/data.csv
+    python run_genus_gnn_embeddings.py --n_rfe_features 50 --data_path /path/to/data.csv
 
 Note: The pipeline automatically processes ALL targets (ACE-km, H2-km) in the dataset.
 """
@@ -59,7 +65,8 @@ def create_directories():
 
 def run_gnn_embeddings_pipeline(data_path, base_dir='results_gnn_embeddings_genus',
                                 use_rfe=False, n_rfe_features=100,
-                                target_for_rfe='first', rfe_model_type='extratrees'):
+                                target_for_rfe='first', rfe_model_type='extratrees',
+                                epochs=200, folds=5, nested_cv=True):
     """
     Run GNN embeddings pipeline for all targets
 
@@ -77,6 +84,12 @@ def run_gnn_embeddings_pipeline(data_path, base_dir='results_gnn_embeddings_genu
         Target to use for RFE ('first', 'both', or target name)
     rfe_model_type : str
         Model type for RFE ('extratrees', 'linearsvr', etc.)
+    epochs : int
+        Number of training epochs (default: 200)
+    folds : int
+        Number of cross-validation folds (default: 5)
+    nested_cv : bool
+        Whether to use nested cross-validation (default: True)
 
     Note:
     ----
@@ -103,9 +116,9 @@ def run_gnn_embeddings_pipeline(data_path, base_dir='results_gnn_embeddings_genu
         'batch_size': 8,                      # Batch size
         'learning_rate': 0.001,               # Learning rate
         'weight_decay': 1e-4,                 # Weight decay
-        'num_epochs': 200,                    # Training epochs
+        'num_epochs': epochs,                 # Training epochs
         'patience': 20,                       # Early stopping patience
-        'num_folds': 5,                       # Cross-validation folds
+        'num_folds': folds,                   # Cross-validation folds
         'save_dir': save_dir,
         'importance_threshold': 0.2,          # Explainer threshold
         'use_fast_correlation': False,        # Use standard correlation
@@ -113,7 +126,7 @@ def run_gnn_embeddings_pipeline(data_path, base_dir='results_gnn_embeddings_genu
         'family_filter_mode': 'strict',       # Not used for genus mode
         'use_enhanced_training': True,        # Enhanced training
         'adaptive_hyperparameters': True,     # Adaptive hyperparameters
-        'use_nested_cv': True,                # Nested CV for hyperparameter tuning
+        'use_nested_cv': nested_cv,           # Nested CV for hyperparameter tuning
         'use_node_sparsification': False,     # Edge-based sparsification only
         'graph_construction_method': 'original',
         'rfe_feature_selection': use_rfe,     # RFE feature selection
@@ -269,12 +282,14 @@ def main():
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
-  # Run with ALL features (no RFE) - default
-  python run_genus_gnn_embeddings.py
-  python run_genus_gnn_embeddings.py --n_rfe_features all
+  # Quick test run (5 epochs, 2 folds, no nested CV) - FAST!
+  python run_genus_gnn_embeddings.py --n_rfe_features 20 --quick
 
-  # Run with RFE (recommended for fair comparison with baseline ML)
+  # Full research run with RFE (200 epochs, 5 folds, nested CV)
   python run_genus_gnn_embeddings.py --n_rfe_features 100
+
+  # Run with ALL features (no RFE)
+  python run_genus_gnn_embeddings.py --n_rfe_features all
 
   # Use different number of RFE features
   python run_genus_gnn_embeddings.py --n_rfe_features 50
@@ -305,6 +320,8 @@ Note: The pipeline automatically processes ALL targets (ACE-km, H2-km) found in 
                         default='extratrees',
                         choices=['extratrees', 'linearsvr', 'randomforest', 'gradientboosting', 'xgboost', 'lightgbm'],
                         help='Model type for RFE feature selection (default: extratrees)')
+    parser.add_argument('--quick', action='store_true',
+                        help='Quick test run with minimal configuration (5 epochs, 2 folds, no nested CV)')
 
     args = parser.parse_args()
 
@@ -323,11 +340,25 @@ Note: The pipeline automatically processes ALL targets (ACE-km, H2-km) found in 
             print(f"Error: n_rfe_features must be 'all' or a number (20, 40, 50, 80, 100)")
             sys.exit(1)
 
+    # Adjust parameters for quick run
+    if args.quick:
+        epochs = 5
+        folds = 2
+        nested_cv = False
+        print("🚀 QUICK TEST MODE: Running with minimal configuration")
+    else:
+        epochs = 200
+        folds = 5
+        nested_cv = True
+        print("🔬 FULL RESEARCH MODE: Running with complete validation")
+
     # Print header
     print(f"""
 {'='*80}
 GNN EMBEDDINGS PIPELINE - GENUS-LEVEL ANALYSIS
 {'='*80}
+
+Mode: {'QUICK TEST (fast validation)' if args.quick else 'FULL RESEARCH (complete validation)'}
 
 Configuration:
   Data Path: {args.data_path}
@@ -335,6 +366,9 @@ Configuration:
   Graph Mode: genus
   RFE Enabled: {use_rfe}
   {'RFE Features: ' + str(n_rfe_features) if use_rfe else 'Using ALL genus features'}
+  Epochs: {epochs}
+  Folds: {folds}
+  Nested CV: {nested_cv}
 
 Key Features:
   ✅ RFE feature selection: {'ENABLED (' + str(n_rfe_features) + ' features)' if use_rfe else 'DISABLED (all features)'}
@@ -369,7 +403,10 @@ Key Features:
         use_rfe=use_rfe,
         n_rfe_features=n_rfe_features,
         target_for_rfe=args.target_for_rfe,
-        rfe_model_type=args.rfe_model_type
+        rfe_model_type=args.rfe_model_type,
+        epochs=epochs,
+        folds=folds,
+        nested_cv=nested_cv
     )
 
     # Print final summary
