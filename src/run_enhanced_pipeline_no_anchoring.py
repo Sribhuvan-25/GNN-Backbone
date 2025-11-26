@@ -137,26 +137,36 @@ Key Features Enabled:
             'target_for_rfe': args.target_for_rfe,
             'rfe_model_type': args.rfe_model_type,
             'use_knn_sparsification': args.use_knn_sparsification,
-            # NEW: Disable feature anchoring
-            'disable_anchoring': True,  # This tells the pipeline not to use anchored features
         }
 
         print("Initializing enhanced pipeline WITHOUT feature anchoring...")
         start_time = time.time()
 
-        # Initialize and run pipeline
-        pipeline = DomainExpertCasesPipeline(**config)
+        # CRITICAL: Monkey-patch case implementations to return empty anchored features
+        # This must happen BEFORE pipeline initialization
+        from pipelines.case_implementations import CaseImplementations
+        original_get_case_features = CaseImplementations.get_case_features
 
-        # CRITICAL: Override anchored features to disable anchoring
-        # This ensures no features are protected during RFE or graph pruning
-        pipeline.anchored_features = []
-        if hasattr(pipeline.dataset, 'anchored_features'):
-            pipeline.dataset.anchored_features = []
-        if hasattr(pipeline.dataset, 'protected_nodes'):
-            pipeline.dataset.protected_nodes = []
+        def get_empty_features(self, case_type):
+            """Override to return empty list - disables anchoring"""
+            print(f"⚠️  Anchoring disabled: returning empty feature list for {case_type}")
+            return []  # No anchored features
 
-        print(f"✅ Pipeline initialized successfully!")
-        print(f"⚠️  Feature anchoring DISABLED: protected_nodes = {getattr(pipeline.dataset, 'protected_nodes', [])}")
+        # Temporarily replace the method
+        CaseImplementations.get_case_features = get_empty_features
+
+        try:
+            # Initialize and run pipeline
+            pipeline = DomainExpertCasesPipeline(**config)
+
+            print(f"✅ Pipeline initialized successfully!")
+            print(f"⚠️  Feature anchoring DISABLED:")
+            print(f"   - pipeline.anchored_features = {pipeline.anchored_features}")
+            print(f"   - dataset.protected_nodes = {getattr(pipeline.dataset, 'protected_nodes', [])}")
+
+        finally:
+            # Restore original method
+            CaseImplementations.get_case_features = original_get_case_features
 
         print(f"Dataset: {len(pipeline.dataset.data_list)} samples with {len(pipeline.dataset.node_feature_names)} features")
 
@@ -306,20 +316,26 @@ def run_all_cases(args):
                 'target_for_rfe': args.target_for_rfe,
                 'rfe_model_type': args.rfe_model_type,
                 'use_knn_sparsification': args.use_knn_sparsification,
-                'disable_anchoring': True,  # Disable anchoring
             }
 
-            start_time = time.time()
-            pipeline = DomainExpertCasesPipeline(**config)
+            # CRITICAL: Monkey-patch case implementations to return empty anchored features
+            from pipelines.case_implementations import CaseImplementations
+            original_get_case_features = CaseImplementations.get_case_features
 
-            # CRITICAL: Override anchored features to disable anchoring
-            pipeline.anchored_features = []
-            if hasattr(pipeline.dataset, 'anchored_features'):
-                pipeline.dataset.anchored_features = []
-            if hasattr(pipeline.dataset, 'protected_nodes'):
-                pipeline.dataset.protected_nodes = []
+            def get_empty_features(self, case_type):
+                """Override to return empty list - disables anchoring"""
+                return []  # No anchored features
 
-            results = pipeline.run_case_specific_pipeline()
+            # Temporarily replace the method
+            CaseImplementations.get_case_features = get_empty_features
+
+            try:
+                start_time = time.time()
+                pipeline = DomainExpertCasesPipeline(**config)
+                results = pipeline.run_case_specific_pipeline()
+            finally:
+                # Restore original method
+                CaseImplementations.get_case_features = original_get_case_features
             end_time = time.time()
 
             all_results[case] = results
