@@ -1569,7 +1569,7 @@ class DomainExpertCasesPipeline(MixedEmbeddingPipeline):
         print(f"Creating comprehensive statistics for {target_name}...")
 
         # Process each training phase and model combination
-        for phase in ['knn_training', 'explainer_training']:
+        for phase in ['knn_training', 'explainer_training', 'ml_training']:
             if phase not in results:
                 continue
 
@@ -1580,12 +1580,37 @@ class DomainExpertCasesPipeline(MixedEmbeddingPipeline):
                     continue
 
                 # Extract model type and phase name
-                if 'explainer' in model_key:
-                    model_type = model_key.split('_explainer')[0]
-                    phase_name = 'explainer'
+                # Handle ML training model keys (e.g., 'gat_explainer_LinearSVR')
+                if phase == 'ml_training':
+                    # ML model keys format: 'gnn_model_phase_MLmodel' (e.g., 'gat_explainer_LinearSVR')
+                    parts = model_key.rsplit('_', 1)  # Split from the right to get ML model name
+                    if len(parts) == 2:
+                        gnn_and_phase = parts[0]  # e.g., 'gat_explainer' or 'gcn_knn'
+                        ml_model = parts[1]        # e.g., 'LinearSVR', 'ExtraTrees'
+
+                        if 'explainer' in gnn_and_phase:
+                            gnn_model = gnn_and_phase.split('_explainer')[0]
+                            model_type = f"{gnn_model}_{ml_model}"
+                            phase_name = 'ml_explainer_embeddings'
+                        elif 'knn' in gnn_and_phase:
+                            gnn_model = gnn_and_phase.split('_knn')[0]
+                            model_type = f"{gnn_model}_{ml_model}"
+                            phase_name = 'ml_knn_embeddings'
+                        else:
+                            # Fallback: use the full model_key
+                            model_type = model_key
+                            phase_name = 'ml_embeddings'
+                    else:
+                        model_type = model_key
+                        phase_name = 'ml_embeddings'
                 else:
-                    model_type = model_key.split('_knn')[0] if '_knn' in model_key else model_key
-                    phase_name = 'knn'
+                    # Original logic for GNN models
+                    if 'explainer' in model_key:
+                        model_type = model_key.split('_explainer')[0]
+                        phase_name = 'explainer'
+                    else:
+                        model_type = model_key.split('_knn')[0] if '_knn' in model_key else model_key
+                        phase_name = 'knn'
 
                 # Calculate statistics for each metric
                 stats_data = []
