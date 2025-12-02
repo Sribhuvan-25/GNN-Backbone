@@ -1417,29 +1417,29 @@ class DomainExpertCasesPipeline(MixedEmbeddingPipeline):
                                 # Train and predict
                                 ml_pipeline.fit(X_train, y_train)
                                 y_pred = ml_pipeline.predict(X_test)
-                                
-                                # Calculate metrics (in normalized scale)
-                                mse = mean_squared_error(y_test, y_pred)
-                                rmse = np.sqrt(mse)
-                                r2 = r2_score(y_test, y_pred)
-                                mae = mean_absolute_error(y_test, y_pred)
-                                
-                                # Inverse transform predictions and targets back to original scale for plotting
+
+                                # Inverse transform predictions and targets back to original scale
                                 # The target_scaler was fit on all targets, so we need to reshape for inverse transform
                                 y_test_reshaped = y_test.reshape(-1, 1)
                                 y_pred_reshaped = y_pred.reshape(-1, 1)
-                                
+
                                 # Create a full-size array with zeros for all targets, then fill the target column
                                 n_targets = len(self.dataset.target_cols)
                                 y_test_full = np.zeros((len(y_test), n_targets))
                                 y_pred_full = np.zeros((len(y_pred), n_targets))
                                 y_test_full[:, target_idx] = y_test
                                 y_pred_full[:, target_idx] = y_pred
-                                
+
                                 # Inverse transform
                                 y_test_original = self.dataset.target_scaler.inverse_transform(y_test_full)[:, target_idx]
                                 y_pred_original = self.dataset.target_scaler.inverse_transform(y_pred_full)[:, target_idx]
-                                
+
+                                # Calculate metrics in ORIGINAL scale (for consistency with plots and interpretability)
+                                mse = mean_squared_error(y_test_original, y_pred_original)
+                                rmse = np.sqrt(mse)
+                                r2 = r2_score(y_test_original, y_pred_original)
+                                mae = mean_absolute_error(y_test_original, y_pred_original)
+
                                 ml_fold_results.append({
                                     'fold': fold + 1,
                                     'mse': mse,

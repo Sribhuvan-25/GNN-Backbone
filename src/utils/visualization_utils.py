@@ -322,6 +322,73 @@ def save_graph_visualization(G, node_colors, output_path, title="Graph Visualiza
     
     print(f"Graph visualization saved: {output_path}")
 
+def save_adjacency_matrices(knn_graph_data, explainer_graph_data, node_features, output_dir):
+    """
+    Save adjacency matrices for k-NN and explainer graphs as CSV files.
+
+    Args:
+        knn_graph_data: Dictionary with k-NN graph data
+        explainer_graph_data: Dictionary with explainer graph data
+        node_features: List of node feature names
+        output_dir: Directory to save adjacency matrices
+    """
+    import os
+    import pandas as pd
+    import numpy as np
+    import torch
+
+    os.makedirs(output_dir, exist_ok=True)
+
+    # Save k-NN adjacency matrix
+    if knn_graph_data and 'edge_index' in knn_graph_data:
+        num_nodes = len(node_features)
+        knn_adj_matrix = np.zeros((num_nodes, num_nodes))
+
+        edge_index = knn_graph_data['edge_index'].cpu().numpy()
+        edge_weight = knn_graph_data.get('edge_weight', None)
+
+        if edge_weight is not None:
+            edge_weight = edge_weight.cpu().numpy()
+        else:
+            edge_weight = np.ones(edge_index.shape[1])
+
+        # Fill adjacency matrix
+        for i in range(edge_index.shape[1]):
+            src, dst = edge_index[:, i]
+            knn_adj_matrix[src, dst] = edge_weight[i]
+
+        # Save as CSV with node names as row/column labels
+        knn_df = pd.DataFrame(knn_adj_matrix, index=node_features, columns=node_features)
+        knn_path = os.path.join(output_dir, 'knn_adjacency_matrix.csv')
+        knn_df.to_csv(knn_path)
+        print(f"Saved k-NN adjacency matrix to: {knn_path}")
+
+    # Save explainer adjacency matrix
+    if explainer_graph_data and 'edge_index' in explainer_graph_data:
+        explainer_node_names = explainer_graph_data.get('pruned_node_names', node_features)
+        num_nodes = len(explainer_node_names)
+        explainer_adj_matrix = np.zeros((num_nodes, num_nodes))
+
+        edge_index = explainer_graph_data['edge_index'].cpu().numpy()
+        edge_weight = explainer_graph_data.get('edge_weight', None)
+
+        if edge_weight is not None:
+            edge_weight = edge_weight.cpu().numpy()
+        else:
+            edge_weight = np.ones(edge_index.shape[1])
+
+        # Fill adjacency matrix
+        for i in range(edge_index.shape[1]):
+            src, dst = edge_index[:, i]
+            if src < num_nodes and dst < num_nodes:  # Safety check
+                explainer_adj_matrix[src, dst] = edge_weight[i]
+
+        # Save as CSV with node names as row/column labels
+        explainer_df = pd.DataFrame(explainer_adj_matrix, index=explainer_node_names, columns=explainer_node_names)
+        explainer_path = os.path.join(output_dir, 'explainer_adjacency_matrix.csv')
+        explainer_df.to_csv(explainer_path)
+        print(f"Saved explainer adjacency matrix to: {explainer_path}")
+
 def create_enhanced_graph_comparison(knn_graph_data, explainer_graph_data, node_features,
                                    output_dir, functional_groups=None, protected_nodes=None, abundance_data=None):
     """
@@ -347,6 +414,9 @@ def create_enhanced_graph_comparison(knn_graph_data, explainer_graph_data, node_
         output_dir, functional_groups, protected_nodes, abundance_data
     )
 
+    # Save adjacency matrices for both k-NN and explainer graphs
+    save_adjacency_matrices(knn_graph_data, explainer_graph_data, node_features, output_dir)
+
 def create_side_by_side_comparison(knn_graph_data, explainer_graph_data, node_features,
                                  output_dir, functional_groups=None, protected_nodes=None, abundance_data=None):
     """Create a three-panel comparison plot: Spearman → k-NN → Attention-Pruned."""
@@ -370,11 +440,25 @@ def create_side_by_side_comparison(knn_graph_data, explainer_graph_data, node_fe
     # Grayscale color scheme with high contrast
     def get_node_colors_with_protection(node_list, protected_list=None):
         colors = []
+        protected_count = 0
+
+        # DEBUG: Print what we're checking
+        if protected_list:
+            print(f"\n🔍 DEBUG get_node_colors_with_protection:")
+            print(f"   Protected list ({len(protected_list)} items): {sorted(protected_list)}")
+            print(f"   Node list ({len(node_list)} items): {sorted(node_list)[:10]}...")  # First 10
+
         for node in node_list:
             if protected_list and node in protected_list:
                 colors.append('#606060')  # Medium-dark gray for protected/anchored nodes (lightened)
+                protected_count += 1
+                print(f"   ✅ PROTECTED: {node}")
             else:
                 colors.append('#D3D3D3')  # Light gray for others
+
+        if protected_list:
+            print(f"   Total protected nodes found: {protected_count}/{len(protected_list)}")
+
         return colors
 
     # Function to calculate node sizes based on abundance with better scaling
@@ -489,8 +573,10 @@ def create_side_by_side_comparison(knn_graph_data, explainer_graph_data, node_fe
     # Get full node names and colors - ensure arrays match graph size
     num_graph_nodes = len(original_G.nodes())
     # IMPORTANT: Get actual node names from the graph, not just first N from original list
+    # CRITICAL: Use consistent ordering for both node list and color mapping
+    panel1_nodelist = sorted(original_G.nodes())
     graph_node_features = []
-    for node_id in sorted(original_G.nodes()):  # Sort for consistent ordering
+    for node_id in panel1_nodelist:  # Sort for consistent ordering
         node_name = original_G.nodes[node_id].get('name', f'Node_{node_id}')
         graph_node_features.append(node_name)
 
@@ -505,7 +591,9 @@ def create_side_by_side_comparison(knn_graph_data, explainer_graph_data, node_fe
         original_node_sizes = original_node_sizes[:num_graph_nodes] + [4000] * max(0, num_graph_nodes - len(original_node_sizes))
 
     # Draw Panel 1: Spearman Correlation Graph
-    nx.draw_networkx_nodes(original_G, pos1, ax=ax1, node_color=original_node_colors,
+    nx.draw_networkx_nodes(original_G, pos1, ax=ax1,
+                          nodelist=panel1_nodelist,  # CRITICAL: Use same order as color array
+                          node_color=original_node_colors,
                           node_size=original_node_sizes, alpha=0.95, edgecolors='black', linewidths=3.5)
 
     if original_G.edges():
@@ -569,8 +657,10 @@ def create_side_by_side_comparison(knn_graph_data, explainer_graph_data, node_fe
     # Get node data for k-NN graph - ensure arrays match graph size
     num_knn_nodes = len(knn_G.nodes())
     # IMPORTANT: Get actual node names from the k-NN graph, not just first N from original list
+    # CRITICAL: Use consistent ordering for both node list and color mapping
+    panel2_nodelist = sorted(knn_G.nodes())
     knn_graph_node_features = []
-    for node_id in sorted(knn_G.nodes()):  # Sort for consistent ordering
+    for node_id in panel2_nodelist:  # Sort for consistent ordering
         node_name = knn_G.nodes[node_id].get('name', f'Node_{node_id}')
         knn_graph_node_features.append(node_name)
 
@@ -585,7 +675,9 @@ def create_side_by_side_comparison(knn_graph_data, explainer_graph_data, node_fe
         knn_node_sizes = knn_node_sizes[:num_knn_nodes] + [4000] * max(0, num_knn_nodes - len(knn_node_sizes))
 
     # Draw Panel 2: k-NN Graph
-    nx.draw_networkx_nodes(knn_G, pos2, ax=ax2, node_color=knn_node_colors,
+    nx.draw_networkx_nodes(knn_G, pos2, ax=ax2,
+                          nodelist=panel2_nodelist,  # CRITICAL: Use same order as color array
+                          node_color=knn_node_colors,
                           node_size=knn_node_sizes, alpha=0.95, edgecolors='black', linewidths=3.5)
 
     if knn_G.edges():
@@ -711,12 +803,17 @@ def create_side_by_side_comparison(knn_graph_data, explainer_graph_data, node_fe
         pos3 = get_optimal_layout(explainer_G, seed=42, scale=80.0)  # MASSIVE scale for spacing
 
         # Get node data for pruned graph - extract actual node names from the explainer graph
+        # CRITICAL: Use consistent ordering for both node list and color mapping
+        sorted_node_ids = sorted(explainer_G.nodes())
         explainer_graph_node_features = []
-        for node_id in sorted(explainer_G.nodes()):  # Sort for consistent ordering
+        for node_id in sorted_node_ids:
             node_name = explainer_G.nodes[node_id].get('name', f'Node_{node_id}')
             explainer_graph_node_features.append(node_name)
 
         pruned_node_colors = get_node_colors_with_protection(explainer_graph_node_features, protected_nodes)
+
+        # CRITICAL: Store the node order to use when drawing
+        panel3_nodelist = sorted_node_ids
 
         # For pruned nodes, need to get abundance data for remaining nodes
         pruned_abundance_data = {}
@@ -735,7 +832,9 @@ def create_side_by_side_comparison(knn_graph_data, explainer_graph_data, node_fe
         if len(pruned_node_sizes) != num_nodes:
             pruned_node_sizes = pruned_node_sizes[:num_nodes] + [4000] * max(0, num_nodes - len(pruned_node_sizes))
 
-        nx.draw_networkx_nodes(explainer_G, pos3, ax=ax3, node_color=pruned_node_colors,
+        nx.draw_networkx_nodes(explainer_G, pos3, ax=ax3,
+                              nodelist=panel3_nodelist,  # CRITICAL: Use same order as color array
+                              node_color=pruned_node_colors,
                               node_size=pruned_node_sizes, alpha=0.95, edgecolors='black', linewidths=3.5)
 
         if explainer_G.edges():

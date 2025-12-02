@@ -96,7 +96,7 @@ class MicrobialGNNDataset:
             print(f"📌 RFE will be applied on-demand for each target separately")
             print("="*80 + "\n")
             # NOTE: Don't apply RFE here - it will be applied per-target in the pipeline
-        
+
         # Create graph structure (now feature_matrix is available)
         # Note: Graph will be rebuilt after RFE is applied per-target
         self.full_edge_index, self.full_edge_weight, self.full_edge_type = self._create_graph_structure()
@@ -110,10 +110,10 @@ class MicrobialGNNDataset:
             self.edge_weight = self.full_edge_weight.clone()
             self.edge_type = self.full_edge_type.clone()
             print(f"⚠️  KNN sparsification DISABLED: Using full correlation graph ({self.edge_index.shape[1]//2} edges)")
-        
+
         # Create PyG data objects
         self.data_list = self._create_data_objects()
-        
+
         # Store original data list for reset capability (after data_list is created)
         self.original_data_list = [data.clone() for data in self.data_list]
 
@@ -134,7 +134,7 @@ class MicrobialGNNDataset:
             'n_rfe_features': self.n_rfe_features if self.rfe_feature_selection else None,  # NEW: Number of RFE features
             'rfe_model_type': self.rfe_model_type if self.rfe_feature_selection else None  # NEW: RFE model type
         }
-        
+
         # Initialize explainer-sparsified graph data as None
         self.explainer_sparsified_graph_data = None
         
@@ -2058,18 +2058,33 @@ class MicrobialGNNDataset:
             weight = data['weight']
             edge_labels[(u, v)] = f'{abs(weight):.2f}'
         
-        # Try to find communities for node coloring
-        try:
-            from community import best_partition
-            partition = best_partition(G)
-            node_colors = [partition[node] for node in G.nodes()]
-        except:
-            # Fallback if community detection fails
-            node_colors = list(range(len(G.nodes)))
+        # Color nodes based on whether they are anchor features
+        node_colors = []
+
+        # Get the list of protected/anchored features
+        protected_features = getattr(self, 'protected_nodes', [])
+
+        # Get node names for this graph
+        node_labels = self._get_node_labels(G, graph_type)
+
+        for node in G.nodes():
+            node_name = node_labels.get(node, '')
+            # Check if this node is an anchor feature
+            if protected_features and node_name in protected_features:
+                # Anchor features get a specific color (e.g., 1 for highlighted)
+                node_colors.append(1)
+            else:
+                # Non-anchor features get a different color (e.g., 0 for normal)
+                node_colors.append(0)
         
-        # Draw the graph
+        # Draw the graph with custom colors for anchor features
+        # Convert node colors to actual color values
+        # Anchor features (1) = dark red/crimson, Non-anchor (0) = light blue
+        from matplotlib.colors import ListedColormap
+        anchor_colormap = ListedColormap(['lightblue', 'crimson'])
+
         nx.draw_networkx(
-            G, 
+            G,
             pos=pos,
             with_labels=True,
             labels=self._get_node_labels(G, graph_type),
@@ -2078,7 +2093,9 @@ class MicrobialGNNDataset:
             width=edge_width,
             edge_color=edge_colors,
             alpha=0.8,
-            cmap=plt.cm.tab20,
+            cmap=anchor_colormap,
+            vmin=0,
+            vmax=1,
             font_size=8,
             font_weight='bold',
             ax=ax
